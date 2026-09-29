@@ -44,7 +44,7 @@ services:
       APP_ENV: production
       TIMEZONE: Africa/Lagos
     ports:
-      - "8000:8000"
+      - "${MINTLY_PORT:-8095}:8000"
 
   worker:
     build:

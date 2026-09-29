@@ -6,7 +6,7 @@ import '../models/activity_model.dart';
 
 class ApiService {
   // Configurable base URL: Android emulator uses 10.0.2.2, desktop/web uses 127.0.0.1
-  static String baseUrl = "http://10.0.2.2:8000/api";
+  static String baseUrl = "http://10.0.2.2:8095/api";
   bool isLiveBackendConnected = false;
 
   // In-memory demo state matching mintly-splash-reference.html

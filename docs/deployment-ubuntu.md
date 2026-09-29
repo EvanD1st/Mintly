@@ -7,7 +7,7 @@ This document describes how to host the Mintly backend and worker stack on your 
 ## Architecture on Ubuntu Server
 
 The Mintly backend stack runs containerized via Docker Compose:
-* **`backend` service:** FastAPI app running on port `8000` (`http://localhost:8000`).
+* **`backend` service:** FastAPI app exposed on host port `8095` (`http://localhost:8095`, configurable via `MINTLY_PORT`), avoiding collisions with existing port 8000 services.
 * **`worker` service:** Lease-locked Python background worker handling mint scheduling and recovery.
 * **`postgres` service:** PostgreSQL 16 database for persistent task and wallet storage.
 * **`redis` service:** Redis cache and message bus.
@@ -79,26 +79,35 @@ docker compose down
 
 ---
 
-## Setting up Nginx Reverse Proxy & SSL (Recommended)
+## Reverse Proxy: Caddy & Nginx Examples (Port 8095)
 
-To expose the backend over HTTPS:
+### Caddy (Recommended if Caddy is already running on Ubuntu)
+Add this block to `/etc/caddy/Caddyfile`:
 
+```caddy
+# Mintly API reverse proxy
+mintly-api.duckdns.org {
+    encode gzip
+    reverse_proxy 127.0.0.1:8095
+}
+```
+
+Reload Caddy:
+```bash
+sudo systemctl reload caddy.service
+```
+
+### Nginx
 ```nginx
 server {
-    server_name api.yourdomain.com;
+    server_name mintly-api.yourdomain.com;
 
     location / {
-        proxy_pass http://127.0.0.1:8000;
+        proxy_pass http://127.0.0.1:8095;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 }
-```
-
-Enable SSL with Certbot:
-```bash
-sudo apt install -y certbot python3-certbot-nginx
-sudo certbot --nginx -d api.yourdomain.com
 ```
