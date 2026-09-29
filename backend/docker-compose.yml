@@ -10,7 +10,7 @@ services:
       POSTGRES_PASSWORD: mintly_password
       POSTGRES_DB: mintly
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -24,14 +24,14 @@ services:
     container_name: mintly-redis
     restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6380:6379"
     volumes:
       - redis_data:/data
 
   backend:
     build:
-      context: ..
-      dockerfile: backend/Dockerfile
+      context: .
+      dockerfile: Dockerfile
     container_name: mintly-api
     restart: unless-stopped
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
@@ -48,8 +48,8 @@ services:
 
   worker:
     build:
-      context: ..
-      dockerfile: backend/Dockerfile
+      context: .
+      dockerfile: Dockerfile
     container_name: mintly-worker
     restart: unless-stopped
     command: python -m app.worker

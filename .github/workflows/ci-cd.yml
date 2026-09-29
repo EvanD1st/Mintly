@@ -74,32 +74,58 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Deploy to Ubuntu Host via SSH
-        uses: appleboy/ssh-action@v1.0.3
-        if: env.HAS_SSH_KEY == 'true'
         env:
-          HAS_SSH_KEY: ${{ secrets.UBUNTU_SSH_KEY != '' }}
-        with:
-          host: ${{ secrets.UBUNTU_HOST }}
-          username: ${{ secrets.UBUNTU_USER }}
-          key: ${{ secrets.UBUNTU_SSH_KEY }}
-          port: ${{ secrets.UBUNTU_SSH_PORT || 22 }}
-          script: |
+          SSH_KEY: ${{ secrets.UBUNTU_SSH_KEY || secrets.VESSEL_DEPLOY_SSH_KEY || secrets.SSH_PRIVATE_KEY || secrets.SSH_KEY }}
+          SSH_HOST: ${{ secrets.UBUNTU_HOST || '18.175.211.11' }}
+          SSH_USER: ${{ secrets.UBUNTU_USER || 'ubuntu' }}
+          SSH_PORT: ${{ secrets.UBUNTU_SSH_PORT || '22' }}
+          KNOWN_HOSTS: ${{ secrets.UBUNTU_KNOWN_HOSTS || secrets.VESSEL_DEPLOY_KNOWN_HOSTS }}
+        run: |
+          if [ -z "$SSH_KEY" ]; then
+            echo "::warning::No SSH key found in secrets (checked UBUNTU_SSH_KEY, VESSEL_DEPLOY_SSH_KEY, SSH_PRIVATE_KEY, SSH_KEY)."
+            echo "To enable automated deployment, add your SSH private key in GitHub Repo Settings > Secrets and variables > Actions."
+            exit 0
+          fi
+
+          mkdir -m 700 -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy-key
+          chmod 600 ~/.ssh/deploy-key
+
+          if [ -n "$KNOWN_HOSTS" ]; then
+            printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+            chmod 600 ~/.ssh/known_hosts
+            SSH_OPTS="-o StrictHostKeyChecking=yes -p $SSH_PORT"
+          else
+            SSH_OPTS="-o StrictHostKeyChecking=accept-new -p $SSH_PORT"
+          fi
+
+          echo "Connecting to $SSH_USER@$SSH_HOST:$SSH_PORT..."
+          ssh -i ~/.ssh/deploy-key $SSH_OPTS "$SSH_USER@$SSH_HOST" "
             set -e
-            echo "Deploying Mintly to Ubuntu server..."
-            TARGET_DIR=${{ secrets.UBUNTU_APP_DIR || '~/Mintly' }}
-            if [ ! -d "$TARGET_DIR" ]; then
-              git clone https://github.com/EvanD1st/Mintly.git "$TARGET_DIR"
-              cd "$TARGET_DIR"
+            echo '=== Deploying Mintly to Ubuntu Host ==='
+            APP_DIR=\${UBUNTU_APP_DIR:-~/Mintly}
+            if [ ! -d \"\$APP_DIR\" ]; then
+              echo 'Cloning repository...'
+              git clone https://github.com/EvanD1st/Mintly.git \"\$APP_DIR\"
+              cd \"\$APP_DIR\"
             else
-              cd "$TARGET_DIR"
+              echo 'Pulling latest code...'
+              cd \"\$APP_DIR\"
+              git fetch origin
+              git checkout main || git checkout master
               git pull origin main || git pull origin master
             fi
 
-            # Deploy backend stack via Docker Compose
-            cd "$TARGET_DIR/backend"
+            cd \"\$APP_DIR/backend\"
             if [ ! -f .env ]; then
+              echo 'Creating .env from .env.example...'
               cp .env.example .env
             fi
+
+            echo 'Starting Docker Compose stack (backend, worker, postgres, redis)...'
             docker compose down || true
             docker compose up --build -d
-            echo "Mintly successfully deployed and running!"
+
+            echo '=== Mintly Deployment Successful! Running Services: ==='
+            docker compose ps
+          "
