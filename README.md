@@ -1,6 +1,6 @@
 # Mintly — Personal NFT Discovery & Scheduled Minting App
 
-Mintly is a personal NFT discovery and scheduled minting application designed for Jenny, featuring an elegant native Flutter mobile application, an asynchronous Python (FastAPI) orchestration backend, and a lease-locked execution worker with an isolated cryptographic signer boundary.
+Mintly is a personal NFT discovery and scheduled minting application, featuring an elegant native Flutter mobile application, an asynchronous Python (FastAPI) orchestration backend, and a lease-locked execution worker with an isolated cryptographic signer boundary.
 
 ---
 
