@@ -103,15 +103,18 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
                 return;
               }
 
-              await notifier.importList(text);
-              if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Import preview: showing the drop list.'),
-                    duration: Duration(seconds: 2),
-                  ),
-                );
-                Navigator.of(context).pop();
+              try {
+                final imported = await notifier.importList(text);
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text(imported ? 'Import complete.' : 'Connect to your server in Wallet before importing.'),
+                  ));
+                  if (imported) Navigator.of(context).pop();
+                }
+              } catch (error) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$error')));
+                }
               }
             },
             child: const Row(

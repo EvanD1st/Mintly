@@ -5,9 +5,57 @@ import '../models/task_model.dart';
 import '../models/activity_model.dart';
 
 class ApiService {
-  // Configurable base URL: Android emulator uses 10.0.2.2, desktop/web uses 127.0.0.1
-  static String baseUrl = "http://10.0.2.2:8095/api";
-  bool isLiveBackendConnected = false;
+  static String baseUrl = const String.fromEnvironment(
+    'MINTLY_API_URL', defaultValue: 'https://mintly.duckdns.org/api');
+  final http.Client _client;
+  String _ownerToken = '';
+  bool get isLiveBackendConnected => _ownerToken.isNotEmpty;
+
+  ApiService({http.Client? client}) : _client = client ?? http.Client();
+
+  // Session-only credential: never embedded in an APK or stored in plain text.
+  Future<void> connectBackend(String token) async {
+    final uri = Uri.parse(baseUrl);
+    if (uri.scheme != 'https') {
+      throw Exception('A secure HTTPS server address is required.');
+    }
+    final candidate = token.trim();
+    if (candidate.isEmpty) throw Exception('Enter your server access token.');
+    final response = await _client.get(Uri.parse('$baseUrl/wallets'),
+      headers: {'Authorization': 'Bearer $candidate'}).timeout(const Duration(seconds: 10));
+    _checkResponse(response);
+    _ownerToken = candidate;
+  }
+
+  void disconnectBackend() { _ownerToken = ''; }
+  void dispose() { _client.close(); }
+
+  Map<String, String> get _headers => {
+    'Content-Type': 'application/json',
+    'Authorization': 'Bearer $_ownerToken',
+  };
+
+  void _checkResponse(http.Response response) {
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception(response.statusCode == 401
+        ? 'Server access token is invalid.'
+        : 'Server request failed (${response.statusCode}). Please refresh before retrying.');
+    }
+  }
+
+  Future<dynamic> _get(String path) async {
+    final response = await _client.get(Uri.parse('$baseUrl$path'), headers: _headers)
+      .timeout(const Duration(seconds: 10));
+    _checkResponse(response);
+    return jsonDecode(response.body);
+  }
+
+  Future<dynamic> _post(String path, Map<String, dynamic> body) async {
+    final response = await _client.post(Uri.parse('$baseUrl$path'), headers: _headers,
+      body: jsonEncode(body)).timeout(const Duration(seconds: 10));
+    _checkResponse(response);
+    return jsonDecode(response.body);
+  }
 
   // In-memory demo state matching mintly-splash-reference.html
   final List<DropModel> _demoDrops = [
@@ -129,19 +177,12 @@ class ApiService {
   bool isMonitoring = true;
 
   Future<List<DropModel>> fetchDrops(String filter) async {
-    try {
-      final res = await http.get(Uri.parse('$baseUrl/drops?filter_kind=$filter')).timeout(const Duration(seconds: 2));
-      if (res.statusCode == 200) {
-        final data = jsonDecode(res.body);
-        final list = (data['drops'] as List).map((d) => DropModel.fromJson(d)).toList();
-        isLiveBackendConnected = true;
-        return list;
-      }
-    } catch (_) {
-      isLiveBackendConnected = false;
+    if (isLiveBackendConnected) {
+      final data = await _get('/drops?filter_kind=$filter');
+      return (data['drops'] as List).map((d) => DropModel.fromJson(d)).toList();
     }
 
-    // Demo fallback
+    // Explicit offline demo mode
     if (filter == 'eligible') {
       return _demoDrops.where((d) => d.statusKind == 'eligible').toList();
     } else if (filter == 'manual') {
@@ -151,14 +192,10 @@ class ApiService {
   }
 
   Future<List<MintTaskModel>> fetchQueue() async {
-    try {
-      final res = await http.get(Uri.parse('$baseUrl/tasks/queue')).timeout(const Duration(seconds: 2));
-      if (res.statusCode == 200) {
-        final data = jsonDecode(res.body);
-        final list = (data['tasks'] as List).map((t) => MintTaskModel.fromJson(t)).toList();
-        return list;
-      }
-    } catch (_) {}
+    if (isLiveBackendConnected) {
+      final data = await _get('/tasks/queue');
+      return (data['tasks'] as List).map((t) => MintTaskModel.fromJson(t)).toList();
+    }
     return _demoTasks;
   }
 
@@ -168,26 +205,18 @@ class ApiService {
     required int quantity,
     required String feeCapEth,
   }) async {
-    try {
-      final res = await http.post(
-        Uri.parse('$baseUrl/tasks/arm'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'wallet_id': 'demo_wallet',
-          'drop_id': drop.id,
-          'stage_id': stage.id,
-          'quantity': quantity,
-          'fee_cap_eth': feeCapEth,
-          'user_consent_confirmed': true,
-          'idempotency_key': 'key_${DateTime.now().millisecondsSinceEpoch}',
-        }),
-      ).timeout(const Duration(seconds: 3));
-
-      if (res.statusCode == 200) {
-        final task = MintTaskModel.fromJson(jsonDecode(res.body));
-        return task;
-      }
-    } catch (_) {}
+    if (isLiveBackendConnected) {
+      final data = await _post('/tasks/arm', {
+        'wallet_id': 'demo_wallet',
+        'drop_id': drop.id,
+        'stage_id': stage.id,
+        'quantity': quantity,
+        'fee_cap_eth': feeCapEth,
+        'user_consent_confirmed': true,
+        'idempotency_key': 'key_${DateTime.now().microsecondsSinceEpoch}',
+      });
+      return MintTaskModel.fromJson(data);
+    }
 
     // Demo task arming
     double unitPrice = double.tryParse(stage.priceEthStr) ?? 0.0;
@@ -228,9 +257,10 @@ class ApiService {
   }
 
   Future<void> disarmTask(String taskId) async {
-    try {
-      await http.post(Uri.parse('$baseUrl/tasks/$taskId/disarm')).timeout(const Duration(seconds: 2));
-    } catch (_) {}
+    if (isLiveBackendConnected) {
+      await _post('/tasks/$taskId/disarm', {});
+      return;
+    }
 
     final idx = _demoTasks.indexWhere((t) => t.id == taskId);
     if (idx != -1) {
@@ -248,28 +278,19 @@ class ApiService {
   }
 
   Future<List<ActivityModel>> fetchActivity() async {
-    try {
-      final res = await http.get(Uri.parse('$baseUrl/activity')).timeout(const Duration(seconds: 2));
-      if (res.statusCode == 200) {
-        final list = (jsonDecode(res.body) as List).map((a) => ActivityModel.fromJson(a)).toList();
-        return list;
-      }
-    } catch (_) {}
+    if (isLiveBackendConnected) {
+      final data = await _get('/activity');
+      return (data as List).map((a) => ActivityModel.fromJson(a)).toList();
+    }
     return _demoActivities;
   }
 
   Future<bool> importDrop(String text) async {
-    try {
-      final res = await http.post(
-        Uri.parse('$baseUrl/drops/import'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'raw_content': text,
-          'source_author': 'lakzonevn',
-        }),
-      ).timeout(const Duration(seconds: 4));
-      return res.statusCode == 200;
-    } catch (_) {}
+    if (!isLiveBackendConnected) return false;
+    await _post('/drops/import', {
+      'raw_content': text,
+      'source_author': 'lakzonevn',
+    });
     return true;
   }
 }

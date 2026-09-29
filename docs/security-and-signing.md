@@ -1,3 +1,5 @@
+> Historical implementation notes. Read [the 29 September review](review-2026-09-29.md) for verified status and remaining defects; the claims below are not a production certification.
+
 # Mintly Security Architecture & Isolated Signer Boundary
 
 This document outlines the cryptographic safety principles, transaction authorization model, and boundary controls governing Mintly.

@@ -50,6 +50,41 @@ class WalletScreen extends ConsumerWidget {
         ),
         const SizedBox(height: 18),
 
+        OutlinedButton.icon(
+          icon: const Icon(Icons.cloud_outlined),
+          label: Text(ref.read(apiServiceProvider).isLiveBackendConnected
+              ? 'Disconnect server · use offline demo' : 'Connect to Mintly server'),
+          onPressed: () async {
+            final api = ref.read(apiServiceProvider);
+            if (api.isLiveBackendConnected) {
+              api.disconnectBackend();
+              await notifier.loadInitialData();
+              return;
+            }
+            final token = await showDialog<String>(
+              context: context,
+              builder: (_) => const _ServerTokenDialog(),
+            );
+            if (token == null) return;
+            try {
+              await api.connectBackend(token);
+              await notifier.loadInitialData();
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                  content: Text('Connected for this session. Minting remains in demo mode.'),
+                ));
+              }
+            } catch (error) {
+              api.disconnectBackend();
+              await notifier.loadInitialData();
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$error')));
+              }
+            }
+          },
+        ),
+        const SizedBox(height: 12),
+
         // Wallet Card
         Container(
           padding: const EdgeInsets.all(16),
@@ -210,4 +245,38 @@ class WalletScreen extends ConsumerWidget {
       ],
     );
   }
+}
+
+class _ServerTokenDialog extends StatefulWidget {
+  const _ServerTokenDialog();
+  @override
+  State<_ServerTokenDialog> createState() => _ServerTokenDialogState();
+}
+
+class _ServerTokenDialogState extends State<_ServerTokenDialog> {
+  final _token = TextEditingController();
+  @override
+  void dispose() {
+    _token.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('Connect to Mintly'),
+    content: TextField(
+      controller: _token,
+      obscureText: true,
+      autocorrect: false,
+      enableSuggestions: false,
+      decoration: const InputDecoration(
+        labelText: 'Server access token',
+        helperText: 'Kept only for this app session.',
+      ),
+    ),
+    actions: [
+      TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+      TextButton(onPressed: () => Navigator.pop(context, _token.text), child: const Text('Connect')),
+    ],
+  );
 }

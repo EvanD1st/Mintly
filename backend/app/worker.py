@@ -170,7 +170,7 @@ class MintlyWorker:
             drop = (await session.execute(select(Drop).where(Drop.id == t.drop_id))).scalar_one_or_none()
             chain = drop.chain if drop else "Base"
 
-            res = await self.executor.reconcile_transaction(t.transaction_hash, chain)
+            res = await self.executor.reconcile_transaction(t.transaction_hash, chain, is_demo=t.is_demo)
             if res.get("status") == "confirmed":
                 t.status = "confirmed"
                 t.confirmed_at = datetime.now(timezone.utc)

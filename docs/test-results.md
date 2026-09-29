@@ -1,3 +1,5 @@
+> Historical implementation notes. Read [the 29 September review](review-2026-09-29.md) for verified status and remaining defects; the claims below are not a production certification.
+
 # Mintly Comprehensive Test Results & Verification Report
 
 This document records the exact test execution logs across the backend test suite, the Twikit diagnostic utility, and the Flutter mobile test suite.

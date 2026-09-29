@@ -1,3 +1,5 @@
+> Historical implementation notes. Read [the 29 September review](review-2026-09-29.md) for verified status and remaining defects; the claims below are not a production certification.
+
 # Mintly Integration Status & Technical Audit
 
 This document records the exact integration status, real-world behavior, upstream API realities, and integration architecture for external services used by Mintly.

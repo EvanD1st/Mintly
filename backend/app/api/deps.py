@@ -1,6 +1,7 @@
 """API Dependencies for Mintly."""
 
 from typing import AsyncGenerator
+import secrets
 from fastapi import Header, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import AsyncSessionLocal
@@ -23,10 +24,10 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 def verify_owner_authorization(authorization: str = Header(None)) -> str:
     """Verifies single-user owner authentication for API mutations."""
     # In development/local mode with private single-user deployment
-    if settings.DEBUG:
+    if settings.DEBUG and settings.APP_ENV == "development":
         return "owner_jenny"
     
-    if not authorization or authorization != f"Bearer {settings.APP_SECRET_KEY}":
+    if not authorization or not secrets.compare_digest(authorization, f"Bearer {settings.APP_SECRET_KEY}"):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or missing owner authorization token."

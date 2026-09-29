@@ -83,10 +83,8 @@ class MintExecutor:
 
     async def broadcast_transaction(self, raw_tx_hex: str, chain: str) -> str:
         """Broadcasts signed raw transaction to RPC network."""
-        # For simulated / demo mode or test without live RPC:
-        if raw_tx_hex.startswith("0x") and len(raw_tx_hex) < 100:
-            # Simulated hash
-            return raw_tx_hex
+        if not settings.ALLOW_LIVE_BROADCAST or settings.SIGNER_MODE == "demo":
+            raise ExecutionException("Live broadcasting is disabled.")
 
         rpc_url = settings.RPC_BASE if chain.lower() == "base" else settings.RPC_ETHEREUM
         w3 = AsyncWeb3(AsyncWeb3.AsyncHTTPProvider(rpc_url))
@@ -98,10 +96,9 @@ class MintExecutor:
         except Exception as e:
             raise ExecutionException(f"RPC broadcast error on {chain}: {str(e)}")
 
-    async def reconcile_transaction(self, tx_hash: str, chain: str) -> Dict[str, Any]:
+    async def reconcile_transaction(self, tx_hash: str, chain: str, *, is_demo: bool = False) -> Dict[str, Any]:
         """Checks status of a broadcasted transaction to handle crash recovery and reorgs."""
-        # If simulated hash
-        if tx_hash.startswith("0x") and len(tx_hash) == 66:
+        if is_demo:
             # Deterministic simulation response
             return {
                 "status": "confirmed",

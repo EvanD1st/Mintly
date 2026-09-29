@@ -175,11 +175,19 @@ class ReviewScreen extends ConsumerWidget {
           ElevatedButton.icon(
             onPressed: state.isConsentChecked
                 ? () async {
-                    final task = await notifier.armCurrentTask();
-                    if (context.mounted && task != null) {
-                      Navigator.of(context).pushReplacement(
-                        MaterialPageRoute(builder: (_) => SuccessScreen(task: task)),
-                      );
+                    try {
+                      final task = await notifier.armCurrentTask();
+                      if (context.mounted && task != null) {
+                        Navigator.of(context).pushReplacement(
+                          MaterialPageRoute(builder: (_) => SuccessScreen(task: task)),
+                        );
+                      }
+                    } catch (error) {
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                          content: Text('Could not confirm the task. Refresh the queue before retrying. $error'),
+                        ));
+                      }
                     }
                   }
                 : null,

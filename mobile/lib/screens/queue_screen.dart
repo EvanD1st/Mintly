@@ -169,14 +169,19 @@ class QueueScreen extends ConsumerWidget {
                   ),
                   const SizedBox(height: 12),
                   OutlinedButton(
-                    onPressed: () {
-                      notifier.disarmTask(task.id);
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Task disarmed. No transaction was sent.'),
-                          duration: Duration(seconds: 2),
-                        ),
-                      );
+                    onPressed: () async {
+                      try {
+                        await notifier.disarmTask(task.id);
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                            content: Text('Task disarmed.'),
+                          ));
+                        }
+                      } catch (error) {
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$error')));
+                        }
+                      }
                     },
                     child: const Text('Disarm task'),
                   ),

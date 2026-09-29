@@ -52,6 +52,7 @@ async def test_worker_reconciles_crash_before_broadcast(test_db):
         stage_id="orbit-wl",
         status="submitting",
         idempotency_key="crash_test_key_1",
+        is_demo=True,
         scheduled_for_utc=now - timedelta(minutes=5),
         expires_at_utc=now + timedelta(hours=1),
         transaction_hash="0x" + "1" * 64,

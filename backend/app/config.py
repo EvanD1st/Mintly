@@ -40,6 +40,8 @@ class Settings(BaseSettings):
     # Signer Boundary
     SIGNER_MODE: str = "demo"  # 'demo' or 'isolated_server_signer'
     SIGNER_PRIVATE_KEY: Optional[str] = None
+    ALLOW_LIVE_BROADCAST: bool = False
+    CORS_ORIGINS: list[str] = []
 
     # Notifications
     FIREBASE_CREDENTIALS_FILE: Optional[str] = None

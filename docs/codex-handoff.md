@@ -1,3 +1,5 @@
+> Historical implementation notes. Read [the 29 September review](review-2026-09-29.md) for verified status and remaining defects; the claims below are not a production certification.
+
 # Mintly Codex Review Handoff & Architecture Map
 
 This document is prepared for the independent Codex reviewer. It provides a file-by-file map matching every requirement in `Mintly_Codex_Review_Prompt.md`, documents verified behaviors and tests, and highlights areas for live verification.

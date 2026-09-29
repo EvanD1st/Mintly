@@ -1,0 +1,12 @@
+.env
+.env.*
+*.pem
+*.key
+*cookies*
+*.db
+*.sqlite*
+__pycache__
+.pytest_cache
+.venv
+venv
+.git

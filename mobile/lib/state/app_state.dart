@@ -176,7 +176,11 @@ class MintlyNotifier extends StateNotifier<MintlyState> {
   }
 }
 
-final apiServiceProvider = Provider<ApiService>((ref) => ApiService());
+final apiServiceProvider = Provider<ApiService>((ref) {
+  final api = ApiService();
+  ref.onDispose(api.dispose);
+  return api;
+});
 
 final mintlyProvider = StateNotifierProvider<MintlyNotifier, MintlyState>((ref) {
   final api = ref.watch(apiServiceProvider);

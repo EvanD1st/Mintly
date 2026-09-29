@@ -1,67 +1,70 @@
-version: '3.8'
+name: mintly
+
+x-app: &app
+  image: mintly-backend:${MINTLY_RELEASE:-local}
+  build:
+    context: .
+  restart: unless-stopped
+  env_file:
+    - ${MINTLY_ENV_FILE:-.env}
+  environment:
+    DATABASE_URL: postgresql+asyncpg://mintly:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/mintly
+    APP_ENV: production
+    DEBUG: "false"
+    SIGNER_MODE: demo
+    ALLOW_LIVE_BROADCAST: "false"
+    TIMEZONE: Africa/Lagos
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
 
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: mintly-postgres
     restart: unless-stopped
     environment:
       POSTGRES_USER: mintly
-      POSTGRES_PASSWORD: mintly_password
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
       POSTGRES_DB: mintly
-    ports:
-      - "127.0.0.1:5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U mintly -d mintly"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 12
 
-  redis:
-    image: redis:7-alpine
-    container_name: mintly-redis
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:6380:6379"
-    volumes:
-      - redis_data:/data
+  migrate:
+    <<: *app
+    restart: "no"
+    command: alembic upgrade head
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   backend:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: mintly-api
-    restart: unless-stopped
+    <<: *app
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
-    depends_on:
-      postgres:
-        condition: service_healthy
-    environment:
-      DATABASE_URL: postgresql+asyncpg://mintly:mintly_password@postgres:5432/mintly
-      REDIS_URL: redis://redis:6379/0
-      APP_ENV: production
-      TIMEZONE: Africa/Lagos
     ports:
-      - "${MINTLY_PORT:-8095}:8000"
+      - "127.0.0.1:${MINTLY_PORT:-8095}:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:8000/healthz"]
+      interval: 10s
+      timeout: 5s
+      start_period: 20s
+      retries: 12
 
   worker:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: mintly-worker
-    restart: unless-stopped
+    <<: *app
     command: python -m app.worker
     depends_on:
-      postgres:
+      backend:
         condition: service_healthy
-    environment:
-      DATABASE_URL: postgresql+asyncpg://mintly:mintly_password@postgres:5432/mintly
-      REDIS_URL: redis://redis:6379/0
-      APP_ENV: production
-      TIMEZONE: Africa/Lagos
 
 volumes:
   postgres_data:
-  redis_data:
