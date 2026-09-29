@@ -1,0 +1,67 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: mintly-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: mintly
+      POSTGRES_PASSWORD: mintly_password
+      POSTGRES_DB: mintly
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mintly -d mintly"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: mintly-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  backend:
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    container_name: mintly-api
+    restart: unless-stopped
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+asyncpg://mintly:mintly_password@postgres:5432/mintly
+      REDIS_URL: redis://redis:6379/0
+      APP_ENV: production
+      TIMEZONE: Africa/Lagos
+    ports:
+      - "8000:8000"
+
+  worker:
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    container_name: mintly-worker
+    restart: unless-stopped
+    command: python -m app.worker
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+asyncpg://mintly:mintly_password@postgres:5432/mintly
+      REDIS_URL: redis://redis:6379/0
+      APP_ENV: production
+      TIMEZONE: Africa/Lagos
+
+volumes:
+  postgres_data:
+  redis_data:

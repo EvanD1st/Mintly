@@ -1,0 +1,105 @@
+name: Mintly CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  backend-tests:
+    name: Backend Pytest Suite
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run Pytest test suite
+        run: |
+          python -m pytest tests -v
+        env:
+          ALLOW_LIVE_BROADCAST: "false"
+          SIGNER_TYPE: "mock"
+
+  mobile-tests:
+    name: Mobile Flutter Suite
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Install Flutter dependencies
+        run: flutter pub get
+
+      - name: Run Flutter analyzer
+        run: flutter analyze
+
+      - name: Run Flutter widget tests
+        run: flutter test
+
+  deploy-ubuntu:
+    name: Deploy to Ubuntu Server
+    needs: [ backend-tests, mobile-tests ]
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Deploy to Ubuntu Host via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        if: env.HAS_SSH_KEY == 'true'
+        env:
+          HAS_SSH_KEY: ${{ secrets.UBUNTU_SSH_KEY != '' }}
+        with:
+          host: ${{ secrets.UBUNTU_HOST }}
+          username: ${{ secrets.UBUNTU_USER }}
+          key: ${{ secrets.UBUNTU_SSH_KEY }}
+          port: ${{ secrets.UBUNTU_SSH_PORT || 22 }}
+          script: |
+            set -e
+            echo "Deploying Mintly to Ubuntu server..."
+            TARGET_DIR=${{ secrets.UBUNTU_APP_DIR || '~/Mintly' }}
+            if [ ! -d "$TARGET_DIR" ]; then
+              git clone https://github.com/EvanD1st/Mintly.git "$TARGET_DIR"
+              cd "$TARGET_DIR"
+            else
+              cd "$TARGET_DIR"
+              git pull origin main || git pull origin master
+            fi
+
+            # Deploy backend stack via Docker Compose
+            cd "$TARGET_DIR/backend"
+            if [ ! -f .env ]; then
+              cp .env.example .env
+            fi
+            docker compose down || true
+            docker compose up --build -d
+            echo "Mintly successfully deployed and running!"
