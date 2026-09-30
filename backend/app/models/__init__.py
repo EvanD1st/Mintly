@@ -5,6 +5,7 @@ from app.models.source import SourceConnection, SourcePost
 from app.models.drop import Drop, MintStage
 from app.models.task import MintAuthorization, MintTask
 from app.models.activity import ActivityEvent, NotificationDevice
+from app.models.user import User, AuthSession, LoginAttempt, WalletPairing
 
 __all__ = [
     "Wallet",
@@ -16,4 +17,5 @@ __all__ = [
     "MintTask",
     "ActivityEvent",
     "NotificationDevice",
+    "User", "AuthSession", "LoginAttempt", "WalletPairing",
 ]

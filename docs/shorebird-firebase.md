@@ -12,7 +12,7 @@ read a Firebase service account from
 `~/Mintly/shared/firebase-service-account.json` on Ubuntu. The deploy script
 mounts that file read-only if present. No Firebase private key belongs in Git.
 
-The app asks for notification permission after connecting to the Mintly server,
+The app asks for notification permission after account sign-in,
 registers its FCM token, and refreshes that registration if FCM rotates it.
 The notification switches save per-device preferences to the backend.
 Disconnecting deactivates that device token. The worker and manual-import API
@@ -45,10 +45,10 @@ new signed release and an updated installer; an over-the-air Dart patch cannot
 change icons already installed on a phone.
 
 To verify push end to end, install the signed Shorebird APK on an Android
-device, connect the app to `https://mintly.duckdns.org` with the owner token,
-grant notification permission, and import a sample list through the app. The
-device should receive a "New Drops Imported" notification; foreground and
-background delivery should each be checked. The release key and its signing
+device, sign in with an admin-created account, grant notification permission,
+and import a real mint link as admin or wait for a new OpenSea listing. The
+device should receive a new-drop notification; foreground and background
+delivery should each be checked. The release key and its signing
 metadata are stored outside this repository under `C:\Users\USER\.ssh` and
 must be backed up for future installers.
 

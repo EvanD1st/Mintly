@@ -66,6 +66,8 @@ class DropPostParser:
         if m24:
             hour = int(m24.group(1))
             minute = int(m24.group(2))
+            if hour > 23:
+                return None
             dt_lagos = datetime(
                 year=base_date.year,
                 month=base_date.month,
@@ -108,7 +110,7 @@ class DropPostParser:
                 continue
 
             # Extract Chain
-            chain = "Base"
+            chain = "Unknown"
             chain_match = re.search(r"(?:chain|network):\s*([a-zA-Z0-9\s]+)", section, re.IGNORECASE)
             if chain_match:
                 c_str = chain_match.group(1).strip().split()[0].capitalize()
@@ -127,19 +129,18 @@ class DropPostParser:
                 elif "base" in section.lower():
                     chain = "Base"
 
-            chain_id = 8453 if chain == "Base" else (1 if chain == "Ethereum" else 11155111)
+            chain_id = 8453 if chain == "Base" else (1 if chain == "Ethereum" else 0)
 
             # Extract URLs
             urls = re.findall(r"https?://[^\s<>\"']+", section)
             mint_url = urls[0] if urls else ""
+            if not mint_url:
+                continue
             site_label = "OpenSea" if "opensea.io" in mint_url.lower() else "Project website"
 
             # Extract Time
             time_match = re.search(r"(?:time|starts?|at):\s*([0-9]{1,2}(?::[0-9]{2})?\s*(?:AM|PM|WAT)?)", section, re.IGNORECASE)
-            time_str = time_match.group(1) if time_match else "18:00 WAT"
-            parsed_utc = cls.parse_time_wat(time_str, posted_at)
-            if not parsed_utc:
-                parsed_utc = posted_at.replace(hour=17, minute=0, second=0, microsecond=0)
+            parsed_utc = cls.parse_time_wat(time_match.group(1), posted_at) if time_match else None
 
             # Extract Stages and Prices
             # Look for Allowlist / Presale / Public
@@ -156,46 +157,54 @@ class DropPostParser:
                     wl_time_sub = wl_match.group(2)
                     wl_utc = cls.parse_time_wat(wl_time_sub, posted_at) if wl_time_sub else parsed_utc
                     wl_wei = parse_eth_to_wei(wl_price_str)
-                    stages.append({
+                    if wl_utc:
+                        stages.append({
                         "stage_name": "Allowlist",
                         "start_time_utc": wl_utc,
                         "price_wei": wl_wei,
                         "price_eth_str": format_wei_to_eth(wl_wei),
-                        "limit_per_wallet": 3,
+                        "limit_per_wallet": 0,
                         "eligibility_status": "unknown",
-                    })
+                        })
                 if pub_match:
                     pub_price_str = pub_match.group(1)
                     pub_time_sub = pub_match.group(2)
-                    pub_utc = cls.parse_time_wat(pub_time_sub, posted_at) if pub_time_sub else parsed_utc + timedelta(hours=2)
+                    pub_utc = cls.parse_time_wat(pub_time_sub, posted_at) if pub_time_sub else parsed_utc
                     pub_wei = parse_eth_to_wei(pub_price_str)
-                    stages.append({
+                    if pub_utc:
+                        stages.append({
                         "stage_name": "Public",
                         "start_time_utc": pub_utc,
                         "price_wei": pub_wei,
                         "price_eth_str": format_wei_to_eth(pub_wei),
-                        "limit_per_wallet": 5,
+                        "limit_per_wallet": 0,
                         "eligibility_status": "unknown",
-                    })
+                        })
             else:
                 # Single price pattern: "Price: 0.0008 ETH"
                 price_match = re.search(r"(?:price|mint):\s*([0-9\.]+|free|tba)\s*(?:eth)?", section, re.IGNORECASE)
-                price_str = price_match.group(1) if price_match else "0.0005"
-                if price_str.lower() == "tba":
+                price_str = price_match.group(1) if price_match else None
+                if price_str is None or parsed_utc is None:
+                    price_str = None
+                if price_str is None:
+                    price_wei = None
+                    price_display = ""
+                elif price_str.lower() == "tba":
                     price_wei = 0
                     price_display = "TBA"
                 else:
                     price_wei = parse_eth_to_wei(price_str)
                     price_display = format_wei_to_eth(price_wei)
 
-                stages.append({
+                if price_wei is not None:
+                    stages.append({
                     "stage_name": "Public",
                     "start_time_utc": parsed_utc,
                     "price_wei": price_wei,
                     "price_eth_str": price_display,
-                    "limit_per_wallet": 1,
+                    "limit_per_wallet": 0,
                     "eligibility_status": "unknown",
-                })
+                    })
 
             # Determine icon based on name
             icon = "gem"
@@ -217,7 +226,7 @@ class DropPostParser:
                 "name": raw_name,
                 "chain": chain,
                 "chain_id": chain_id,
-                "mint_page_url": mint_url or "https://opensea.io",
+                "mint_page_url": mint_url,
                 "site_label": site_label,
                 "icon_name": icon,
                 "status_label": status_label,

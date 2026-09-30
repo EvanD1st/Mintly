@@ -5,7 +5,8 @@ import asyncio
 import os
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from app.database import Base
-from app.services.seed import seed_initial_data
+from app.models import User
+from app.services.auth import hash_password
 import app.models  # load models
 
 TEST_DB_URL = "sqlite+aiosqlite:///./test_mintly.db"
@@ -23,7 +24,11 @@ async def test_db():
         await conn.run_sync(Base.metadata.create_all)
 
     async with session_factory() as session:
-        await seed_initial_data(session)
+        session.add(User(username="admin", password_hash=hash_password("Admin test password 123"),
+                         role="admin", is_active=True, must_change_password=False))
+        session.add(User(username="member", password_hash=hash_password("Member test password 123"),
+                         role="member", is_active=True, must_change_password=False))
+        await session.commit()
         yield session
 
     async with engine.begin() as conn:

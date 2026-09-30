@@ -25,7 +25,7 @@ class QueueScreen extends ConsumerWidget {
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
       children: [
         Text(
-          'PREPARED AHEAD',
+          'ACTIVITY',
           style: TextStyle(
             fontSize: 10,
             fontWeight: FontWeight.w700,
@@ -35,7 +35,7 @@ class QueueScreen extends ConsumerWidget {
         ),
         const SizedBox(height: 6),
         Text(
-          'Mint queue',
+          'Mint history',
           style: TextStyle(
             fontSize: 28,
             fontWeight: FontWeight.w700,
@@ -47,8 +47,8 @@ class QueueScreen extends ConsumerWidget {
         const SizedBox(height: 4),
         Text(
           hasTasks
-              ? 'Your scheduled mints, in one place.'
-              : 'Your next mint starts with a plan.',
+              ? 'Previous task records for your account.'
+              : 'MetaMask asks you to approve each mint transaction.',
           style: TextStyle(fontSize: 13, color: muted),
         ),
         const SizedBox(height: 20),
@@ -71,14 +71,14 @@ class QueueScreen extends ConsumerWidget {
           const SizedBox(height: 18),
           Center(
             child: Text(
-              'No mints armed yet',
+              'No task history',
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: ink),
             ),
           ),
           const SizedBox(height: 8),
           Center(
             child: Text(
-              'Choose a drop, set your budget,\nand review its mint task.',
+              'Browse live drops and open the source to mint with MetaMask.',
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 13, color: muted, height: 1.4),
             ),
@@ -105,7 +105,7 @@ class QueueScreen extends ConsumerWidget {
                           borderRadius: BorderRadius.circular(6),
                         ),
                         child: Text(
-                          '${task.status == 'armed' ? 'Armed' : task.status} · demo',
+                          task.status,
                           style: TextStyle(
                             fontSize: 10,
                             fontWeight: FontWeight.w600,
@@ -192,7 +192,7 @@ class QueueScreen extends ConsumerWidget {
           const SizedBox(height: 8),
           Center(
             child: Text(
-              'All times WAT · Scheduled tasks shown are simulated.',
+              'Times shown in WAT. New mints require approval in MetaMask.',
               style: TextStyle(fontSize: 11, color: muted),
             ),
           ),

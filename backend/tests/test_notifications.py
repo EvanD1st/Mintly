@@ -26,6 +26,11 @@ async def test_fcm_delivery_respects_saved_preferences(test_db, monkeypatch):
     token = "mintly-test-fcm-token-123456"
     try:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            login = await client.post("/api/auth/login", json={
+                "username": "member", "password": "Member test password 123",
+            })
+            assert login.status_code == 200
+            client.headers["Authorization"] = "Bearer " + login.json()["token"]
             registered = await client.post("/api/notifications/register", json={"token": token})
             assert registered.status_code == 200
             assert registered.json()["preferences"]["daily_list"] is True
@@ -40,7 +45,7 @@ async def test_fcm_delivery_respects_saved_preferences(test_db, monkeypatch):
             assert reconnected.json()["preferences"]["daily_list"] is False
             assert not await NotificationService.send_notification("New drops", "Two drops", "daily_list")
             assert len(sent) == 1
-            assert await NotificationService.send_notification("Confirmed", "Demo confirmed", "mint_status")
+            assert await NotificationService.send_notification("Confirmed", "Confirmed", "mint_status")
             assert len(sent) == 2
 
             unregistered = await client.post("/api/notifications/unregister", json={"token": token})

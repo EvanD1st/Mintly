@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import '../theme/colors.dart';
-import 'main_shell.dart';
+import 'auth_gate.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -35,7 +35,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
       if (mounted) {
         Navigator.of(context).pushReplacement(
           PageRouteBuilder(
-            pageBuilder: (context, anim1, anim2) => const MainShell(),
+            pageBuilder: (context, anim1, anim2) => const AuthGate(),
             transitionsBuilder: (context, anim1, anim2, child) => FadeTransition(
               opacity: anim1,
               child: child,

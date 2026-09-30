@@ -1,34 +1,37 @@
 # Mintly
 
-Mintly is a Flutter client with a FastAPI backend for NFT discovery and scheduled
-minting experiments. The current Ubuntu deployment is an **authenticated demo**.
-Live automatic minting is not production-ready; see the [review](docs/review-2026-09-29.md).
+Mintly is a Flutter app and FastAPI service for browsing real OpenSea drops. The
+production API runs at https://mintly.duckdns.org/api. The [account and wallet
+guide](docs/real-data-accounts-wallet.md) explains sign-in, MetaMask linking,
+security limits, and the live feed.
 
-## Hosted backend
+An admin creates accounts. Members must change their temporary passwords before
+using the app. A MetaMask address is linked through a short-lived, one-use message
+signature in a browser with the extension installed. Mintly never imports wallet
+secrets or signs mint transactions. Users approve any mint directly in MetaMask
+on OpenSea. Wallet-specific eligibility is unverified in the feed.
 
-- API: https://mintly.duckdns.org/api
-- Health: https://mintly.duckdns.org/healthz
-- Native app: Wallet > Connect to Mintly server, using your owner access token.
-- Deployment, credentials, DNS, and operations: [Ubuntu guide](docs/deployment-ubuntu.md).
+The worker imports OpenSea's upcoming and featured drop records when
+`OPENSEA_API_KEY` is configured. The app does not invent drop prices, times,
+eligibility, or activity when the live source is unavailable. CI tests the
+backend and Flutter app before deploying `main` to Ubuntu. Android builds use
+Shorebird; a new signed installer is needed whenever native plugins change.
 
-GitHub Actions runs backend tests, a clean PostgreSQL/Docker startup check, Flutter
-analysis, and Flutter tests before deploying the tested revision from `main`.
+See [Ubuntu operations](docs/deployment-ubuntu.md) and [Android updates and
+notifications](docs/shorebird-firebase.md). The [29 September review](docs/review-2026-09-29.md)
+records the earlier demo release and is historical context.
 
 ## Local development
 
 Use Python 3.12 and Flutter 3.44.8. From `backend`:
 
 ```bash
-python -m venv .venv
-# Activate .venv using your shell, then:
 pip install -r requirements.txt
 alembic upgrade head
+python -m app.admin_cli admin  # reads initial password from stdin
 uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
-python -m pytest tests -v
+python -m pytest tests -q
 ```
-
-Local development defaults to SQLite. Production uses PostgreSQL and requires a
-random owner token with debugging disabled. The default signer is simulated.
 
 From `mobile`:
 
@@ -38,10 +41,3 @@ flutter analyze
 flutter test
 flutter run
 ```
-
-The client starts in offline demo mode. Connecting to the hosted server keeps the
-access token only for the app session. API errors do not silently create demo tasks.
-
-The original requirements are in `Mintly_Antigravity_Prompt.md`; the independent
-review checklist is in `Mintly_Codex_Review_Prompt.md`. Earlier handoff documents
-contain implementation claims that the current review supersedes.

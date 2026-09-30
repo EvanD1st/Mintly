@@ -20,9 +20,9 @@ class WalletModel {
       id: json['id'] ?? '',
       label: json['label'] ?? "Jenny's wallet",
       address: json['address'] ?? "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
-      signingCapability: json['signing_capability'] ?? "demo",
+      signingCapability: json['signing_capability'] ?? "watch_only",
       isDefault: json['is_default'] ?? true,
-      isDemo: json['is_demo'] ?? true,
+      isDemo: json['is_demo'] ?? false,
     );
   }
 }

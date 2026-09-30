@@ -8,7 +8,7 @@ from app.schemas.drop import DropSchema
 
 class ManualImportRequest(BaseModel):
     raw_content: str = Field(..., min_length=5)
-    source_author: str = "lakzonevn"
+    source_author: str = Field(default="manual", max_length=50)
 
 
 class ManualImportResponse(BaseModel):

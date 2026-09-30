@@ -8,9 +8,9 @@ The Flutter app is a native client; this address serves the API, not a Flutter w
 - Caddy terminates HTTPS and proxies to `127.0.0.1:8095`. Existing Caddy sites are preserved.
 - Docker Compose runs PostgreSQL, a one-shot Alembic migration, FastAPI, and one worker.
 - The database has no published host port. Redis was removed because the application does not use it.
-- The production configuration forces `DEBUG=false`, `SIGNER_MODE=demo`, and `ALLOW_LIVE_BROADCAST=false`.
-- A random owner token and database password are generated on first deployment at `~/Mintly/shared/.env` (mode 600). They are excluded from images and source control.
-- The API requires `Authorization: Bearer <owner token>` on all `/api` routes. `/` and `/healthz` are public.
+- The production configuration forces `DEBUG=false`, `SIGNER_MODE=disabled`, and `ALLOW_LIVE_BROADCAST=false`.
+- A random application secret and database password are generated on first deployment at `~/Mintly/shared/.env` (mode 600). They are excluded from images and source control.
+- Admin-created user accounts use revocable bearer sessions. `/api/auth/login` and the short-lived wallet-link endpoints are public; member data routes require a valid account session.
 - Releases live under `~/Mintly/releases/`; `~/Mintly/current` points to the latest successful deployment. Database data persists in the `mintly_postgres_data` Docker volume.
 
 ## GitHub Actions
@@ -31,17 +31,14 @@ Repository variable: `MINTLY_PUBLIC_URL=https://mintly.duckdns.org`.
 
 ## Connect the mobile app
 
-Open **Wallet > Connect to Mintly server** and enter the owner access token.
-On the setup computer, the token is saved outside the repository at
-`C:\Users\USER\.ssh\mintly-api-token.txt`. On Ubuntu it is the `APP_SECRET_KEY`
-value in `~/Mintly/shared/.env`. Do not commit it or put it in build arguments.
-The mobile app keeps it in memory for the current session only. Restarting the
-app returns to explicit offline demo mode. Connected API failures are reported
-instead of silently becoming simulated task success.
-
-The default API address is `https://mintly.duckdns.org/api`. A different HTTPS
-endpoint can be configured with `--dart-define=MINTLY_API_URL=https://host/api`.
-Server connectivity does not enable real minting: this deployment uses demo signing.
+Create the first admin with `python -m app.admin_cli admin` inside the backend
+container after migration, piping a strong initial password through stdin. The
+admin changes that password at first sign-in, then creates member accounts in
+the app. The app keeps the bearer session in memory until logout or restart.
+There is no offline sample feed. The default API address is
+`https://mintly.duckdns.org/api`; a different HTTPS endpoint can be configured
+with `--dart-define=MINTLY_API_URL=https://host/api`. See the
+[account and wallet guide](real-data-accounts-wallet.md) for MetaMask linking.
 
 ## DNS and HTTPS
 
