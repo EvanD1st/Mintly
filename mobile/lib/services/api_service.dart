@@ -298,9 +298,10 @@ class ApiService {
     return true;
   }
 
-  Future<void> registerDevice(String token) async {
-    if (!isLiveBackendConnected) return;
-    await _post('/notifications/register', {'token': token, 'platform': 'android'});
+  Future<Map<String, dynamic>?> registerDevice(String token) async {
+    if (!isLiveBackendConnected) return null;
+    return (await _post('/notifications/register',
+      {'token': token, 'platform': 'android'})) as Map<String, dynamic>;
   }
 
   Future<void> setNotificationPreferences(String token, {

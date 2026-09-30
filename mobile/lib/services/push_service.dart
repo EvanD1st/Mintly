@@ -67,10 +67,14 @@ class PushService {
     }
     _token = await _messaging!.getToken();
     if (_token == null) return false;
-    await api.registerDevice(_token!);
-    await api.setNotificationPreferences(_token!,
-      dailyList: preferences.value.dailyList,
-      mintStatus: preferences.value.mintStatus);
+    final registration = await api.registerDevice(_token!);
+    final saved = registration?['preferences'];
+    if (saved is Map<String, dynamic>) {
+      preferences.value = PushPreferences(
+        dailyList: saved['daily_list'] == true,
+        mintStatus: saved['mint_status'] == true,
+      );
+    }
     return true;
   }
 

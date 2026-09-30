@@ -31,13 +31,16 @@ async def register_device_token(req: DeviceRegisterRequest, db: AsyncSession = D
         NotificationDevice.device_token == req.token
     ))).scalar_one_or_none()
     if device is None:
-        device = NotificationDevice(device_token=req.token, platform=req.platform, is_active=True)
+        device = NotificationDevice(
+            device_token=req.token, platform=req.platform, is_active=True,
+            preferences={"daily_list": True, "mint_status": True, "source_health": True},
+        )
         db.add(device)
     else:
         device.platform = req.platform
         device.is_active = True
     await db.commit()
-    return {"status": "ok"}
+    return {"status": "ok", "preferences": device.preferences}
 
 
 @router.post("/preferences")

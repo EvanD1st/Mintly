@@ -28,6 +28,7 @@ async def test_fcm_delivery_respects_saved_preferences(test_db, monkeypatch):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             registered = await client.post("/api/notifications/register", json={"token": token})
             assert registered.status_code == 200
+            assert registered.json()["preferences"]["daily_list"] is True
             assert await NotificationService.send_notification("New drops", "One drop", "daily_list")
             assert len(sent) == 1
 
@@ -35,6 +36,8 @@ async def test_fcm_delivery_respects_saved_preferences(test_db, monkeypatch):
                 "token": token, "daily_list": False, "mint_status": True,
             })
             assert saved.status_code == 200
+            reconnected = await client.post("/api/notifications/register", json={"token": token})
+            assert reconnected.json()["preferences"]["daily_list"] is False
             assert not await NotificationService.send_notification("New drops", "Two drops", "daily_list")
             assert len(sent) == 1
             assert await NotificationService.send_notification("Confirmed", "Demo confirmed", "mint_status")

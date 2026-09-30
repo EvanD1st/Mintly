@@ -33,11 +33,16 @@ secrets: `SHOREBIRD_TOKEN`, `MINTLY_GOOGLE_SERVICES_JSON_B64`,
 `MINTLY_ANDROID_KEYSTORE_B64`, `MINTLY_KEYSTORE_PASSWORD`,
 `MINTLY_KEY_PASSWORD`, and `MINTLY_KEY_ALIAS`. After an installer has been
 distributed, set repository variables `MINTLY_SHOREBIRD_RELEASE_VERSION` to
-its exact version (for example `1.0.0+1`) and
+its exact version (for example `1.0.1+2`) and
 `MINTLY_SHOREBIRD_RELEASE_READY` to `true`. Only then will a push to
 `mobile/lib/` attempt a patch. The job checks for Android, iOS, asset, and
 dependency changes in the same push and skips the patch when they are present.
 Shorebird itself also rejects native differences.
+
+The launcher icon is generated from `mobile/assets/icon/mintly.png` using
+`dart run flutter_launcher_icons` in `mobile/`. Changing the icon requires a
+new signed release and an updated installer; an over-the-air Dart patch cannot
+change icons already installed on a phone.
 
 To verify push end to end, install the signed Shorebird APK on an Android
 device, connect the app to `https://mintly.duckdns.org` with the owner token,
