@@ -19,6 +19,9 @@ eligibility, or activity when the live source is unavailable. CI tests the
 backend and Flutter app before deploying `main` to Ubuntu. Android builds use
 Shorebird; a new signed installer is needed whenever native plugins change.
 
+The operator can set up the single shared X reader with the [X session guide](docs/x-session-setup.md);
+Mintly users do not need X accounts.
+
 See [Ubuntu operations](docs/deployment-ubuntu.md) and [Android updates and
 notifications](docs/shorebird-firebase.md). The [29 September review](docs/review-2026-09-29.md)
 records the earlier demo release and is historical context.
