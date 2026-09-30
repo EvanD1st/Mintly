@@ -43,5 +43,5 @@ in chat: it grants access to the X account. The worker checks @lakzonevn every
 five minutes, stores full post text and source IDs, and notifies devices only
 when it persists new drops. Twikit uses X's unofficial web interface, so X may
 change or limit it; a source error then appears instead of substitute data.
-See the [X session setup guide](x-session-setup.md) for the local, password-hidden
-creation step.
+See the [X session setup guide](x-session-setup.md) for the current Twikit
+compatibility status before attempting to create a session.

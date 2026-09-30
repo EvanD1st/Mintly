@@ -31,13 +31,6 @@ async def verify_reader(client: Client) -> None:
     await client.get_user_tweets(target.id, "Tweets", count=1)
 
 
-async def browser_cookies_and_verify(auth_token: str, ct0: str) -> Client:
-    client = Client("en-US")
-    client.set_cookies({"auth_token": auth_token, "ct0": ct0})
-    await verify_reader(client)
-    return client
-
-
 async def password_login_preflight() -> None:
     """Detect broken anonymous Twikit startup before asking for a password."""
     client = Client("en-US", timeout=20)
@@ -67,49 +60,37 @@ def safe_failure(error: Exception) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Save a verified local X session for Mintly's Twikit worker")
     parser.add_argument("--replace", action="store_true", help="Replace an expired local session only after a successful login")
-    parser.add_argument("--from-browser", action="store_true", help="Use two cookies from your already signed-in Chrome X tab; no X password")
+    parser.add_argument("--from-browser", action="store_true", help="Deprecated: browser-cookie login is disabled while Twikit cannot read X")
     args = parser.parse_args()
+    if args.from_browser:
+        print("Browser-cookie login is disabled: Twikit failed its authenticated read check on X's current page scripts.")
+        print("No cookies were requested or saved. Do not copy X session cookies from DevTools.")
+        return 1
     if SESSION_FILE.exists() and not args.replace:
         print(f"A session already exists at {SESSION_FILE}. Use --replace only if it has expired.")
         return 1
 
-    if args.from_browser:
-        print("Copy auth_token and ct0 from Chrome DevTools on your signed-in x.com tab.")
-        print("Paste them only at these hidden local prompts. Never send or screenshot their values.")
-        auth_token = getpass.getpass("auth_token cookie (hidden): ").strip()
-        ct0 = getpass.getpass("ct0 cookie (hidden): ").strip()
-        if not auth_token or not ct0:
-            print("Both cookie values are required. No session was saved.")
-            return 1
-        try:
-            client = asyncio.run(browser_cookies_and_verify(auth_token, ct0))
-        except Exception as error:
-            print(safe_failure(error))
-            return 1
-        finally:
-            auth_token = ct0 = None
-    else:
-        try:
-            asyncio.run(password_login_preflight())
-        except Exception as error:
-            print(safe_failure(error))
-            print("Your password was not requested. Use --from-browser if already signed in to X in Chrome.")
-            return 1
-        print("This signs your X account into Twikit once and checks read access to @lakzonevn.")
-        print("Your password is hidden and never written to the session file or Mintly repository.")
-        username = input("Your X username or email: ").strip()
-        second_id = input("Other login identifier (email or username; Enter to skip): ").strip() or None
-        password = getpass.getpass("X password (hidden): ")
-        if not username or not password:
-            print("A username/email and password are required.")
-            return 1
-        try:
-            client = asyncio.run(login_and_verify(username, second_id, password))
-        except Exception as error:
-            print(safe_failure(error))
-            return 1
-        finally:
-            password = None
+    try:
+        asyncio.run(password_login_preflight())
+    except Exception as error:
+        print(safe_failure(error))
+        print("No login details were requested. Wait for a compatible Twikit release before trying again.")
+        return 1
+    print("This signs your X account into Twikit once and checks read access to @lakzonevn.")
+    print("Your password is hidden and never written to the session file or Mintly repository.")
+    username = input("Your X username or email: ").strip()
+    second_id = input("Other login identifier (email or username; Enter to skip): ").strip() or None
+    password = getpass.getpass("X password (hidden): ")
+    if not username or not password:
+        print("A username/email and password are required.")
+        return 1
+    try:
+        client = asyncio.run(login_and_verify(username, second_id, password))
+    except Exception as error:
+        print(safe_failure(error))
+        return 1
+    finally:
+        password = None
 
     SESSION_FILE.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     old_mask = os.umask(0o077)
@@ -133,8 +114,6 @@ def main() -> int:
             temporary.unlink()
 
     print(f"Verified X session saved at {SESSION_FILE}.")
-    if args.from_browser:
-        print("Clear your clipboard after copying the cookie values (PowerShell: Set-Clipboard -Value '').")
     print("Do not paste or attach that file in chat. Tell Codex only that the file is ready.")
     return 0
 
