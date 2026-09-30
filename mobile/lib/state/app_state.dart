@@ -14,10 +14,12 @@ class MintlyState {
   final List<MintTaskModel> queue;
   final List<ActivityModel> activities;
   final bool isMonitoring;
-  final bool isRechecked;
   final bool isConsentChecked;
   final bool isLoading;
-  final bool isDemoMode;
+  final String? error;
+  final String sourceStatusText;
+  final String checkedWalletLabel;
+  final String lastCheckedText;
 
   MintlyState({
     required this.drops,
@@ -29,10 +31,12 @@ class MintlyState {
     required this.queue,
     required this.activities,
     this.isMonitoring = true,
-    this.isRechecked = false,
     this.isConsentChecked = false,
     this.isLoading = false,
-    this.isDemoMode = true,
+    this.error,
+    this.sourceStatusText = 'Waiting for live data',
+    this.checkedWalletLabel = 'No wallet connected',
+    this.lastCheckedText = 'Eligibility unverified',
   });
 
   MintlyState copyWith({
@@ -45,10 +49,12 @@ class MintlyState {
     List<MintTaskModel>? queue,
     List<ActivityModel>? activities,
     bool? isMonitoring,
-    bool? isRechecked,
     bool? isConsentChecked,
     bool? isLoading,
-    bool? isDemoMode,
+    String? error,
+    String? sourceStatusText,
+    String? checkedWalletLabel,
+    String? lastCheckedText,
   }) {
     return MintlyState(
       drops: drops ?? this.drops,
@@ -60,10 +66,12 @@ class MintlyState {
       queue: queue ?? this.queue,
       activities: activities ?? this.activities,
       isMonitoring: isMonitoring ?? this.isMonitoring,
-      isRechecked: isRechecked ?? this.isRechecked,
       isConsentChecked: isConsentChecked ?? this.isConsentChecked,
       isLoading: isLoading ?? this.isLoading,
-      isDemoMode: isDemoMode ?? this.isDemoMode,
+      error: error,
+      sourceStatusText: sourceStatusText ?? this.sourceStatusText,
+      checkedWalletLabel: checkedWalletLabel ?? this.checkedWalletLabel,
+      lastCheckedText: lastCheckedText ?? this.lastCheckedText,
     );
   }
 }
@@ -76,31 +84,38 @@ class MintlyNotifier extends StateNotifier<MintlyState> {
           drops: [],
           queue: [],
           activities: [],
-          isLoading: true,
-        )) {
-    loadInitialData();
-  }
+          isLoading: false,
+        ));
 
   Future<void> loadInitialData() async {
+    if (!_api.isLiveBackendConnected) {
+      state = MintlyState(drops: [], queue: [], activities: []);
+      return;
+    }
     state = state.copyWith(isLoading: true);
-    final drops = await _api.fetchDrops(state.filter);
-    final queue = await _api.fetchQueue();
-    final activities = await _api.fetchActivity();
-    
-    state = state.copyWith(
-      drops: drops,
-      selectedDrop: drops.isNotEmpty ? drops.first : null,
-      selectedStage: drops.isNotEmpty && drops.first.stages.isNotEmpty ? drops.first.stages.first : null,
-      queue: queue,
-      activities: activities,
-      isLoading: false,
-    );
+    try {
+      final drops = await _api.fetchDrops(state.filter);
+      final queue = await _api.fetchQueue();
+      final activities = await _api.fetchActivity();
+      state = state.copyWith(
+        drops: drops,
+        selectedDrop: drops.isNotEmpty ? drops.first : null,
+        selectedStage: drops.isNotEmpty && drops.first.stages.isNotEmpty ? drops.first.stages.first : null,
+        queue: queue,
+        activities: activities,
+        sourceStatusText: _api.sourceStatusText,
+        checkedWalletLabel: _api.checkedWalletLabel,
+        lastCheckedText: _api.lastCheckedText,
+        isLoading: false,
+      );
+    } catch (error) {
+      state = state.copyWith(isLoading: false, error: '$error');
+    }
   }
 
   Future<void> setFilter(String filter) async {
     state = state.copyWith(filter: filter);
-    final drops = await _api.fetchDrops(filter);
-    state = state.copyWith(drops: drops);
+    await loadInitialData();
   }
 
   void selectDrop(DropModel drop) {
@@ -161,14 +176,6 @@ class MintlyNotifier extends StateNotifier<MintlyState> {
     state = state.copyWith(queue: queue, activities: activities);
   }
 
-  void recheckEligibility() {
-    state = state.copyWith(isRechecked: true);
-  }
-
-  void toggleMonitoring() {
-    state = state.copyWith(isMonitoring: !state.isMonitoring);
-  }
-
   Future<bool> importList(String text) async {
     final ok = await _api.importDrop(text);
     await loadInitialData();
@@ -176,13 +183,12 @@ class MintlyNotifier extends StateNotifier<MintlyState> {
   }
 }
 
-final apiServiceProvider = Provider<ApiService>((ref) {
+final apiServiceProvider = ChangeNotifierProvider<ApiService>((ref) {
   final api = ApiService();
-  ref.onDispose(api.dispose);
   return api;
 });
 
 final mintlyProvider = StateNotifierProvider<MintlyNotifier, MintlyState>((ref) {
-  final api = ref.watch(apiServiceProvider);
+  final api = ref.read(apiServiceProvider);
   return MintlyNotifier(api);
 });

@@ -1,89 +1,75 @@
-"""Source connection health, preferences, and activity endpoints."""
+"""Live source health and account-scoped activity."""
 
-from datetime import datetime, timezone
+from datetime import timezone
 from zoneinfo import ZoneInfo
-from typing import List
+
 from fastapi import APIRouter, Depends
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.api.deps import get_db, verify_owner_authorization
-from app.models import SourceConnection, ActivityEvent, Drop
-from app.schemas.activity import SourceStatusResponse, ActivityEventSchema
-from app.twikit_diag import run_twikit_diagnostic
+
+from app.api.deps import get_current_user, get_db, require_admin
+from app.models import ActivityEvent, Drop, SourceConnection, User
+from app.schemas.activity import ActivityEventSchema, SourceStatusResponse
+from app.config import settings
 
 router = APIRouter(tags=["source_and_activity"])
 
 
 @router.get("/source/status", response_model=SourceStatusResponse)
 async def get_source_status(db: AsyncSession = Depends(get_db)):
-    """Returns the current status of the X/Twikit connection."""
-    stmt = select(SourceConnection).where(SourceConnection.source_name == "lakzonevn")
-    src = (await db.execute(stmt)).scalar_one_or_none()
-
-    drops_count = len((await db.execute(select(Drop))).scalars().all())
-
-    is_monitoring = src.is_monitoring if src else True
-    last_sync = src.last_sync_at if src else None
-
-    # Check whether live credentials exist or whether connection needs attention
-    diag = await run_twikit_diagnostic()
-    if diag["status"] == "missing_credentials":
-        status_text = "needs_attention"
-        summary_text = "Monitoring paused · saved list" if not is_monitoring else "Connection needs attention · credentials required"
-    elif diag["status"] == "success":
-        status_text = "healthy"
-        summary_text = f"Last synced 17:02 · {drops_count} drops"
+    source = (await db.execute(select(SourceConnection).where(
+        SourceConnection.source_name == "opensea",
+    ))).scalar_one_or_none()
+    count = (await db.execute(select(func.count()).select_from(Drop).where(
+        Drop.is_demo.is_(False), Drop.id.like("os_%"),
+    ))).scalar_one()
+    active = source.is_monitoring if source else True
+    last_sync = source.last_sync_at if source else None
+    status = source.status if source else "needs_attention"
+    if not settings.OPENSEA_API_KEY:
+        status = "needs_attention"
+    if not active:
+        summary = "OpenSea monitoring paused by admin"
+    elif last_sync:
+        summary = f"OpenSea updated {last_sync.replace(tzinfo=timezone.utc).astimezone(ZoneInfo('Africa/Lagos')):%d %b %H:%M} WAT · {count} drops"
     else:
-        status_text = "error"
-        summary_text = f"Connection error: {diag.get('error_type')}"
-
+        summary = "Waiting for live OpenSea data" if settings.OPENSEA_API_KEY else "OpenSea API key required"
     return SourceStatusResponse(
-        source_name="@lakzonevn",
-        status=status_text,
-        is_monitoring=is_monitoring,
-        last_sync_at=last_sync,
-        last_error=src.last_error if src else None,
-        drops_count=drops_count,
-        summary_text=summary_text,
+        source_name="OpenSea", status=status, is_monitoring=active,
+        last_sync_at=last_sync, last_error=source.last_error if source else None,
+        drops_count=count, summary_text=summary,
     )
 
 
 @router.post("/source/toggle")
 async def toggle_monitoring(
-    db: AsyncSession = Depends(get_db),
-    owner: str = Depends(verify_owner_authorization),
+    admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db),
 ):
-    """Toggles active background monitoring on or off."""
-    stmt = select(SourceConnection).where(SourceConnection.source_name == "lakzonevn")
-    src = (await db.execute(stmt)).scalar_one_or_none()
-    if src:
-        src.is_monitoring = not src.is_monitoring
-        is_mon = src.is_monitoring
-        await db.commit()
+    source = (await db.execute(select(SourceConnection).where(
+        SourceConnection.source_name == "opensea",
+    ))).scalar_one_or_none()
+    if source is None:
+        source = SourceConnection(source_name="opensea", source_type="api", status="needs_attention",
+                                  is_monitoring=False)
+        db.add(source)
     else:
-        is_mon = False
+        source.is_monitoring = not source.is_monitoring
+    await db.commit()
+    return {"is_monitoring": source.is_monitoring}
 
-    return {"is_monitoring": is_mon, "message": "Monitoring enabled" if is_mon else "Monitoring paused"}
 
-
-@router.get("/activity", response_model=List[ActivityEventSchema])
-async def list_activity(db: AsyncSession = Depends(get_db)):
-    """Returns activity journal events."""
-    stmt = select(ActivityEvent).order_by(ActivityEvent.event_time.desc()).limit(50)
-    events = (await db.execute(stmt)).scalars().all()
-
-    results = []
-    lagos_tz = ZoneInfo("Africa/Lagos")
-    for ev in events:
-        t_lagos = ev.event_time.astimezone(lagos_tz)
-        results.append(ActivityEventSchema(
-            id=ev.id,
-            event_type=ev.event_type,
-            label=ev.label,
-            detail=ev.detail,
-            icon_name=ev.icon_name,
-            is_demo=ev.is_demo,
-            event_time=ev.event_time,
-            formatted_time=t_lagos.strftime("%H:%M"),
-        ))
-    return results
+@router.get("/activity", response_model=list[ActivityEventSchema])
+async def list_activity(
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    events = (await db.execute(select(ActivityEvent).where(
+        ActivityEvent.is_demo.is_(False),
+        or_(ActivityEvent.user_id.is_(None), ActivityEvent.user_id == user.id),
+    ).order_by(ActivityEvent.event_time.desc()).limit(50))).scalars().all()
+    lagos = ZoneInfo("Africa/Lagos")
+    return [ActivityEventSchema(
+        id=event.id, event_type=event.event_type, label=event.label,
+        detail=event.detail, icon_name=event.icon_name, is_demo=False,
+        event_time=event.event_time,
+        formatted_time=event.event_time.replace(tzinfo=timezone.utc).astimezone(lagos).strftime("%H:%M"),
+    ) for event in events]

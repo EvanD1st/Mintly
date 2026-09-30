@@ -28,87 +28,13 @@ class _MainShellState extends ConsumerState<MainShell> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final bg = MintlyColors.getBg(isDark);
     final panel = MintlyColors.getPanel(isDark);
-    final ink = MintlyColors.getInk(isDark);
     final green = MintlyColors.getGreen(isDark);
     final muted = MintlyColors.getMuted(isDark);
     final line = MintlyColors.getLine(isDark);
-    final soft = MintlyColors.getSoft(isDark);
 
     return Scaffold(
       backgroundColor: bg,
-      appBar: PreferredSize(
-        preferredSize: const Size.fromHeight(64),
-        child: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                // Brand Wordmark + Logo
-                Row(
-                  children: [
-                    Container(
-                      width: 32,
-                      height: 32,
-                      decoration: BoxDecoration(
-                        color: green,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: const Center(
-                        child: Icon(Icons.adjust, size: 20, color: Colors.white),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    RichText(
-                      text: TextSpan(
-                        style: TextStyle(
-                          fontSize: 25,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: -1.0,
-                          color: ink,
-                          fontFamily: 'Roboto',
-                        ),
-                        children: [
-                          const TextSpan(text: 'mintly'),
-                          TextSpan(
-                            text: '.',
-                            style: TextStyle(color: green),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                // Jenny's Avatar
-                GestureDetector(
-                  onTap: () {
-                    setState(() => _currentIndex = 3); // switch to wallet tab
-                  },
-                  child: Container(
-                    width: 38,
-                    height: 38,
-                    decoration: BoxDecoration(
-                      color: soft,
-                      shape: BoxShape.circle,
-                      border: Border.all(color: line, width: 1),
-                    ),
-                    child: Center(
-                      child: Text(
-                        'J',
-                        style: TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600,
-                          color: ink,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
+      appBar: AppBar(toolbarHeight: 0),
       body: IndexedStack(
         index: _currentIndex,
         children: _screens,

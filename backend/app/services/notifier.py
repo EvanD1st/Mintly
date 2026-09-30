@@ -11,6 +11,7 @@ from sqlalchemy import select
 from app.config import settings
 from app.database import AsyncSessionLocal
 from app.models.activity import NotificationDevice
+from app.models.user import User
 
 logger = logging.getLogger("mintly.notifications")
 
@@ -43,6 +44,7 @@ class NotificationService:
         category: str = "daily_list",
         deep_link: Optional[str] = None,
         data: Optional[Dict[str, str]] = None,
+        user_id: Optional[str] = None,
     ) -> bool:
         """Send to opted-in devices; return True only if FCM accepted a message."""
         payload = {
@@ -69,7 +71,11 @@ class NotificationService:
 
         async with AsyncSessionLocal() as session:
             devices = (await session.execute(
-                select(NotificationDevice).where(NotificationDevice.is_active.is_(True))
+                select(NotificationDevice).join(User, User.id == NotificationDevice.user_id).where(
+                    NotificationDevice.is_active.is_(True), User.is_active.is_(True),
+                    User.deleted_at.is_(None),
+                    *((NotificationDevice.user_id == user_id,) if user_id else ()),
+                )
             )).scalars().all()
             for device in devices:
                 if not (device.preferences or {}).get(category, True):

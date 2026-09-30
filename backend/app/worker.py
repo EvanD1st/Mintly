@@ -12,6 +12,7 @@ from app.services.mint_executor import MintExecutor
 from app.services.signer.base import SignerPolicy, SEADROP_V1_ADDRESS
 from app.services.twikit_adapter import TwikitSourceAdapter
 from app.services.notifier import NotificationService
+from app.services.opensea_feed import sync_opensea_drops
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("mintly.worker")
@@ -250,13 +251,16 @@ class MintlyWorker:
                 await session.commit()
 
     async def run_discovery_poll(self, session):
-        """Polls for latest drops via Twikit."""
+        """Import actual OpenSea drops; never announce unpersisted previews."""
         try:
-            drops = await self.twikit.poll_latest_drops()
-            if drops:
-                # The diagnostic adapter only returns a short preview. Do not
-                # announce unpersisted rows or repeat the alert every poll.
-                logger.info("X returned a daily-list preview; manual import is required before notification")
+            added = await sync_opensea_drops(session)
+            if added:
+                await NotificationService.send_notification(
+                    title="New drops on OpenSea",
+                    body=f"{added} new drops are available to review.",
+                    category="daily_list",
+                    deep_link="mintly://drops",
+                )
         except Exception as e:
             logger.warning(f"Discovery poll failed: {e}")
 
@@ -277,8 +281,8 @@ class MintlyWorker:
                     # 2. Reconcile in-flight submitted tasks
                     await self.reconcile_pending_tasks(session)
 
-                    # 3. Periodic discovery poll every N loops
-                    if iteration % 12 == 0:  # ~every 60 seconds if loop sleep is 5s
+                    # 3. Refresh the real feed roughly every five minutes.
+                    if iteration % 60 == 0:
                         await self.run_discovery_poll(session)
 
                 iteration += 1

@@ -25,7 +25,7 @@ if [[ ! -f "$MINTLY_ENV_FILE" ]]; then
 import secrets, sys
 from pathlib import Path
 Path(sys.argv[1]).write_text(
-    'APP_ENV=production\nDEBUG=false\nSIGNER_MODE=demo\nALLOW_LIVE_BROADCAST=false\n'
+    'APP_ENV=production\nDEBUG=false\nSIGNER_MODE=disabled\nALLOW_LIVE_BROADCAST=false\n'
     'MINTLY_PORT=8095\nTIMEZONE=Africa/Lagos\n'
     f'APP_SECRET_KEY={secrets.token_hex(32)}\n'
     f'POSTGRES_PASSWORD={secrets.token_hex(32)}\n'
@@ -47,4 +47,4 @@ if [[ "$RELEASE_DIR" != "$APP_DIR" ]]; then
     ln -sfn "$RELEASE_DIR" "$APP_DIR/current"
 fi
 "${COMPOSE[@]}" ps
-echo "Mintly deployment healthy (demo mode)."
+echo "Mintly deployment healthy."

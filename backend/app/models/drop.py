@@ -22,11 +22,11 @@ class Drop(Base):
     icon_name: Mapped[str] = mapped_column(String(30), default="gem")
     
     # Drop-level summary status: 'eligible', 'manual', 'ineligible', 'unknown'
-    status_label: Mapped[str] = mapped_column(String(50), default="Presale eligible")
-    status_kind: Mapped[str] = mapped_column(String(20), default="eligible")  # 'eligible', 'manual', 'ineligible'
+    status_label: Mapped[str] = mapped_column(String(50), default="Unverified")
+    status_kind: Mapped[str] = mapped_column(String(20), default="unknown")
     
     # Verified execution support: True only if verified EVM SeaDrop contract exists
-    is_supported_integration: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_supported_integration: Mapped[bool] = mapped_column(Boolean, default=False)
     manual_notice: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     is_demo: Mapped[bool] = mapped_column(Boolean, default=False)
 

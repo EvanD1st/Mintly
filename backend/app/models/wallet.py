@@ -2,7 +2,7 @@
 
 import uuid
 from typing import List
-from sqlalchemy import String, Boolean, JSON
+from sqlalchemy import String, Boolean, JSON, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column
 from app.database import Base
 
@@ -11,6 +11,7 @@ class Wallet(Base):
     __tablename__ = "wallets"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), index=True, nullable=True)
     label: Mapped[str] = mapped_column(String(100), nullable=False)
     address: Mapped[str] = mapped_column(String(42), nullable=False, index=True)
     # signing_capability: 'watch_only', 'interactive', 'isolated_server_signer', 'demo'

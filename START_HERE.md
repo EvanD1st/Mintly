@@ -1,5 +1,8 @@
 # Mintly development handoff
 
+> Historical design handoff. The app has since been implemented and deployed.
+> Read [README.md](README.md) for the current account, wallet, and data behavior.
+
 1. Extract this folder into your project workspace.
 2. Open the workspace in Antigravity.
 3. Paste the contents of `Mintly_Antigravity_Prompt.md` into a new agent task and ask it to implement the project. Ensure the agent can read `design/mintly-splash-reference.html`.

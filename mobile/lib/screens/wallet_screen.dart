@@ -1,322 +1,178 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../theme/colors.dart';
 import '../state/app_state.dart';
 import '../services/push_service.dart';
+import 'admin_screen.dart';
 import 'import_screen.dart';
 
-class WalletScreen extends ConsumerWidget {
+class WalletScreen extends ConsumerStatefulWidget {
   const WalletScreen({super.key});
+  @override
+  ConsumerState<WalletScreen> createState() => _WalletScreenState();
+}
+
+class _WalletScreenState extends ConsumerState<WalletScreen> {
+  late Future<List<Map<String, dynamic>>> _wallets;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final state = ref.watch(mintlyProvider);
-    final notifier = ref.read(mintlyProvider.notifier);
+  void initState() {
+    super.initState();
+    _wallets = ref.read(apiServiceProvider).fetchWallets();
+  }
 
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final ink = MintlyColors.getInk(isDark);
-    final muted = MintlyColors.getMuted(isDark);
-    final green = MintlyColors.getGreen(isDark);
-    final line = MintlyColors.getLine(isDark);
-    final panel = MintlyColors.getPanel(isDark);
-    final soft = MintlyColors.getSoft(isDark);
+  void _refresh() => setState(() => _wallets = ref.read(apiServiceProvider).fetchWallets());
 
-    return ListView(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-      children: [
-        Text(
-          'JENNY’S SPACE',
-          style: TextStyle(
-            fontSize: 10,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 1.6,
-            color: muted,
-          ),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          'Wallet & preferences',
-          style: TextStyle(
-            fontSize: 28,
-            fontWeight: FontWeight.w700,
-            letterSpacing: -1.0,
-            color: ink,
-            height: 1.15,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          'Choose how you discover and prepare.',
-          style: TextStyle(fontSize: 13, color: muted),
-        ),
-        const SizedBox(height: 18),
-
-        OutlinedButton.icon(
-          icon: const Icon(Icons.cloud_outlined),
-          label: Text(ref.read(apiServiceProvider).isLiveBackendConnected
-              ? 'Disconnect server · use offline demo' : 'Connect to Mintly server'),
-          onPressed: () async {
-            final api = ref.read(apiServiceProvider);
-            if (api.isLiveBackendConnected) {
-              try { await PushService.instance.disconnect(); } catch (_) {}
-              api.disconnectBackend();
-              await notifier.loadInitialData();
-              return;
+  Future<void> _pair() async {
+    try {
+      final api = ref.read(apiServiceProvider);
+      final pairing = await api.startWalletPairing();
+      if (!mounted) return;
+      final id = pairing['pairing_id'] as String;
+      bool polling = false;
+      final timer = Timer.periodic(const Duration(seconds: 3), (_) async {
+        if (polling || !mounted) return;
+        polling = true;
+        try {
+          final result = await api.walletPairingStatus(id);
+          if (!mounted) return;
+          if (result['status'] == 'linked') {
+            Navigator.of(context, rootNavigator: true).pop();
+            _refresh();
+            await ref.read(mintlyProvider.notifier).loadInitialData();
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('MetaMask address linked.')));
             }
-            final token = await showDialog<String>(
-              context: context,
-              builder: (_) => const _ServerTokenDialog(),
-            );
-            if (token == null) return;
-            try {
-              await api.connectBackend(token);
-              bool notificationsReady = false;
-              try {
-                notificationsReady = await PushService.instance.connect(api);
-              } catch (error) {
-                debugPrint('Push registration failed: $error');
-              }
-              await notifier.loadInitialData();
-              if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                  content: Text(notificationsReady
-                    ? 'Connected. Notifications enabled; minting remains in demo mode.'
-                    : 'Connected. Notifications need Firebase setup or permission; minting remains in demo mode.'),
-                ));
-              }
-            } catch (error) {
-              api.disconnectBackend();
-              await notifier.loadInitialData();
-              if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$error')));
-              }
+          } else if (result['status'] == 'expired') {
+            Navigator.of(context, rootNavigator: true).pop();
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Pairing code expired. Try again.')));
             }
-          },
-        ),
-        const SizedBox(height: 12),
+          }
+        } catch (_) {
+          // The next poll may succeed after a brief network interruption.
+        } finally { polling = false; }
+      });
+      await showDialog<void>(context: context, builder: (context) => AlertDialog(
+        title: const Text('Connect MetaMask on your PC'),
+        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Open this address in the browser where MetaMask is installed:'),
+            const SizedBox(height: 8),
+            SelectableText(pairing['connect_url'] as String),
+            const SizedBox(height: 18),
+            const Text('Enter this one-time code there:'),
+            const SizedBox(height: 8),
+            SelectableText(pairing['code'] as String,
+              style: const TextStyle(fontSize: 21, fontFamily: 'monospace', fontWeight: FontWeight.bold)),
+            const SizedBox(height: 12),
+            const Text('Expires in 5 minutes. Sign only the readable linking message. Never enter a recovery phrase.'),
+          ]),
+        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))],
+      ));
+      timer.cancel();
+    } catch (error) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$error')));
+    }
+  }
 
-        // Wallet Card
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: panel,
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: line, width: 1),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    "Jenny’s wallet",
-                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: ink),
-                  ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: soft,
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Text(
-                      'Demo',
-                      style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: green),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 6),
-              Text(
-                'Sample wallet · no account connected',
-                style: TextStyle(fontSize: 12, color: muted),
-              ),
-              const SizedBox(height: 12),
-              Container(height: 1, color: line),
-              const SizedBox(height: 12),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text('Mint signing', style: TextStyle(fontSize: 12, color: muted)),
-                  Text(
-                    'Preview only',
-                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: muted),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 14),
-
-        // Discovery Preferences Panel
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: panel,
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: line, width: 1),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Discovery',
-                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: ink),
-              ),
-              const SizedBox(height: 12),
-              // Switch 1: Monitor @lakzonevn
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Monitor @lakzonevn', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: ink)),
-                      const SizedBox(height: 2),
-                      Text(
-                        state.isMonitoring ? 'Last checked 17:02' : 'Monitoring paused',
-                        style: TextStyle(fontSize: 11, color: muted),
-                      ),
-                    ],
-                  ),
-                  Switch(
-                    value: state.isMonitoring,
-                    activeThumbColor: green,
-                    onChanged: (val) {
-                      notifier.toggleMonitoring();
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(val ? 'Demo monitoring enabled.' : 'Demo monitoring paused.'),
-                          duration: const Duration(seconds: 2),
-                        ),
-                      );
-                    },
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              // Switch 2: Daily list notifications
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text('Daily list notifications', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: ink)),
-                  ValueListenableBuilder<PushPreferences>(
-                    valueListenable: PushService.instance.preferences,
-                    builder: (context, prefs, _) => Switch(
-                      value: prefs.dailyList, activeThumbColor: green,
-                      onChanged: (value) async {
-                        try {
-                          await PushService.instance.setPreferences(dailyList: value);
-                        } catch (error) {
-                          if (context.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text('$error')));
-                          }
-                        }
-                      },
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              // Switch 3: Mint status notifications
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text('Mint status notifications', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: ink)),
-                  ValueListenableBuilder<PushPreferences>(
-                    valueListenable: PushService.instance.preferences,
-                    builder: (context, prefs, _) => Switch(
-                      value: prefs.mintStatus, activeThumbColor: green,
-                      onChanged: (value) async {
-                        try {
-                          await PushService.instance.setPreferences(mintStatus: value);
-                        } catch (error) {
-                          if (context.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text('$error')));
-                          }
-                        }
-                      },
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 14),
-
-        // Time Zone Panel
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: panel,
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: line, width: 1),
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text('Time zone', style: TextStyle(fontSize: 13, color: ink)),
-              Text('WAT · Lagos', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: ink)),
-            ],
-          ),
-        ),
-        const SizedBox(height: 20),
-
-        // Manual Import Button
-        OutlinedButton(
-          onPressed: () {
-            Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const ImportScreen()),
-            );
-          },
-          child: const Text('Import a mint list manually'),
-        ),
-        const SizedBox(height: 12),
-
-        Text(
-          'Automatic discovery can pause if the X connection needs attention. Manual import stays available.',
-          style: TextStyle(fontSize: 11, color: muted, height: 1.4),
-        ),
-        const SizedBox(height: 24),
+  Future<void> _unlink(Map<String, dynamic> wallet) async {
+    final confirmed = await showDialog<bool>(context: context, builder: (context) => AlertDialog(
+      title: const Text('Unlink wallet?'),
+      content: const Text('This removes the public address from your account. Your MetaMask wallet and funds are unaffected.'),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+        TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Unlink')),
       ],
-    );
-  }
-}
-
-class _ServerTokenDialog extends StatefulWidget {
-  const _ServerTokenDialog();
-  @override
-  State<_ServerTokenDialog> createState() => _ServerTokenDialogState();
-}
-
-class _ServerTokenDialogState extends State<_ServerTokenDialog> {
-  final _token = TextEditingController();
-  @override
-  void dispose() {
-    _token.dispose();
-    super.dispose();
+    ));
+    if (confirmed != true) return;
+    try {
+      await ref.read(apiServiceProvider).unlinkWallet(wallet['id'] as String);
+      _refresh();
+      await ref.read(mintlyProvider.notifier).loadInitialData();
+    } catch (error) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$error')));
+    }
   }
 
   @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: const Text('Connect to Mintly'),
-    content: TextField(
-      controller: _token,
-      obscureText: true,
-      autocorrect: false,
-      enableSuggestions: false,
-      decoration: const InputDecoration(
-        labelText: 'Server access token',
-        helperText: 'Kept only for this app session.',
-      ),
-    ),
-    actions: [
-      TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-      TextButton(onPressed: () => Navigator.pop(context, _token.text), child: const Text('Connect')),
-    ],
-  );
+  Widget build(BuildContext context) {
+    final api = ref.watch(apiServiceProvider);
+    final state = ref.watch(mintlyProvider);
+    final ink = Theme.of(context).colorScheme.onSurface;
+    final muted = ink.withValues(alpha: 0.65);
+    return ListView(padding: const EdgeInsets.fromLTRB(20, 12, 20, 32), children: [
+      Text('Wallet & account', style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: ink)),
+      const SizedBox(height: 4),
+      Text('Signed in as ${api.username}', style: TextStyle(color: muted)),
+      const SizedBox(height: 20),
+      Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Text('MetaMask wallets', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600, color: ink)),
+          const SizedBox(height: 8),
+          const Text('Link an address with a message signature on your PC. Mintly never receives a seed phrase or private key.'),
+          FutureBuilder<List<Map<String, dynamic>>>(future: _wallets, builder: (context, snapshot) {
+            if (!snapshot.hasData) {
+              if (snapshot.hasError) return Text('${snapshot.error}');
+              return const Padding(padding: EdgeInsets.all(12), child: Center(child: CircularProgressIndicator()));
+            }
+            if (snapshot.data!.isEmpty) {
+              return const Padding(padding: EdgeInsets.symmetric(vertical: 12),
+                child: Text('No wallet linked yet.'));
+            }
+            return Column(children: [for (final wallet in snapshot.data!) ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.account_balance_wallet_outlined),
+              title: Text(wallet['label'] as String? ?? 'MetaMask'),
+              subtitle: SelectableText(wallet['address'] as String),
+              trailing: IconButton(onPressed: () => _unlink(wallet), icon: const Icon(Icons.link_off),
+                tooltip: 'Unlink wallet'),
+            )]);
+          }),
+          FilledButton.icon(onPressed: _pair, icon: const Icon(Icons.link),
+            label: const Text('Connect MetaMask')),
+        ],
+      ))),
+      const SizedBox(height: 14),
+      Card(child: ListTile(leading: const Icon(Icons.public), title: const Text('Live source'),
+        subtitle: Text(state.sourceStatusText))),
+      const SizedBox(height: 14),
+      Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(children: [
+        ValueListenableBuilder<PushPreferences>(valueListenable: PushService.instance.preferences,
+          builder: (context, prefs, _) => SwitchListTile(
+            title: const Text('New drop notifications'), value: prefs.dailyList,
+            onChanged: (value) async {
+              try { await PushService.instance.setPreferences(dailyList: value); }
+              catch (error) { if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$error'))); }
+            },
+          )),
+        ValueListenableBuilder<PushPreferences>(valueListenable: PushService.instance.preferences,
+          builder: (context, prefs, _) => SwitchListTile(
+            title: const Text('Mint status notifications'), value: prefs.mintStatus,
+            onChanged: (value) async {
+              try { await PushService.instance.setPreferences(mintStatus: value); }
+              catch (error) { if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$error'))); }
+            },
+          )),
+      ]))),
+      if (api.isAdmin) ...[
+        const SizedBox(height: 14),
+        OutlinedButton.icon(onPressed: () => Navigator.push(context,
+          MaterialPageRoute(builder: (_) => const AdminScreen())),
+          icon: const Icon(Icons.admin_panel_settings_outlined), label: const Text('Manage accounts')),
+        OutlinedButton.icon(onPressed: () => Navigator.push(context,
+          MaterialPageRoute(builder: (_) => const ImportScreen())),
+          icon: const Icon(Icons.add_link), label: const Text('Import a mint link')),
+      ],
+      const SizedBox(height: 18),
+      OutlinedButton.icon(onPressed: () async {
+        final notifier = ref.read(mintlyProvider.notifier);
+        try { await PushService.instance.disconnect(); } catch (_) {}
+        await api.logout();
+        await notifier.loadInitialData();
+      }, icon: const Icon(Icons.logout), label: const Text('Sign out')),
+    ]);
+  }
 }

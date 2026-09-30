@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Connect MetaMask · Mintly</title>
+  <style>
+    :root{color-scheme:dark;font-family:system-ui,sans-serif;background:#101713;color:#e5f8e2}
+    body{margin:0;padding:32px 16px;display:grid;place-items:center;min-height:100vh;box-sizing:border-box}
+    main{width:min(440px,100%);background:#19231c;border:1px solid #3d5542;border-radius:20px;padding:28px;box-sizing:border-box}
+    h1{font-size:27px;margin:0 0 12px}p{line-height:1.5;color:#c4d5c2}
+    label{display:block;margin:24px 0 8px;font-weight:600}input,button{font:inherit;box-sizing:border-box;width:100%;padding:13px;border-radius:10px}
+    input{color:#fff;background:#101713;border:1px solid #80a984;letter-spacing:2px}
+    button{margin-top:16px;background:#b5eea3;color:#101713;border:0;font-weight:700;cursor:pointer}
+    button:disabled{opacity:.6;cursor:wait}.warning{border-left:3px solid #b5eea3;padding-left:12px}
+    #status{min-height:24px;overflow-wrap:anywhere}
+  </style>
+  <script src="/connect.js" defer></script>
+</head>
+<body><main>
+  <h1>Connect MetaMask</h1>
+  <p>On the Mintly app, tap <strong>Connect MetaMask</strong>, then enter its one-time code here on the PC where your MetaMask extension is logged in.</p>
+  <p class="warning">Only approve a readable message from <strong>mintly.duckdns.org</strong>. This step links your public address. Never enter your recovery phrase or approve a transaction to connect.</p>
+  <form id="pair-form">
+    <label for="code">One-time code</label>
+    <input id="code" autocomplete="off" spellcheck="false" maxlength="19" placeholder="abcd-1234-ef56-7890" required>
+    <button id="connect" type="submit">Connect and sign message</button>
+  </form>
+  <p id="status" role="status" aria-live="polite"></p>
+</main></body></html>

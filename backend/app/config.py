@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     APP_ENV: str = "development"
     DEBUG: bool = True
     APP_SECRET_KEY: str = "mintly-dev-secret-key-must-be-changed-in-production-12345"
+    PUBLIC_URL: str = "https://mintly.duckdns.org"
 
     SERVER_HOST: str = "0.0.0.0"
     SERVER_PORT: int = 8000
@@ -38,7 +39,7 @@ class Settings(BaseSettings):
     OPENSEA_API_KEY: Optional[str] = None
 
     # Signer Boundary
-    SIGNER_MODE: str = "demo"  # 'demo' or 'isolated_server_signer'
+    SIGNER_MODE: str = "disabled"  # legacy signer code is not exposed to MetaMask users
     SIGNER_PRIVATE_KEY: Optional[str] = None
     ALLOW_LIVE_BROADCAST: bool = False
     CORS_ORIGINS: list[str] = []
