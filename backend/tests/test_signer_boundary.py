@@ -17,7 +17,7 @@ def base_policy():
         max_price_per_token_wei=200_000_000_000_000,  # 0.0002 ETH
         max_fee_wei=100_000_000_000_000,             # 0.0001 ETH
         total_spend_cap_wei=500_000_000_000_000,     # 0.0005 ETH (400k mint + 100k fee)
-        stage_name="Allowlist",
+        stage_name="Public",
     )
 
 
@@ -57,6 +57,7 @@ def test_signer_policy_rejects_chain_mismatch(base_policy):
         quantity=2,
     )
     bad_tx = {
+        "from": base_policy.authorized_minter,
         "to": base_policy.allowed_seadrop_contract,
         "value": 400_000_000_000_000,
         "data": calldata,
@@ -78,6 +79,7 @@ def test_signer_policy_rejects_target_mismatch(base_policy):
         quantity=2,
     )
     bad_tx = {
+        "from": base_policy.authorized_minter,
         "to": "0x9999999999999999999999999999999999999999",  # Arbitrary contract!
         "value": 400_000_000_000_000,
         "data": calldata,
@@ -99,6 +101,7 @@ def test_signer_policy_rejects_excessive_value(base_policy):
         quantity=2,
     )
     bad_tx = {
+        "from": base_policy.authorized_minter,
         "to": base_policy.allowed_seadrop_contract,
         "value": 900_000_000_000_000,  # Exceeds authorized mint spend cap (400k)
         "data": calldata,
@@ -121,6 +124,7 @@ def test_signer_policy_rejects_calldata_tampering(base_policy):
         quantity=5,  # Tampered quantity!
     )
     bad_tx = {
+        "from": base_policy.authorized_minter,
         "to": base_policy.allowed_seadrop_contract,
         "value": 400_000_000_000_000,
         "data": tampered_calldata,

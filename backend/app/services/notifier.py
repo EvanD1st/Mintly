@@ -1,17 +1,39 @@
-"""Notification Service for Mintly."""
+"""Firebase Cloud Messaging delivery for registered Mintly devices."""
 
-from datetime import datetime, timezone
+import asyncio
 import logging
-from typing import Dict, Any, Optional
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Dict, Optional
+
+from sqlalchemy import select
+
 from app.config import settings
+from app.database import AsyncSessionLocal
+from app.models.activity import NotificationDevice
 
 logger = logging.getLogger("mintly.notifications")
 
 
 class NotificationService:
-    """Manages FCM push notifications and local notification logging."""
-
     _logged_notifications = []
+    _firebase_app = None
+
+    @classmethod
+    def _get_firebase_app(cls):
+        if cls._firebase_app is not None:
+            return cls._firebase_app
+        path = settings.FIREBASE_CREDENTIALS_FILE
+        if not path or not Path(path).is_file():
+            logger.warning("FCM is unavailable: Firebase credentials file is not configured.")
+            return None
+        import firebase_admin
+        from firebase_admin import credentials
+
+        cls._firebase_app = firebase_admin.initialize_app(
+            credentials.Certificate(path), name="mintly-fcm"
+        )
+        return cls._firebase_app
 
     @classmethod
     async def send_notification(
@@ -22,7 +44,7 @@ class NotificationService:
         deep_link: Optional[str] = None,
         data: Optional[Dict[str, str]] = None,
     ) -> bool:
-        """Sends a notification to registered devices or logs to sink."""
+        """Send to opted-in devices; return True only if FCM accepted a message."""
         payload = {
             "title": title,
             "body": body,
@@ -30,21 +52,44 @@ class NotificationService:
             "deep_link": deep_link,
             "data": data or {},
             "timestamp": datetime.now(timezone.utc).isoformat(),
+            "delivered": 0,
         }
-
-        # Always record in local sink for audit and tests
         cls._logged_notifications.append(payload)
-        logger.info(f"[NOTIFICATION SINK] [{category.upper()}] {title} - {body} (Deep Link: {deep_link})")
+        cls._logged_notifications = cls._logged_notifications[-100:]
 
-        # If Firebase credentials configured, send to FCM
-        if settings.FIREBASE_CREDENTIALS_FILE:
-            try:
-                # Optional FCM dispatch
-                pass
-            except Exception as e:
-                logger.warning(f"FCM delivery error: {e}")
+        try:
+            app = cls._get_firebase_app()
+        except Exception:
+            logger.exception("FCM initialization failed")
+            return False
+        if app is None:
+            return False
 
-        return True
+        from firebase_admin import messaging
+
+        async with AsyncSessionLocal() as session:
+            devices = (await session.execute(
+                select(NotificationDevice).where(NotificationDevice.is_active.is_(True))
+            )).scalars().all()
+            for device in devices:
+                if not (device.preferences or {}).get(category, True):
+                    continue
+                message = messaging.Message(
+                    token=device.device_token,
+                    notification=messaging.Notification(title=title, body=body),
+                    data={**(data or {}), "category": category, "deep_link": deep_link or ""},
+                    android=messaging.AndroidConfig(priority="high"),
+                )
+                try:
+                    await asyncio.to_thread(messaging.send, message, app=app)
+                    payload["delivered"] += 1
+                except messaging.UnregisteredError:
+                    device.is_active = False
+                    logger.info("Deactivated an unregistered FCM token")
+                except Exception:
+                    logger.exception("FCM delivery failed for a registered device")
+            await session.commit()
+        return payload["delivered"] > 0
 
     @classmethod
     def get_recent_notifications(cls):

@@ -162,7 +162,7 @@ class DropPostParser:
                         "price_wei": wl_wei,
                         "price_eth_str": format_wei_to_eth(wl_wei),
                         "limit_per_wallet": 3,
-                        "eligibility_status": "eligible",
+                        "eligibility_status": "unknown",
                     })
                 if pub_match:
                     pub_price_str = pub_match.group(1)
@@ -175,7 +175,7 @@ class DropPostParser:
                         "price_wei": pub_wei,
                         "price_eth_str": format_wei_to_eth(pub_wei),
                         "limit_per_wallet": 5,
-                        "eligibility_status": "eligible",
+                        "eligibility_status": "unknown",
                     })
             else:
                 # Single price pattern: "Price: 0.0008 ETH"
@@ -194,7 +194,7 @@ class DropPostParser:
                     "price_wei": price_wei,
                     "price_eth_str": price_display,
                     "limit_per_wallet": 1,
-                    "eligibility_status": "eligible",
+                    "eligibility_status": "unknown",
                 })
 
             # Determine icon based on name
@@ -208,9 +208,10 @@ class DropPostParser:
                 icon = "gem"
 
             # Determine integration support
-            is_supported = ("opensea.io" in mint_url.lower())
-            status_kind = "eligible" if is_supported else "manual"
-            status_label = "Presale eligible" if any(s["stage_name"] == "Allowlist" for s in stages) else ("Public stage" if is_supported else "Manual check")
+            # A URL in a post is not proof of a SeaDrop integration or wallet eligibility.
+            is_supported = False
+            status_kind = "manual"
+            status_label = "Manual check"
 
             drops.append({
                 "name": raw_name,
@@ -222,7 +223,7 @@ class DropPostParser:
                 "status_label": status_label,
                 "status_kind": status_kind,
                 "is_supported_integration": is_supported,
-                "manual_notice": None if is_supported else "This project's eligibility checker isn't supported yet.",
+                "manual_notice": "Imported post has not been verified against contract metadata.",
                 "stages": stages,
             })
 

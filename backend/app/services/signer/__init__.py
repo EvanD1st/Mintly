@@ -5,7 +5,6 @@ from app.services.signer.base import (
     SignerBoundaryException,
     SEADROP_V1_ADDRESS,
     MINT_PUBLIC_SELECTOR,
-    MINT_ALLOWLIST_SELECTOR,
 )
 from app.services.signer.local_signer import LocalServerSigner
 from app.services.signer.mock_signer import MockSigner
@@ -15,7 +14,6 @@ __all__ = [
     "SignerBoundaryException",
     "SEADROP_V1_ADDRESS",
     "MINT_PUBLIC_SELECTOR",
-    "MINT_ALLOWLIST_SELECTOR",
     "LocalServerSigner",
     "MockSigner",
 ]

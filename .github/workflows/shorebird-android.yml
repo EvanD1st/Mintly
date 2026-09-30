@@ -1,0 +1,112 @@
+name: Mintly Android Shorebird
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'mobile/lib/**'
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Create a new native release or patch an installed release
+        type: choice
+        options: [release, patch]
+        required: true
+      release_version:
+        description: Existing Shorebird version to patch (for example 1.0.0+1)
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  shorebird:
+    if: github.event_name == 'workflow_dispatch' || vars.MINTLY_SHOREBIRD_RELEASE_READY == 'true'
+    runs-on: ubuntu-24.04
+    concurrency:
+      group: mintly-shorebird-android
+      cancel-in-progress: false
+    env:
+      SHOREBIRD_TOKEN: ${{ secrets.SHOREBIRD_TOKEN }}
+      GOOGLE_SERVICES_B64: ${{ secrets.MINTLY_GOOGLE_SERVICES_JSON_B64 }}
+      KEYSTORE_B64: ${{ secrets.MINTLY_ANDROID_KEYSTORE_B64 }}
+      MINTLY_KEYSTORE_PASSWORD: ${{ secrets.MINTLY_KEYSTORE_PASSWORD }}
+      MINTLY_KEY_PASSWORD: ${{ secrets.MINTLY_KEY_PASSWORD }}
+      MINTLY_KEY_ALIAS: ${{ secrets.MINTLY_KEY_ALIAS }}
+      RELEASE_VERSION: ${{ inputs.release_version || vars.MINTLY_SHOREBIRD_RELEASE_VERSION }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 2
+      - name: Check patch scope
+        id: scope
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          OPERATION: ${{ inputs.operation }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT_NAME" == push ]]; then
+            if git diff --name-only "$BEFORE" "$GITHUB_SHA" -- mobile | grep -Ev '^mobile/lib/'; then
+              echo 'Native, asset, or dependency changes require a new Shorebird release.'
+              echo 'skip=true' >> "$GITHUB_OUTPUT"
+            fi
+          fi
+      - name: Require release credentials and Firebase registration
+        if: steps.scope.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          : "${SHOREBIRD_TOKEN:?Missing SHOREBIRD_TOKEN}"
+          : "${GOOGLE_SERVICES_B64:?Missing MINTLY_GOOGLE_SERVICES_JSON_B64}"
+          : "${KEYSTORE_B64:?Missing MINTLY_ANDROID_KEYSTORE_B64}"
+          : "${MINTLY_KEYSTORE_PASSWORD:?Missing MINTLY_KEYSTORE_PASSWORD}"
+          : "${MINTLY_KEY_PASSWORD:?Missing MINTLY_KEY_PASSWORD}"
+          : "${MINTLY_KEY_ALIAS:?Missing MINTLY_KEY_ALIAS}"
+          install -m 700 -d "$RUNNER_TEMP/mintly-signing"
+          printf '%s' "$GOOGLE_SERVICES_B64" | base64 --decode > mobile/android/app/google-services.json
+          printf '%s' "$KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/mintly-signing/release.jks"
+          chmod 600 mobile/android/app/google-services.json "$RUNNER_TEMP/mintly-signing/release.jks"
+          echo "MINTLY_KEYSTORE_PATH=$RUNNER_TEMP/mintly-signing/release.jks" >> "$GITHUB_ENV"
+          python - <<'PY'
+          import json
+          data = json.load(open('mobile/android/app/google-services.json', encoding='utf-8'))
+          clients = data.get('client', [])
+          assert any(c.get('client_info', {}).get('android_client_info', {}).get('package_name') == 'com.mintly.mintly' for c in clients), 'Firebase config is not registered for Mintly'
+          PY
+      - uses: subosito/flutter-action@v2
+        if: steps.scope.outputs.skip != 'true'
+        with:
+          flutter-version: '3.44.8'
+          channel: stable
+          cache: true
+      - name: Test Flutter app
+        if: steps.scope.outputs.skip != 'true'
+        working-directory: mobile
+        run: |
+          flutter pub get
+          flutter analyze
+          flutter test
+      - name: Install Shorebird
+        if: steps.scope.outputs.skip != 'true'
+        run: |
+          curl --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/shorebirdtech/install/main/install.sh -sSf | bash
+          echo "$HOME/.shorebird/bin" >> "$GITHUB_PATH"
+      - name: Create signed Android release
+        if: steps.scope.outputs.skip != 'true' && inputs.operation == 'release'
+        working-directory: mobile
+        run: shorebird --json release android --artifact apk --flutter-version 3.44.8
+      - name: Publish Dart patch
+        if: steps.scope.outputs.skip != 'true' && (github.event_name == 'push' || inputs.operation == 'patch')
+        working-directory: mobile
+        run: |
+          : "${RELEASE_VERSION:?Set MINTLY_SHOREBIRD_RELEASE_VERSION or dispatch with release_version}"
+          shorebird --json patch android --release-version "$RELEASE_VERSION"
+      - name: Upload signed installer
+        if: steps.scope.outputs.skip != 'true' && inputs.operation == 'release'
+        uses: actions/upload-artifact@v4
+        with:
+          name: mintly-shorebird-android
+          path: mobile/build/app/outputs/flutter-apk/*.apk
+          if-no-files-found: error
+          retention-days: 14

@@ -73,10 +73,12 @@ def test_daily_list_parsing_full():
     assert d1["name"] == "Orbit Bloom"
     assert d1["chain"] == "Base"
     assert d1["chain_id"] == 8453
-    assert d1["is_supported_integration"] is True
+    assert d1["is_supported_integration"] is False
+    assert d1["status_kind"] == "manual"
     assert len(d1["stages"]) == 2
     assert d1["stages"][0]["stage_name"] == "Allowlist"
     assert d1["stages"][0]["price_wei"] == 200_000_000_000_000
+    assert d1["stages"][0]["eligibility_status"] == "unknown"
     assert d1["stages"][1]["stage_name"] == "Public"
 
     # Check Drop 2 (Paper Planets)
@@ -84,7 +86,7 @@ def test_daily_list_parsing_full():
     assert d2["name"] == "Paper Planets"
     assert d2["chain"] == "Ethereum"
     assert d2["chain_id"] == 1
-    assert d2["is_supported_integration"] is True
+    assert d2["is_supported_integration"] is False
     assert d2["stages"][0]["price_wei"] == 800_000_000_000_000
 
     # Check Drop 3 (Midnight Club - independent site)
@@ -92,4 +94,4 @@ def test_daily_list_parsing_full():
     assert d3["name"] == "Midnight Club"
     assert d3["is_supported_integration"] is False
     assert d3["status_kind"] == "manual"
-    assert "manual" in d3["manual_notice"].lower() or "supported" in d3["manual_notice"].lower()
+    assert "verified" in d3["manual_notice"].lower()

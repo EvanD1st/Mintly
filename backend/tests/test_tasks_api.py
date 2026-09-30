@@ -22,22 +22,22 @@ def override_db(test_db):
 async def test_draft_task_recalculation(test_db):
     """Verifies fee recalculation and spending limit itemization."""
     transport = ASGITransport(app=app)
+    wallet_id = (await test_db.execute(select(Wallet.id))).scalar_one()
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         res = await ac.post("/api/tasks/draft", json={
-            "wallet_id": "dummy",
+            "wallet_id": wallet_id,
             "drop_id": "orbit",
-            "stage_id": "orbit-wl",
+            "stage_id": "orbit-pub",
             "quantity": 2,
             "fee_cap_eth": "0.0001",
         })
         assert res.status_code == 200
         data = res.json()
         assert data["quantity"] == 2
-        assert data["mint_price_each_eth"] == "0.0002"
+        assert data["mint_price_each_eth"] == "0.0004"
         assert data["fee_cap_eth"] == "0.0001"
-        # Total cap: 2 * 0.0002 + 0.0001 = 0.0005 ETH
-        assert data["total_spend_cap_eth"] == "0.0005"
-        assert data["total_spend_cap_wei"] == 500_000_000_000_000
+        assert data["total_spend_cap_eth"] == "0.0009"
+        assert data["total_spend_cap_wei"] == 900_000_000_000_000
         assert data["is_signer_ready"] is True
 
 
@@ -45,12 +45,13 @@ async def test_draft_task_recalculation(test_db):
 async def test_arm_and_disarm_task_lifecycle(test_db):
     """Verifies that arming creates a durable task and disarming safely cancels it."""
     transport = ASGITransport(app=app)
+    wallet_id = (await test_db.execute(select(Wallet.id))).scalar_one()
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         # Arm task
         arm_res = await ac.post("/api/tasks/arm", json={
-            "wallet_id": "dummy",
+            "wallet_id": wallet_id,
             "drop_id": "orbit",
-            "stage_id": "orbit-wl",
+            "stage_id": "orbit-pub",
             "quantity": 1,
             "fee_cap_eth": "0.0001",
             "user_consent_confirmed": True,
@@ -94,5 +95,5 @@ async def test_disarm_race_protection_on_submitted_task(test_db):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         res = await ac.post(f"/api/tasks/{task.id}/disarm")
-        assert res.status_code == 400
+        assert res.status_code == 409
         assert "cannot be canceled" in res.json()["detail"]

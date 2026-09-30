@@ -1,0 +1,51 @@
+# Mintly Android updates and notifications
+
+Mintly has its own Shorebird app ID in `mobile/shorebird.yaml`. It uses the
+existing Firebase project `marketmind-f16d2`, with a distinct Android app
+registration for package `com.mintly.mintly`. The MarketMind Android package
+cannot substitute for this registration.
+
+The Android build reads `mobile/android/app/google-services.json`. This file is
+ignored by Git. GitHub Actions receives it through the
+`MINTLY_GOOGLE_SERVICES_JSON_B64` repository secret. The backend and worker
+read a Firebase service account from
+`~/Mintly/shared/firebase-service-account.json` on Ubuntu. The deploy script
+mounts that file read-only if present. No Firebase private key belongs in Git.
+
+The app asks for notification permission after connecting to the Mintly server,
+registers its FCM token, and refreshes that registration if FCM rotates it.
+The notification switches save per-device preferences to the backend.
+Disconnecting deactivates that device token. The worker and manual-import API
+send FCM messages to active, opted-in devices; invalid tokens are deactivated.
+Foreground messages appear as a snack bar; Android displays background
+notification payloads. The server only reports delivery when FCM accepts a
+message, which is distinct from proof that a phone displayed it.
+
+The signed Android installer must be created by Shorebird and installed once.
+`flutter build apk` does not include Shorebird's update runtime. After that,
+Shorebird checks for patches when the app starts and applies a downloaded patch
+on a subsequent launch. Patches can change Dart code. Firebase plugin, Android
+configuration, native code, and asset changes require a new signed installer.
+
+`.github/workflows/shorebird-android.yml` has a manual **release** operation
+and an automatic Dart patch path. The release job requires these repository
+secrets: `SHOREBIRD_TOKEN`, `MINTLY_GOOGLE_SERVICES_JSON_B64`,
+`MINTLY_ANDROID_KEYSTORE_B64`, `MINTLY_KEYSTORE_PASSWORD`,
+`MINTLY_KEY_PASSWORD`, and `MINTLY_KEY_ALIAS`. After an installer has been
+distributed, set repository variables `MINTLY_SHOREBIRD_RELEASE_VERSION` to
+its exact version (for example `1.0.0+1`) and
+`MINTLY_SHOREBIRD_RELEASE_READY` to `true`. Only then will a push to
+`mobile/lib/` attempt a patch. The job checks for Android, iOS, asset, and
+dependency changes in the same push and skips the patch when they are present.
+Shorebird itself also rejects native differences.
+
+To verify push end to end, install the signed Shorebird APK on an Android
+device, connect the app to `https://mintly.duckdns.org` with the owner token,
+grant notification permission, and import a sample list through the app. The
+device should receive a "New Drops Imported" notification; foreground and
+background delivery should each be checked. The release key and its signing
+metadata are stored outside this repository under `C:\Users\USER\.ssh` and
+must be backed up for future installers.
+
+Live automatic minting remains disabled in production. Imported social posts
+and OpenSea URLs are not treated as eligibility proof or verified integrations.

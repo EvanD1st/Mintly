@@ -13,13 +13,8 @@ SEADROP_V1_ADDRESS = "0x00005EA00Ac477B1030CE78506496e8C2dE24bf5"
 MINT_PUBLIC_SIG = "mintPublic(address,address,address,uint256)"
 MINT_PUBLIC_SELECTOR = function_signature_to_4byte_selector(MINT_PUBLIC_SIG).hex()
 
-# mintAllowList(address nftContract, address feeRecipient, address minterIfNotPayer, uint256 quantity, (bytes32[],uint256,uint256,uint256,bytes))
-MINT_ALLOWLIST_SIG = "mintAllowList(address,address,address,uint256,(bytes32[],uint256,uint256,uint256,bytes))"
-MINT_ALLOWLIST_SELECTOR = function_signature_to_4byte_selector(MINT_ALLOWLIST_SIG).hex()
-
 ALLOWED_SELECTORS = {
     f"0x{MINT_PUBLIC_SELECTOR}": "mintPublic",
-    f"0x{MINT_ALLOWLIST_SELECTOR}": "mintAllowList",
 }
 
 
@@ -66,6 +61,11 @@ class SignerPolicy:
             raise SignerBoundaryException(
                 f"Chain ID mismatch: transaction has {tx_chain_id}, authorized for {self.chain_id}."
             )
+
+        if self.stage_name.lower() not in ("public", "public stage"):
+            raise SignerBoundaryException("Only a verified public stage may use mintPublic calldata.")
+        if to_checksum_address(tx.get("from", "")) != self.authorized_minter:
+            raise SignerBoundaryException("Transaction sender does not match authorized minter.")
 
         # 2. Target Contract Verification (must be canonical SeaDrop)
         to_address = to_checksum_address(tx.get("to", ""))
@@ -127,13 +127,13 @@ class SignerPolicy:
                         f"Calldata quantity {quantity} does not match authorized quantity {self.authorized_quantity}."
                     )
 
-                # Validate recipient
-                if minter_if_not_payer != "0x0000000000000000000000000000000000000000":
-                    recipient_cs = to_checksum_address(minter_if_not_payer)
-                    if recipient_cs != self.authorized_recipient:
-                        raise SignerBoundaryException(
-                            f"Calldata recipient {recipient_cs} does not match authorized recipient {self.authorized_recipient}."
-                        )
+                recipient_cs = to_checksum_address(minter_if_not_payer)
+                if recipient_cs != self.authorized_recipient:
+                    raise SignerBoundaryException(
+                        f"Calldata recipient {recipient_cs} does not match authorized recipient {self.authorized_recipient}."
+                    )
+                if fee_recipient != "0x0000000000000000000000000000000000000000":
+                    raise SignerBoundaryException("Unexpected fee recipient in calldata.")
 
             except Exception as e:
                 raise SignerBoundaryException(f"Failed to decode or validate SeaDrop calldata: {str(e)}")

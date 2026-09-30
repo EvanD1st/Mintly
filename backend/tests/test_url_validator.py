@@ -1,7 +1,7 @@
 """Tests for SSRF prevention, scheme restrictions, and private IP blocking."""
 
 import pytest
-from app.services.url_validator import validate_safe_url, is_ip_private_or_restricted, URLSecurityError
+from app.services.url_validator import validate_safe_url, is_ip_private_or_restricted, URLSecurityError, _PinnedResolver
 
 
 def test_ip_restriction_filter():
@@ -42,3 +42,13 @@ def test_validate_safe_url_localhost_and_metadata():
 
     with pytest.raises(URLSecurityError, match="Prohibited hostname"):
         validate_safe_url("http://metadata.google.internal/computeMetadata/v1/")
+
+
+@pytest.mark.asyncio
+async def test_connection_uses_only_the_validated_address():
+    resolved = [(2, 1, 6, "", ("8.8.8.8", 443))]
+    resolver = _PinnedResolver("example.com", 443, resolved)
+    addresses = await resolver.resolve("example.com", 443)
+    assert [entry["host"] for entry in addresses] == ["8.8.8.8"]
+    with pytest.raises(URLSecurityError, match="Unexpected destination"):
+        await resolver.resolve("metadata.google.internal", 443)

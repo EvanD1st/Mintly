@@ -120,13 +120,10 @@ class OpenSeaAdapter:
                 "checked_at": datetime.now(timezone.utc),
             }
 
-        # For verified drop
-        # In a real environment without custom allowlist merkle proof, public stage is eligible
-        # Allowlist stage requires proof.
         if stage_name.lower() in ("public", "public stage"):
             return {
-                "status": "eligible",
-                "evidence": "Public stage is open to all valid addresses (subject to available supply and wallet balance).",
+                "status": "unknown",
+                "evidence": "Public mint access does not verify sale timing, supply, wallet balance, or contract restrictions.",
                 "checked_at": datetime.now(timezone.utc),
             }
         

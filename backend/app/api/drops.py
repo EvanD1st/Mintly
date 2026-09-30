@@ -69,6 +69,12 @@ async def recheck_drop_eligibility(
     if not drop:
         raise HTTPException(status_code=404, detail="Drop not found.")
 
+    wallet = (await db.execute(select(Wallet).where(Wallet.id == wallet_id))).scalar_one_or_none() if wallet_id else None
+    if wallet_id and wallet is None:
+        raise HTTPException(status_code=404, detail="Wallet not found.")
+    if not drop.is_demo and wallet is None:
+        raise HTTPException(status_code=400, detail="Select a wallet before checking eligibility.")
+
     adapter = OpenSeaAdapter()
     now = datetime.now(timezone.utc)
 
@@ -78,21 +84,26 @@ async def recheck_drop_eligibility(
                 chain=drop.chain,
                 collection_slug=drop.id,
                 stage_name=stage.stage_name,
-                wallet_address="0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+                wallet_address=wallet.address if wallet else "",
             )
             stage.eligibility_status = chk["status"]
             stage.eligibility_evidence = chk["evidence"]
+            stage.eligibility_wallet_address = wallet.address if wallet else None
         else:
             stage.eligibility_status = "manual_check"
             stage.eligibility_evidence = "Independent project mint page requires manual review."
 
         stage.eligibility_checked_at = now
 
+    if not drop.is_demo:
+        drop.status_kind = "manual" if not drop.is_supported_integration else "unknown"
+        drop.status_label = "Manual check" if not drop.is_supported_integration else "Eligibility unverified"
+
     # Record activity event
     db.add(ActivityEvent(
         event_type="scan",
         label="Eligibility rechecked",
-        detail=f"{drop.name} scanned for Jenny's wallet",
+        detail=f"{drop.name} scanned for {wallet.label if wallet else 'demo preview'}",
         icon_name="refresh-cw",
         is_demo=drop.is_demo,
     ))

@@ -15,7 +15,7 @@ if ! command -v docker >/dev/null || ! docker compose version >/dev/null 2>&1; t
     sudo -n systemctl enable --now docker
 fi
 DOCKER=(docker)
-if ! docker info >/dev/null 2>&1; then DOCKER=(sudo -n --preserve-env=MINTLY_ENV_FILE,MINTLY_RELEASE docker); fi
+if ! docker info >/dev/null 2>&1; then DOCKER=(sudo -n --preserve-env=MINTLY_ENV_FILE,MINTLY_RELEASE,MINTLY_FIREBASE_FILE docker); fi
 
 export MINTLY_ENV_FILE="$APP_DIR/shared/.env"
 export MINTLY_RELEASE="${MINTLY_RELEASE:-local}"
@@ -34,6 +34,11 @@ PY
 fi
 chmod 600 "$MINTLY_ENV_FILE"
 COMPOSE=("${DOCKER[@]}" compose --env-file "$MINTLY_ENV_FILE" -f "$RELEASE_DIR/backend/docker-compose.yml")
+if [[ -f "$APP_DIR/shared/firebase-service-account.json" ]]; then
+    chmod 600 "$APP_DIR/shared/firebase-service-account.json"
+    export MINTLY_FIREBASE_FILE="$APP_DIR/shared/firebase-service-account.json"
+    COMPOSE+=(-f "$RELEASE_DIR/backend/docker-compose.firebase.yml")
+fi
 "${COMPOSE[@]}" config --quiet
 "${COMPOSE[@]}" build backend
 "${COMPOSE[@]}" up -d --wait --wait-timeout 180

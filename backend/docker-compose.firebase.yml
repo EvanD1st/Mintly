@@ -1,0 +1,11 @@
+services:
+  backend:
+    environment:
+      FIREBASE_CREDENTIALS_FILE: /run/secrets/firebase-service-account.json
+    volumes:
+      - ${MINTLY_FIREBASE_FILE:?Set MINTLY_FIREBASE_FILE}:/run/secrets/firebase-service-account.json:ro
+  worker:
+    environment:
+      FIREBASE_CREDENTIALS_FILE: /run/secrets/firebase-service-account.json
+    volumes:
+      - ${MINTLY_FIREBASE_FILE:?Set MINTLY_FIREBASE_FILE}:/run/secrets/firebase-service-account.json:ro

@@ -28,9 +28,9 @@ class MintlyWorker:
         self.lease_duration = timedelta(seconds=settings.WORKER_LEASE_DURATION_SECONDS)
 
     async def claim_ready_task(self, session) -> MintTask:
-        """Atomically leases an armed task ready for submission using database leases.
-        
-        Prevents multiple workers from claiming the same task.
+        """Lease one task under a PostgreSQL row lock.
+
+        SKIP LOCKED keeps competing workers from selecting the same task.
         """
         now = datetime.now(timezone.utc)
         stmt = (
@@ -39,6 +39,7 @@ class MintlyWorker:
                 and_(
                     MintTask.status == "armed",
                     MintTask.scheduled_for_utc <= now,
+                    MintTask.expires_at_utc > now,
                     or_(
                         MintTask.worker_id.is_(None),
                         MintTask.lease_expires_at < now,
@@ -47,12 +48,13 @@ class MintlyWorker:
             )
             .order_by(MintTask.scheduled_for_utc.asc())
             .limit(1)
+            .with_for_update(skip_locked=True)
         )
         task = (await session.execute(stmt)).scalar_one_or_none()
         if not task:
             return None
 
-        # Acquire lease atomically
+        # The row lock remains held until this commit.
         task.worker_id = self.worker_id
         task.lease_expires_at = now + self.lease_duration
         task.status = "preparing"
@@ -70,9 +72,27 @@ class MintlyWorker:
             wallet = (await session.execute(select(Wallet).where(Wallet.id == task.wallet_id))).scalar_one_or_none()
             auth = (await session.execute(select(MintAuthorization).where(MintAuthorization.id == task.authorization_id))).scalar_one_or_none()
 
-            if not drop or not stage or not auth:
+            if not drop or not stage or not auth or not wallet:
                 task.status = "failed"
                 task.failure_reason = "Missing referenced drop, stage, or authorization record."
+                await session.commit()
+                return
+
+            if (
+                stage.drop_id != drop.id or auth.drop_id != drop.id
+                or auth.stage_id != stage.id or auth.wallet_id != wallet.id
+                or auth.is_revoked
+            ):
+                task.status = "failed"
+                task.failure_reason = "Authorization no longer matches the task or was revoked."
+                await session.commit()
+                return
+
+            # Live execution remains closed until signer, nonce, eligibility and
+            # chain reconciliation are certified together.
+            if not task.is_demo:
+                task.status = "failed"
+                task.failure_reason = "Live automatic minting is disabled."
                 await session.commit()
                 return
 
@@ -88,9 +108,9 @@ class MintlyWorker:
             # 2. Build Signer Policy
             policy = SignerPolicy(
                 chain_id=drop.chain_id,
-                authorized_minter=wallet.address if wallet else "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+                authorized_minter=wallet.address,
                 authorized_recipient=auth.recipient_address,
-                allowed_nft_contract=drop.contract_address or "0x1234567890123456789012345678901234567890",
+                allowed_nft_contract=drop.contract_address,
                 allowed_seadrop_contract=SEADROP_V1_ADDRESS,
                 authorized_quantity=auth.quantity,
                 max_price_per_token_wei=auth.max_price_per_token_wei,
@@ -109,7 +129,7 @@ class MintlyWorker:
             task.prepared_calldata = calldata
 
             # 4. Prepare and Sign Transaction
-            nonce = task.assigned_nonce or 0
+            nonce = task.assigned_nonce if task.assigned_nonce is not None else 0
             signed_res = self.executor.prepare_and_sign(
                 policy=policy,
                 from_address=policy.authorized_minter,
@@ -126,9 +146,11 @@ class MintlyWorker:
             logger.info(f"[{self.worker_id}] Task {task.id} persisted signed tx {task.transaction_hash}. Broadcasting...")
 
             # 6. Broadcast transaction to network
-            if signed_res.get("is_simulated"):
+            if signed_res.get("is_simulated") and task.is_demo:
                 tx_hash = signed_res["transaction_hash"]
             else:
+                if signed_res.get("is_simulated"):
+                    raise RuntimeError("A simulated signature cannot be submitted as a live task.")
                 tx_hash = await self.executor.broadcast_transaction(task.signed_tx_raw, drop.chain)
 
             task.status = "submitted"
@@ -154,13 +176,30 @@ class MintlyWorker:
 
         except Exception as e:
             logger.error(f"[{self.worker_id}] Task execution failed: {e}", exc_info=True)
-            task.status = "failed"
+            # An RPC error after a real send is ambiguous. Keep the signed payload
+            # and hash for reconciliation; never create a different transaction.
+            if task.status != "submitting" or task.is_demo:
+                task.status = "failed"
             task.failure_reason = str(e)
             await session.commit()
 
     async def reconcile_pending_tasks(self, session):
-        """Checks confirmation status of in-flight submitted tasks."""
-        stmt = select(MintTask).where(MintTask.status == "submitted")
+        """Recover expired preparation leases and inspect persisted signed hashes."""
+        now = datetime.now(timezone.utc)
+        abandoned = (await session.execute(
+            select(MintTask).where(
+                MintTask.status == "preparing",
+                MintTask.lease_expires_at < now,
+            ).with_for_update(skip_locked=True)
+        )).scalars().all()
+        for t in abandoned:
+            t.status = "armed" if t.expires_at_utc > now else "expired"
+            t.worker_id = None
+            t.lease_expires_at = None
+        if abandoned:
+            await session.commit()
+
+        stmt = select(MintTask).where(MintTask.status.in_(("submitting", "submitted")))
         tasks = (await session.execute(stmt)).scalars().all()
 
         for t in tasks:
@@ -204,18 +243,20 @@ class MintlyWorker:
                 await session.commit()
                 logger.warning(f"Task {t.id} reverted on-chain.")
 
+            elif t.status == "submitting" and t.is_demo:
+                # A demo signature is persisted before the simulated submit.
+                t.status = "submitted"
+                t.submitted_at = datetime.now(timezone.utc)
+                await session.commit()
+
     async def run_discovery_poll(self, session):
         """Polls for latest drops via Twikit."""
         try:
             drops = await self.twikit.poll_latest_drops()
             if drops:
-                logger.info(f"Discovered {len(drops)} new drops from {settings.X_MONITORED_USER}")
-                await NotificationService.send_notification(
-                    title="New Drops Detected",
-                    body=f"LAKZONE posted {len(drops)} new drops for today.",
-                    category="daily_list",
-                    deep_link="mintly://drops",
-                )
+                # The diagnostic adapter only returns a short preview. Do not
+                # announce unpersisted rows or repeat the alert every poll.
+                logger.info("X returned a daily-list preview; manual import is required before notification")
         except Exception as e:
             logger.warning(f"Discovery poll failed: {e}")
 

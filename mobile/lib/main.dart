@@ -3,9 +3,11 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'theme/app_theme.dart';
 import 'screens/splash_screen.dart';
+import 'services/push_service.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await PushService.instance.initialize();
   SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
     DeviceOrientation.portraitDown,
@@ -21,6 +23,7 @@ class MintlyApp extends StatelessWidget {
     return MaterialApp(
       title: 'Mintly',
       debugShowCheckedModeBanner: false,
+      scaffoldMessengerKey: PushService.instance.messengerKey,
       theme: MintlyTheme.light(),
       darkTheme: MintlyTheme.dark(),
       themeMode: ThemeMode.system,

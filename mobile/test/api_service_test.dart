@@ -22,7 +22,7 @@ void main() {
   test('authenticated request errors cannot become demo success', () async {
     final api = ApiService(client: MockClient((request) async {
       expect(request.headers['Authorization'], 'Bearer session-token');
-      if (request.url.path.endsWith('/wallets')) return http.Response('[]', 200);
+      if (request.url.path.endsWith('/wallets')) return http.Response('[{"id":"wallet-1"}]', 200);
       return http.Response('{}', 503);
     }));
     await api.connectBackend('session-token');

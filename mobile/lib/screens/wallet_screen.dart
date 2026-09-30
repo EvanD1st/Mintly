@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../theme/colors.dart';
 import '../state/app_state.dart';
+import '../services/push_service.dart';
 import 'import_screen.dart';
 
 class WalletScreen extends ConsumerWidget {
@@ -57,6 +58,7 @@ class WalletScreen extends ConsumerWidget {
           onPressed: () async {
             final api = ref.read(apiServiceProvider);
             if (api.isLiveBackendConnected) {
+              try { await PushService.instance.disconnect(); } catch (_) {}
               api.disconnectBackend();
               await notifier.loadInitialData();
               return;
@@ -68,10 +70,18 @@ class WalletScreen extends ConsumerWidget {
             if (token == null) return;
             try {
               await api.connectBackend(token);
+              bool notificationsReady = false;
+              try {
+                notificationsReady = await PushService.instance.connect(api);
+              } catch (error) {
+                debugPrint('Push registration failed: $error');
+              }
               await notifier.loadInitialData();
               if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                  content: Text('Connected for this session. Minting remains in demo mode.'),
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                  content: Text(notificationsReady
+                    ? 'Connected. Notifications enabled; minting remains in demo mode.'
+                    : 'Connected. Notifications need Firebase setup or permission; minting remains in demo mode.'),
                 ));
               }
             } catch (error) {
@@ -191,7 +201,22 @@ class WalletScreen extends ConsumerWidget {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text('Daily list notifications', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: ink)),
-                  Switch(value: true, activeThumbColor: green, onChanged: (v) {}),
+                  ValueListenableBuilder<PushPreferences>(
+                    valueListenable: PushService.instance.preferences,
+                    builder: (context, prefs, _) => Switch(
+                      value: prefs.dailyList, activeThumbColor: green,
+                      onChanged: (value) async {
+                        try {
+                          await PushService.instance.setPreferences(dailyList: value);
+                        } catch (error) {
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('$error')));
+                          }
+                        }
+                      },
+                    ),
+                  ),
                 ],
               ),
               const SizedBox(height: 8),
@@ -200,7 +225,22 @@ class WalletScreen extends ConsumerWidget {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text('Mint status notifications', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: ink)),
-                  Switch(value: true, activeThumbColor: green, onChanged: (v) {}),
+                  ValueListenableBuilder<PushPreferences>(
+                    valueListenable: PushService.instance.preferences,
+                    builder: (context, prefs, _) => Switch(
+                      value: prefs.mintStatus, activeThumbColor: green,
+                      onChanged: (value) async {
+                        try {
+                          await PushService.instance.setPreferences(mintStatus: value);
+                        } catch (error) {
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('$error')));
+                          }
+                        }
+                      },
+                    ),
+                  ),
                 ],
               ),
             ],

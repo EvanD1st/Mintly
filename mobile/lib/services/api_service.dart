@@ -9,6 +9,7 @@ class ApiService {
     'MINTLY_API_URL', defaultValue: 'https://mintly.duckdns.org/api');
   final http.Client _client;
   String _ownerToken = '';
+  String? _walletId;
   bool get isLiveBackendConnected => _ownerToken.isNotEmpty;
 
   ApiService({http.Client? client}) : _client = client ?? http.Client();
@@ -24,10 +25,13 @@ class ApiService {
     final response = await _client.get(Uri.parse('$baseUrl/wallets'),
       headers: {'Authorization': 'Bearer $candidate'}).timeout(const Duration(seconds: 10));
     _checkResponse(response);
+    final wallets = jsonDecode(response.body) as List<dynamic>;
+    if (wallets.isEmpty) throw Exception('No wallet is registered on the server.');
+    _walletId = (wallets.first as Map<String, dynamic>)['id'] as String;
     _ownerToken = candidate;
   }
 
-  void disconnectBackend() { _ownerToken = ''; }
+  void disconnectBackend() { _ownerToken = ''; _walletId = null; }
   void dispose() { _client.close(); }
 
   Map<String, String> get _headers => {
@@ -207,7 +211,7 @@ class ApiService {
   }) async {
     if (isLiveBackendConnected) {
       final data = await _post('/tasks/arm', {
-        'wallet_id': 'demo_wallet',
+        'wallet_id': _walletId,
         'drop_id': drop.id,
         'stage_id': stage.id,
         'quantity': quantity,
@@ -292,5 +296,25 @@ class ApiService {
       'source_author': 'lakzonevn',
     });
     return true;
+  }
+
+  Future<void> registerDevice(String token) async {
+    if (!isLiveBackendConnected) return;
+    await _post('/notifications/register', {'token': token, 'platform': 'android'});
+  }
+
+  Future<void> setNotificationPreferences(String token, {
+    required bool dailyList, required bool mintStatus,
+  }) async {
+    if (!isLiveBackendConnected) throw Exception('Connect to Mintly to save notification preferences.');
+    await _post('/notifications/preferences', {
+      'token': token, 'daily_list': dailyList,
+      'mint_status': mintStatus, 'source_health': true,
+    });
+  }
+
+  Future<void> unregisterDevice(String token) async {
+    if (!isLiveBackendConnected) return;
+    await _post('/notifications/unregister', {'token': token, 'platform': 'android'});
   }
 }

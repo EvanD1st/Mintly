@@ -32,16 +32,15 @@ async def draft_task_preview(req: DraftTaskRequest, db: AsyncSession = Depends(g
         raise HTTPException(status_code=404, detail="Drop not found.")
 
     stage = (await db.execute(select(MintStage).where(MintStage.id == req.stage_id))).scalar_one_or_none()
-    if not stage:
-        raise HTTPException(status_code=404, detail="Stage not found.")
+    if not stage or stage.drop_id != drop.id:
+        raise HTTPException(status_code=404, detail="Stage not found for this drop.")
 
     wallet = (await db.execute(select(Wallet).where(Wallet.id == req.wallet_id))).scalar_one_or_none()
     if not wallet:
-        # Fallback to default Jenny wallet
-        wallet = (await db.execute(select(Wallet).where(Wallet.is_default == True))).scalar_one_or_none()
-    
-    wallet_label = wallet.label if wallet else "Jenny · Demo address"
-    wallet_addr = wallet.address if wallet else "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
+        raise HTTPException(status_code=404, detail="Wallet not found.")
+
+    wallet_label = wallet.label
+    wallet_addr = wallet.address
 
     # Enforce quantity bounds
     if req.quantity > stage.limit_per_wallet:
@@ -61,6 +60,9 @@ async def draft_task_preview(req: DraftTaskRequest, db: AsyncSession = Depends(g
     if not drop.is_supported_integration:
         is_signer_ready = False
         note = "Automatic minting is unavailable for independent mint sites without supported adapter."
+    elif stage.stage_name.lower() not in ("public", "public stage"):
+        is_signer_ready = False
+        note = "Automatic minting supports public stages only; use the mint page for allowlists."
     elif drop.is_demo or (wallet and wallet.is_demo):
         is_signer_ready = True
         note = "Demo signing is ready. The real app must verify signing access before a task can be armed."
@@ -102,22 +104,34 @@ async def arm_mint_task(
     if not drop:
         raise HTTPException(status_code=404, detail="Drop not found.")
 
-    if not drop.is_supported_integration and not drop.is_demo:
+    if not drop.is_supported_integration:
         raise HTTPException(
             status_code=400,
             detail="Cannot arm an unsupported drop integration."
         )
 
     stage = (await db.execute(select(MintStage).where(MintStage.id == req.stage_id))).scalar_one_or_none()
-    if not stage:
-        raise HTTPException(status_code=404, detail="Stage not found.")
+    if not stage or stage.drop_id != drop.id:
+        raise HTTPException(status_code=404, detail="Stage not found for this drop.")
+    if stage.stage_name.lower() not in ("public", "public stage"):
+        raise HTTPException(status_code=400, detail="Automatic minting supports public stages only.")
 
     wallet = (await db.execute(select(Wallet).where(Wallet.id == req.wallet_id))).scalar_one_or_none()
     if not wallet:
-        wallet = (await db.execute(select(Wallet).where(Wallet.is_default == True))).scalar_one_or_none()
+        raise HTTPException(status_code=404, detail="Wallet not found.")
+    if req.quantity > stage.limit_per_wallet:
+        raise HTTPException(status_code=400, detail="Quantity exceeds this stage's wallet limit.")
+    if not drop.is_demo and (wallet.is_demo or wallet.signing_capability != "isolated_server_signer"):
+        raise HTTPException(status_code=400, detail="This wallet cannot authorize an automatic mint.")
+    if not drop.is_demo:
+        raise HTTPException(status_code=409, detail="Live automatic minting is not enabled or certified.")
 
-    wallet_id = wallet.id if wallet else "demo-wallet-id"
-    wallet_addr = wallet.address if wallet else "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
+    wallet_id = wallet.id
+    wallet_addr = wallet.address
+
+    existing = (await db.execute(select(MintTask).where(MintTask.idempotency_key == req.idempotency_key))).scalar_one_or_none()
+    if existing:
+        raise HTTPException(status_code=409, detail="Idempotency key has already been used. Refresh the queue.")
 
     # Exact integer math
     fee_cap_wei = parse_eth_to_wei(req.fee_cap_eth)
@@ -143,11 +157,11 @@ async def arm_mint_task(
     await db.flush()
 
     # 2. Check for duplicate armed tasks on same drop & cancel prior armed tasks
-    prior_tasks = (await db.execute(
-        select(MintTask).where(MintTask.drop_id == drop.id, MintTask.status == "armed")
-    )).scalars().all()
-    for pt in prior_tasks:
-        pt.status = "disarmed"
+    await db.execute(
+        update(MintTask)
+        .where(MintTask.drop_id == drop.id, MintTask.status == "armed")
+        .values(status="disarmed")
+    )
 
     # 3. Create MintTask
     task = MintTask(
@@ -212,16 +226,23 @@ async def disarm_task(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found.")
 
-    if task.status in ("submitting", "submitted", "confirmed"):
-        raise HTTPException(
-            status_code=400,
-            detail=f"Task is already {task.status}. Transactions in flight or confirmed cannot be canceled by disarming."
-        )
-
     if task.status == "disarmed":
         return {"message": "Task already disarmed.", "task_id": task_id, "status": "disarmed"}
 
-    task.status = "disarmed"
+    if task.status != "armed":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Task is already {task.status}. Transactions in flight or confirmed cannot be canceled by disarming."
+        )
+
+    changed = await db.execute(
+        update(MintTask)
+        .where(MintTask.id == task_id, MintTask.status == "armed")
+        .values(status="disarmed")
+        .returning(MintTask.id)
+    )
+    if changed.scalar_one_or_none() is None:
+        raise HTTPException(status_code=409, detail="Task is already in flight and cannot be canceled by disarming.")
     drop = (await db.execute(select(Drop).where(Drop.id == task.drop_id))).scalar_one_or_none()
     drop_name = drop.name if drop else "NFT drop"
 
