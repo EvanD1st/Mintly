@@ -48,7 +48,7 @@ jobs:
         run: |
           set -euo pipefail
           if [[ "$EVENT_NAME" == push ]]; then
-            if git diff --name-only "$BEFORE" "$GITHUB_SHA" -- mobile | grep -Ev '^mobile/lib/'; then
+            if git diff --name-only "$BEFORE" "$GITHUB_SHA" -- mobile | grep -Ev '^mobile/(lib|test)/'; then
               echo 'Native, asset, or dependency changes require a new Shorebird release.'
               echo 'skip=true' >> "$GITHUB_OUTPUT"
             fi
