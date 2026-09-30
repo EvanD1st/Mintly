@@ -79,7 +79,7 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
             maxLines: 7,
             style: TextStyle(fontSize: 14, color: ink),
             decoration: const InputDecoration(
-              hintText: 'Paste an OpenSea link or copy the daily mint list here…',
+              hintText: 'Paste a mint link or the full daily list here…',
             ),
           ),
           const SizedBox(height: 14),

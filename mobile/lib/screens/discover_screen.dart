@@ -32,7 +32,7 @@ class DiscoverScreen extends ConsumerWidget {
         const SizedBox(height: 18),
         Card(child: ListTile(
           leading: const Icon(Icons.public),
-          title: const Text('OpenSea drops'),
+          title: const Text('@lakzonevn drops'),
           subtitle: Text(state.sourceStatusText),
           trailing: const Icon(Icons.chevron_right),
           onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SourceScreen())),
@@ -59,7 +59,7 @@ class DiscoverScreen extends ConsumerWidget {
         else if (state.error != null) Card(child: Padding(
           padding: const EdgeInsets.all(16), child: Text('Could not load live data: ${state.error}')))
         else if (state.drops.isEmpty) const Card(child: Padding(
-          padding: EdgeInsets.all(18), child: Text('No current drops from the live source. Pull down to refresh.')))
+          padding: EdgeInsets.all(18), child: Text('No drops from @lakzonevn yet. Admin-imported lists will also appear here.')))
         else for (final drop in state.drops) _dropCard(context, notifier, drop),
         const SizedBox(height: 16),
         Text(state.checkedWalletLabel, style: TextStyle(color: muted, fontSize: 12)),

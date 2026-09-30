@@ -1,0 +1,6 @@
+services:
+  worker:
+    environment:
+      TWIKIT_COOKIES_FILE: /run/secrets/x-cookies.json
+    volumes:
+      - ${MINTLY_X_COOKIES_FILE:?Set MINTLY_X_COOKIES_FILE}:/run/secrets/x-cookies.json:ro

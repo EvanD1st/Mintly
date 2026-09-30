@@ -1,6 +1,7 @@
 # Mintly
 
-Mintly is a Flutter app and FastAPI service for browsing real OpenSea drops. The
+Mintly is a Flutter app and FastAPI service for reviewing mint lists from
+@lakzonevn on X and lists imported by an admin. The
 production API runs at https://mintly.duckdns.org/api. The [account and wallet
 guide](docs/real-data-accounts-wallet.md) explains sign-in, MetaMask linking,
 security limits, and the live feed.
@@ -9,10 +10,11 @@ An admin creates accounts. Members must change their temporary passwords before
 using the app. A MetaMask address is linked through a short-lived, one-use message
 signature in a browser with the extension installed. Mintly never imports wallet
 secrets or signs mint transactions. Users approve any mint directly in MetaMask
-on OpenSea. Wallet-specific eligibility is unverified in the feed.
+on the official mint page. Wallet-specific eligibility is unverified in the feed.
 
-The worker imports OpenSea's upcoming and featured drop records when
-`OPENSEA_API_KEY` is configured. The app does not invent drop prices, times,
+The worker reads @lakzonevn through Twikit when an authenticated X session is
+configured. Without one, the source reports that it needs attention and admin
+imports remain available. The app does not invent drop prices, times,
 eligibility, or activity when the live source is unavailable. CI tests the
 backend and Flutter app before deploying `main` to Ubuntu. Android builds use
 Shorebird; a new signed installer is needed whenever native plugins change.

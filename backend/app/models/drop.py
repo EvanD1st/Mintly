@@ -18,7 +18,7 @@ class Drop(Base):
     chain_id: Mapped[int] = mapped_column(Integer, default=8453, nullable=False)
     contract_address: Mapped[Optional[str]] = mapped_column(String(42), nullable=True)
     mint_page_url: Mapped[str] = mapped_column(Text, nullable=False)
-    site_label: Mapped[str] = mapped_column(String(50), default="OpenSea")  # 'OpenSea', 'Project website'
+    site_label: Mapped[str] = mapped_column(String(50), default="Project website")
     icon_name: Mapped[str] = mapped_column(String(30), default="gem")
     
     # Drop-level summary status: 'eligible', 'manual', 'ineligible', 'unknown'

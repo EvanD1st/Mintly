@@ -10,9 +10,8 @@ from app.database import AsyncSessionLocal
 from app.models import MintTask, MintAuthorization, Drop, MintStage, Wallet, ActivityEvent
 from app.services.mint_executor import MintExecutor
 from app.services.signer.base import SignerPolicy, SEADROP_V1_ADDRESS
-from app.services.twikit_adapter import TwikitSourceAdapter
 from app.services.notifier import NotificationService
-from app.services.opensea_feed import sync_opensea_drops
+from app.services.x_feed import sync_x_drops
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("mintly.worker")
@@ -24,7 +23,6 @@ class MintlyWorker:
     def __init__(self):
         self.worker_id = f"worker_{uuid.uuid4().hex[:8]}"
         self.executor = MintExecutor()
-        self.twikit = TwikitSourceAdapter()
         self.running = False
         self.lease_duration = timedelta(seconds=settings.WORKER_LEASE_DURATION_SECONDS)
 
@@ -251,12 +249,12 @@ class MintlyWorker:
                 await session.commit()
 
     async def run_discovery_poll(self, session):
-        """Import actual OpenSea drops; never announce unpersisted previews."""
+        """Import only @lakzonevn drops; announce persisted records once."""
         try:
-            added = await sync_opensea_drops(session)
+            added = await sync_x_drops(session)
             if added:
                 await NotificationService.send_notification(
-                    title="New drops on OpenSea",
+                    title="New drops from @lakzonevn",
                     body=f"{added} new drops are available to review.",
                     category="daily_list",
                     deep_link="mintly://drops",
