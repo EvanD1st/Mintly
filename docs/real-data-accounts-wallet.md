@@ -38,7 +38,7 @@ after signing in and granting notification permission.
 
 To enable Twikit on Ubuntu, provide an authenticated Twikit `cookies.json` as
 `~/Mintly/shared/x-cookies.json` with mode 600 and redeploy. The deploy script
-mounts it read-only into the backend and worker. Never commit or send this file
+mounts it read-only into the worker. Never commit or send this file
 in chat: it grants access to the X account. The worker checks @lakzonevn every
 five minutes, stores full post text and source IDs, and notifies devices only
 when it persists new drops. Twikit uses X's unofficial web interface, so X may

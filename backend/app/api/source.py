@@ -1,6 +1,5 @@
 """Live source health and account-scoped activity."""
 
-import os
 from datetime import timezone
 from zoneinfo import ZoneInfo
 
@@ -11,7 +10,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user, get_db, require_admin
 from app.models import ActivityEvent, Drop, SourceConnection, SourcePost, User
 from app.schemas.activity import ActivityEventSchema, SourceStatusResponse
-from app.config import settings
 
 router = APIRouter(tags=["source_and_activity"])
 
@@ -28,12 +26,10 @@ async def get_source_status(db: AsyncSession = Depends(get_db)):
     active = source.is_monitoring if source else True
     last_sync = source.last_sync_at if source else None
     status = source.status if source else "needs_attention"
-    if not (settings.TWIKIT_USERNAME and settings.TWIKIT_PASSWORD) and not os.path.isfile(settings.TWIKIT_COOKIES_FILE):
-        status = "needs_attention"
     if not active:
         summary = "@lakzonevn monitoring paused by admin"
     elif status == "needs_attention":
-        summary = "Authenticated X session required for Twikit; admin imports remain available"
+        summary = source.last_error if source and source.last_error else "Awaiting an authenticated X session; admin imports remain available"
     elif last_sync:
         summary = f"@lakzonevn checked {last_sync.replace(tzinfo=timezone.utc).astimezone(ZoneInfo('Africa/Lagos')):%d %b %H:%M} WAT · {count} drops"
     else:
