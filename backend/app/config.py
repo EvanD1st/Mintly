@@ -35,9 +35,6 @@ class Settings(BaseSettings):
     RPC_SEPOLIA: str = "https://rpc.sepolia.org"
     RPC_BASE_SEPOLIA: str = "https://sepolia.base.org"
 
-    # OpenSea
-    OPENSEA_API_KEY: Optional[str] = None
-
     # Signer Boundary
     SIGNER_MODE: str = "disabled"  # legacy signer code is not exposed to MetaMask users
     SIGNER_PRIVATE_KEY: Optional[str] = None

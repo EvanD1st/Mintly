@@ -17,7 +17,7 @@ class SourceScreen extends ConsumerWidget {
           if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
           final source = snapshot.data!;
           return ListView(padding: const EdgeInsets.all(20), children: [
-            Text('OpenSea', style: Theme.of(context).textTheme.headlineMedium),
+            Text('@lakzonevn on X', style: Theme.of(context).textTheme.headlineMedium),
             const SizedBox(height: 10),
             Card(child: Column(children: [
               ListTile(title: const Text('Status'), subtitle: Text('${source['status']}')),

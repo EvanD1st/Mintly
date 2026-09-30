@@ -11,8 +11,8 @@ void main() {
     await tester.pumpWidget(const ProviderScope(child: MaterialApp(
       home: Scaffold(body: DiscoverScreen()),
     )));
-    expect(find.text('OpenSea drops'), findsOneWidget);
-    expect(find.textContaining('No current drops from the live source'), findsOneWidget);
+    expect(find.text('@lakzonevn drops'), findsOneWidget);
+    expect(find.textContaining('No drops from @lakzonevn yet'), findsOneWidget);
     expect(find.text('Orbit Bloom'), findsNothing);
   });
 }
