@@ -6,7 +6,9 @@ default linked wallet. It does not add a drop to the shared @lakzonevn feed.
 Admin text-list imports still use the shared feed.
 
 The first supported integration is native-ETH SeaDrop V1 ERC-721 drops on
-Ethereum, Base, Robinhood Chain, Arbitrum One and Optimism, one NFT per check. Mintly reads the contract, stage schedule,
+Ethereum, Base, Robinhood Chain, Arbitrum One and Optimism. Users select 1–100 NFTs;
+OpenSea enforces the wallet's stage limits, remaining supply and balance for that quantity.
+Mintly reads the contract, stage schedule,
 and price from OpenSea's official Drops API. It sorts stages by their start
 time and rechecks the wallet when a stage opens. A successful mint preparation
 response from OpenSea is required for **ready for approval**. Missing allowlist
@@ -29,6 +31,19 @@ estimate at the time of checking; it can change before inclusion in a block.
 MetaMask displays the transaction's fee and total before the user signs.
 Mintly's preparation flow does not sign, broadcast, import a recovery phrase,
 or create an unattended mint authorization.
+
+The cost card shows selected quantity, unit stage price, prepared mint value,
+estimated gas and the combined ETH total. A Coinbase ETH-USDT quote converts
+the total for display only. Quotes expire after five minutes; unavailable gas
+or pricing leaves the corresponding total unavailable rather than inventing it.
+No exchange or USDT payment is performed.
+
+Automatic execution remains disabled. The product must not hold users' primary
+wallet keys or create server-custodied user wallets. Future automation requires
+user-approved, revocable on-chain permission with a specific collection, chain,
+mint call, quantity, recipient, expiration and maximum spend. An ordinary
+address-link signature grants none of those permissions. Network support,
+allowlist behavior and gas accounting must be verified before activation.
 
 The server obtains an [instant free OpenSea API key](https://docs.opensea.io/reference/api-keys)
 and renews it near its seven-day expiry. The key lives in the private

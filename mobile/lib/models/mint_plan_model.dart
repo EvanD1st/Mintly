@@ -13,6 +13,11 @@ class MintPlanModel {
   final String? estimatedNetworkFeeEth;
   final String status;
   final String statusNote;
+  final int quantity;
+  final String? walletId;
+  final String? estimatedTotalEth;
+  final String? estimatedTotalUsdt;
+  final DateTime? rateCheckedAt;
 
   const MintPlanModel({required this.id, required this.collectionName,
     required this.openSeaUrl, required this.chain, required this.contractAddress,
@@ -20,7 +25,8 @@ class MintPlanModel {
     required this.stageName, required this.startsAt, required this.endsAt,
     required this.priceEth, required this.mintValueEth,
     required this.estimatedNetworkFeeEth, required this.status,
-    required this.statusNote});
+    required this.statusNote, this.quantity = 1, this.walletId, this.estimatedTotalEth,
+    this.estimatedTotalUsdt, this.rateCheckedAt});
 
   factory MintPlanModel.fromJson(Map<String, dynamic> json) => MintPlanModel(
     id: json['id'] as String,
@@ -37,5 +43,10 @@ class MintPlanModel {
     estimatedNetworkFeeEth: json['estimated_network_fee_eth'] as String?,
     status: json['status'] as String,
     statusNote: json['status_note'] as String,
+    quantity: json['quantity'] as int? ?? 1,
+    walletId: json['wallet_id'] as String?,
+    estimatedTotalEth: json['estimated_total_eth'] as String?,
+    estimatedTotalUsdt: json['estimated_total_usdt'] as String?,
+    rateCheckedAt: DateTime.tryParse(json['rate_checked_at']?.toString() ?? ''),
   );
 }

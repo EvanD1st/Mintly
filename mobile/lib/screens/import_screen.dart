@@ -13,6 +13,7 @@ class ImportScreen extends ConsumerStatefulWidget {
 class _ImportScreenState extends ConsumerState<ImportScreen> {
   final TextEditingController _textController = TextEditingController();
   bool _isImporting = false;
+  int _quantity = 1;
 
   @override
   void dispose() {
@@ -87,6 +88,14 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
           ),
           const SizedBox(height: 14),
 
+          Row(children: [
+            const Expanded(child: Text('NFT quantity')),
+            IconButton(onPressed: _isImporting || _quantity <= 1 ? null : () => setState(() => _quantity--), icon: const Icon(Icons.remove)),
+            Text('$_quantity'),
+            IconButton(onPressed: _isImporting || _quantity >= 100 ? null : () => setState(() => _quantity++), icon: const Icon(Icons.add)),
+          ]),
+          Text('OpenSea checks this quantity against your wallet’s stage limit and remaining supply.', style: TextStyle(color: muted, fontSize: 11)),
+
           Text(
             'Supports native-ETH SeaDrop V1 drops on Ethereum, Base, Robinhood Chain, Arbitrum One and Optimism. Mintly checks stage timing and wallet readiness. Gas is estimated. Approve in MetaMask on the drop’s network; importing does not sign a mint.',
             style: TextStyle(fontSize: 11, color: muted, height: 1.4),
@@ -112,7 +121,7 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
                 final isOpenSeaLink = uri != null && uri.scheme == 'https' && uri.host == 'opensea.io' &&
                   uri.pathSegments.length >= 2 && uri.pathSegments.first == 'collection';
                 if (isOpenSeaLink) {
-                  await notifier.importOpenSeaMint(text);
+                  await notifier.importOpenSeaMint(text, quantity: _quantity);
                 } else if (api.isAdmin) {
                   await notifier.importList(text);
                 } else {

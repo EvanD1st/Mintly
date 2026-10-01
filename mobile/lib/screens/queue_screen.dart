@@ -230,16 +230,32 @@ class QueueScreen extends ConsumerWidget {
           Text('Checked wallet: ${plan.walletAddress.substring(0, 6)}…${plan.walletAddress.substring(plan.walletAddress.length - 4)}',
             style: TextStyle(color: muted, fontSize: 12)),
           const SizedBox(height: 8),
-          Text('Mint value: ${plan.mintValueEth ?? plan.priceEth ?? 'Unknown'} ETH',
+          Text('${plan.quantity} NFT${plan.quantity == 1 ? '' : 's'} · Unit stage price: ${plan.priceEth ?? 'Unknown'} ETH', style: TextStyle(color: muted)),
+          Text('Prepared mint value: ${plan.mintValueEth ?? 'Not yet verified'}${plan.mintValueEth == null ? '' : ' ETH'}',
             style: TextStyle(color: ink)),
           Text('Estimated network fee: ${plan.estimatedNetworkFeeEth ?? 'Unavailable'} ETH',
             style: TextStyle(color: muted)),
+          Text('Estimated total: ${plan.estimatedTotalEth ?? 'Unavailable'}${plan.estimatedTotalEth == null ? '' : ' ETH'}', style: TextStyle(color: ink, fontWeight: FontWeight.w700)),
+          Text('≈ ${plan.estimatedTotalUsdt ?? 'Unavailable'}${plan.estimatedTotalUsdt == null ? '' : ' USDT'}', style: TextStyle(color: ink)),
+          Text('Total includes mint value and estimated gas. USDT is a Coinbase ETH-USDT display estimate, not payment in USDT. Missing gas means no complete total.', style: TextStyle(color: muted, fontSize: 11)),
           Text('MetaMask shows the final network fee before approval.',
             style: TextStyle(color: muted, fontSize: 11)),
           const SizedBox(height: 8),
           SelectableText(plan.openSeaUrl, style: TextStyle(color: muted, fontSize: 11)),
           const SizedBox(height: 10),
           Wrap(spacing: 8, children: [
+            OutlinedButton(onPressed: () async {
+              final controller = TextEditingController(text: '${plan.quantity}');
+              final selected = await showDialog<int>(context: context, builder: (dialogContext) => AlertDialog(
+                title: const Text('NFT quantity'),
+                content: TextField(controller: controller, keyboardType: TextInputType.number, decoration: const InputDecoration(helperText: '1–100; OpenSea checks stage limits')),
+                actions: [TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancel')),
+                  FilledButton(onPressed: () { final quantity = int.tryParse(controller.text); if (quantity != null && quantity >= 1 && quantity <= 100) Navigator.pop(dialogContext, quantity); }, child: const Text('Check quantity'))],
+              ));
+              if (selected == null) return;
+              try { await notifier.importOpenSeaMint(plan.openSeaUrl, quantity: selected, walletId: plan.walletId); }
+              catch (error) { if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$error'))); }
+            }, child: const Text('Change quantity')),
             OutlinedButton(onPressed: () async {
               try {
                 await notifier.refreshMintPlan(plan.id);

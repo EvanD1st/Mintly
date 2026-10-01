@@ -145,8 +145,8 @@ class ApiService extends ChangeNotifier {
     return data.map((item) => MintPlanModel.fromJson(item as Map<String, dynamic>)).toList();
   }
 
-  Future<MintPlanModel> importOpenSeaMint(String url) async =>
-    MintPlanModel.fromJson((await _post('/mint-plans', {'url': url},
+  Future<MintPlanModel> importOpenSeaMint(String url, {int quantity = 1, String? walletId}) async =>
+    MintPlanModel.fromJson((await _post('/mint-plans', {'url': url, 'quantity': quantity, if (walletId != null) 'wallet_id': walletId},
       timeout: const Duration(seconds: 60))) as Map<String, dynamic>);
 
   Future<MintPlanModel> refreshMintPlan(String id) async =>

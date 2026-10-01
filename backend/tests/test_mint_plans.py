@@ -13,6 +13,10 @@ from app.models import MintPlan, User, Wallet
 from app.services.opensea import CHAINS, OpenSeaClient, OpenSeaUnavailable, chain_rpc, collection_slug, stage_schedule, transaction_value_wei
 from app.services.signer.base import SEADROP_V1_ADDRESS
 
+@pytest.fixture(autouse=True)
+def mock_display_quote(monkeypatch):
+    monkeypatch.setattr("app.services.mint_plans.eth_usdt_quote", AsyncMock(return_value=("2500", datetime.now(timezone.utc))))
+
 
 @pytest.mark.parametrize("url", [
     "http://opensea.io/collection/example",
@@ -40,7 +44,8 @@ def test_stage_schedule_is_sorted_and_uses_native_price():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("chain", list(CHAINS))
-async def test_member_import_checks_wallet_and_never_creates_mint_task(test_db, monkeypatch, chain):
+@pytest.mark.parametrize("quantity", [1, 2])
+async def test_member_import_checks_wallet_and_never_creates_mint_task(test_db, monkeypatch, chain, quantity):
     user = (await test_db.execute(select(User).where(User.username == "member"))).scalar_one()
     wallet = Wallet(user_id=user.id, label="MetaMask", address="0x" + "1" * 40,
                     signing_capability="interactive", supported_chains=["Base"], is_default=True)
@@ -60,7 +65,7 @@ async def test_member_import_checks_wallet_and_never_creates_mint_task(test_db, 
                     "price_currency_address": "0x" + "0" * 40}],
     }
     transaction = {"chain": chain, "to": SEADROP_V1_ADDRESS,
-                   "data": "0x12345678", "value": str(10**15)}
+                   "data": "0x12345678", "value": str(10**15 * quantity)}
     fake = type("FakeOpenSea", (), {"get_drop": AsyncMock(return_value=detail),
                                     "build_mint": AsyncMock(return_value=(200, transaction))})()
     monkeypatch.setattr("app.api.mint_plans.OpenSeaClient", lambda: fake)
@@ -78,12 +83,16 @@ async def test_member_import_checks_wallet_and_never_creates_mint_task(test_db, 
                 "username": "member", "password": "Member test password 123"})
             client.headers["Authorization"] = "Bearer " + login.json()["token"]
             imported = await client.post("/api/mint-plans", json={
-                "url": "https://opensea.io/collection/example"})
+                "url": "https://opensea.io/collection/example", "quantity": quantity})
             assert imported.status_code == 200, imported.text
             assert imported.json()["status"] == "ready_for_approval"
             assert imported.json()["chain"] == CHAINS[chain][1]
-            assert imported.json()["mint_value_eth"] == "0.001"
+            assert imported.json()["mint_value_eth"] == ("0.001" if quantity == 1 else "0.002")
+            assert imported.json()["quantity"] == quantity
+            fake.build_mint.assert_awaited_once_with("example", wallet.address, quantity)
             assert imported.json()["estimated_network_fee_eth"] == "0.00001"
+            assert imported.json()["estimated_total_eth"] == ("0.00101" if quantity == 1 else "0.00201")
+            assert imported.json()["estimated_total_usdt"] == ("2.5250" if quantity == 1 else "5.0250")
             assert len((await client.get("/api/mint-plans")).json()) == 1
             assert (await client.get("/api/tasks/queue")).json()["tasks"] == []
             stored_plan = (await test_db.execute(select(MintPlan))).scalar_one()

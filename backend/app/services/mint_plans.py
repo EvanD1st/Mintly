@@ -3,6 +3,7 @@
 from datetime import datetime, timedelta, timezone
 
 from app.models import MintPlan, Wallet
+from app.services.price_quote import eth_usdt_quote
 from app.services.opensea import CHAINS, OpenSeaClient, OpenSeaUnavailable, estimate_network_fee, stage_schedule, transaction_value_wei
 
 
@@ -38,6 +39,9 @@ async def refresh_mint_plan(plan: MintPlan, wallet: Wallet, client: OpenSeaClien
     plan.price_wei = selected["price_wei"] if selected else None
     plan.mint_value_wei = None
     plan.estimated_network_fee_wei = None
+    quote = await eth_usdt_quote()
+    plan.eth_usdt_rate = quote[0] if quote else None
+    plan.rate_checked_at = quote[1] if quote else None
 
     if not active:
         if future:
@@ -53,7 +57,7 @@ async def refresh_mint_plan(plan: MintPlan, wallet: Wallet, client: OpenSeaClien
         return plan
 
     try:
-        status, transaction = await client.build_mint(plan.collection_slug, wallet.address)
+        status, transaction = await client.build_mint(plan.collection_slug, wallet.address, plan.quantity or 1)
     except OpenSeaUnavailable as error:
         if error.status != 503:
             raise
@@ -65,13 +69,12 @@ async def refresh_mint_plan(plan: MintPlan, wallet: Wallet, client: OpenSeaClien
         if transaction.get("chain") != detail["chain"]:
             raise OpenSeaUnavailable("OpenSea returned a different mint chain.")
         value = transaction_value_wei(transaction["value"])
-        max_active_price = max((stage["price_wei"] or 0) for stage in active)
+        max_active_price = max((stage["price_wei"] or 0) for stage in active) * (plan.quantity or 1)
         if value > max_active_price or value >= 2**63:
             raise OpenSeaUnavailable("Mint value exceeds the verified active-stage price.")
         plan.status = "ready_for_approval"
         plan.status_note = "OpenSea prepared this wallet's mint. Approve the transaction in MetaMask."
         plan.mint_value_wei = value
-        plan.price_wei = value
         if len(active) > 1:
             plan.stage_name = "Eligible active stage"
         plan.estimated_network_fee_wei = await estimate_network_fee(transaction, wallet.address, detail["chain"])

@@ -189,8 +189,8 @@ class MintlyNotifier extends StateNotifier<MintlyState> {
     return ok;
   }
 
-  Future<void> importOpenSeaMint(String url) async {
-    await _api.importOpenSeaMint(url);
+  Future<void> importOpenSeaMint(String url, {int quantity = 1, String? walletId}) async {
+    await _api.importOpenSeaMint(url, quantity: quantity, walletId: walletId);
     await loadInitialData();
   }
 

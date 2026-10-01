@@ -19,6 +19,7 @@ router = APIRouter(prefix="/mint-plans", tags=["mint-plans"])
 class ImportMintPlanRequest(BaseModel):
     url: str = Field(min_length=20, max_length=300)
     wallet_id: str | None = None
+    quantity: int = Field(default=1, ge=1, le=100, strict=True)
 
 
 def eth_amount(value: int | None) -> str | None:
@@ -29,7 +30,16 @@ def eth_amount(value: int | None) -> str | None:
 
 
 def response(plan: MintPlan, wallet: Wallet) -> dict:
+    mint_value = plan.mint_value_wei
+    if mint_value is None and plan.price_wei is not None:
+        mint_value = plan.price_wei * plan.quantity
+    total = mint_value + plan.estimated_network_fee_wei if mint_value is not None and plan.estimated_network_fee_wei is not None else None
+    rate_fresh = plan.rate_checked_at and aware(plan.rate_checked_at) > datetime.now(timezone.utc) - timedelta(minutes=5)
+    total_usdt = format(Decimal(eth_amount(total)) * Decimal(plan.eth_usdt_rate), '.4f') if total is not None and plan.eth_usdt_rate and rate_fresh else None
     return {
+        "quantity": plan.quantity, "estimated_total_eth": eth_amount(total),
+        "estimated_total_usdt": total_usdt, "eth_usdt_rate": plan.eth_usdt_rate if rate_fresh else None,
+        "rate_checked_at": plan.rate_checked_at, "rate_source": "Coinbase ETH-USDT",
         "id": plan.id, "wallet_id": plan.wallet_id,
         "wallet_address": wallet.address,
         "collection_name": plan.collection_name,
@@ -84,6 +94,8 @@ async def import_open_sea_plan(req: ImportMintPlanRequest,
                             opensea_url=detail["opensea_url"],
                             status="unverified", status_note="Checking OpenSea drop")
             db.add(plan)
+        plan.quantity = req.quantity
+        plan.notified_stage_uuid = None
         await refresh_mint_plan(plan, wallet, client, detail=detail)
         await db.commit()
         await db.refresh(plan)

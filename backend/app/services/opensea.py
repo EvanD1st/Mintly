@@ -182,13 +182,13 @@ class OpenSeaClient:
         stage_schedule(data)
         return data
 
-    async def build_mint(self, slug: str, wallet_address: str) -> tuple[int, dict | None]:
+    async def build_mint(self, slug: str, wallet_address: str, quantity: int = 1) -> tuple[int, dict | None]:
         """Read-only preparation: OpenSea returns calldata; this never signs or sends it."""
-        if not SLUG_RE.fullmatch(slug) or not is_address(wallet_address):
+        if not SLUG_RE.fullmatch(slug) or not is_address(wallet_address) or type(quantity) is not int or not 1 <= quantity <= 100:
             raise OpenSeaUnavailable("Invalid drop or wallet address.", 400)
         status, data = await self._request("POST", f"/drops/{slug}/mint",
                                            payload={"minter": to_checksum_address(wallet_address),
-                                                    "quantity": 1}, key=await self._key())
+                                                    "quantity": quantity}, key=await self._key())
         if status == 200:
             target, calldata, value = data.get("to"), data.get("data"), data.get("value")
             if (not is_address(target or "") or target.lower() != SEADROP_V1_ADDRESS.lower()
