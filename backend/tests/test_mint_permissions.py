@@ -19,6 +19,12 @@ from app.services.mint_permission import permission_typed_data, redeem_calldata,
 from app.services.opensea import OpenSeaUnavailable
 from app.services.signer.base import SEADROP_V1_ADDRESS, MINT_PUBLIC_SELECTOR
 
+class RepeatableGasPrice:
+    def __await__(self):
+        async def value():return 1000000000
+        return value().__await__()
+
+
 def calldata(contract,wallet,quantity):
     return '0x'+MINT_PUBLIC_SELECTOR+encode(['address','address','address','uint256'],[contract,'0x'+'0'*40,wallet,quantity]).hex()
 
@@ -84,7 +90,7 @@ async def test_permission_is_private_single_use_cancellable_and_never_imports_us
     test_db.add(plan); await test_db.commit()
     monkeypatch.setattr(settings,'ENABLE_MINT_PERMISSIONS',True)
     monkeypatch.setattr('app.api.mint_permissions.relayer_account',lambda:operator)
-    provider=SimpleNamespace(provider=SimpleNamespace(disconnect=AsyncMock()),eth=SimpleNamespace(get_balance=AsyncMock(return_value=10**18),gas_price=__import__('asyncio').sleep(0,result=1000000000)))
+    provider=SimpleNamespace(provider=SimpleNamespace(disconnect=AsyncMock()),eth=SimpleNamespace(get_balance=AsyncMock(return_value=10**18),gas_price=RepeatableGasPrice()))
     monkeypatch.setattr('app.api.mint_permissions.checked_provider',AsyncMock(return_value=provider))
     async def refresh(plan,wallet,client,transaction_out):
         transaction_out.update(chain='base',to=SEADROP_V1_ADDRESS,value='20',data=calldata(plan.contract_address,wallet.address,2))
@@ -102,14 +108,17 @@ async def test_permission_is_private_single_use_cancellable_and_never_imports_us
             unfunded=await client.post('/api/mint-permissions',json=req)
             assert unfunded.status_code==409 and 'funding' in unfunded.json()['detail']
             assert (await client.get('/api/mint-permissions')).json()==[]
-            provider.eth.get_balance=AsyncMock(return_value=10**18)
+            # Less than the hard fee ceiling, but enough for this quote plus mint.
+            provider.eth.get_balance=AsyncMock(return_value=500000000000000)
             too_low=await client.post('/api/mint-permissions',json={**req,'max_mint_value_wei':'19'})
             assert too_low.status_code==409
-            provider.eth.gas_price=__import__('asyncio').sleep(0,result=1000000000)
+            provider.eth.gas_price=RepeatableGasPrice()
             created=await client.post('/api/mint-permissions',json=req)
             assert created.status_code==200,created.text
             payload=created.json(); code=payload['code']; pid=payload['id']
             assert 'signature' not in payload and 'typed_data' not in payload
+            assert payload['gas_fee_wei']=='450000000000000'
+            assert int(payload['total_value_wei'])==450000000000020
             assert (await client.post('/api/mint-permissions',json=req)).status_code==409
             challenge=await client.post('/api/mint-permission-link/challenge',json={'code':code})
             assert challenge.status_code==200

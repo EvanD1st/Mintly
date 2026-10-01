@@ -44,7 +44,8 @@ user wallet key there. Keep a secure operator backup; keep gas balances small.
 Set `ENABLE_MINT_PERMISSIONS=true` for both containers and keep the default
 `MINT_RELAYER_KEY_FILE=/run/opensea/mint-relayer.key`. The maximum estimated gas
 fee per execution is `MINT_RELAYER_MAX_FEE_WEI` (default 0.001 ETH).
-The relayer must hold at least that amount before requests can be accepted.
+The relayer must hold at least the current quoted gas budget before requests
+can be accepted. The 0.001 ETH ceiling is not a required minimum deposit.
 This is a relayer operating limit; L2 data fees can be additional. The user
 permission fixes their exact debit independently of the operator's gas cost.
 Legacy signer and unattended task routes remain disabled.

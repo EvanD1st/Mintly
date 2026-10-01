@@ -72,8 +72,7 @@ async def create_permission(req:CreatePermission,user:User=Depends(get_current_u
             raise OpenSeaUnavailable('Automatic public mints can be authorized at most 24 hours before the stage opens.',409)
         web3=await checked_provider(next(k for k,v in CHAINS.items() if v[0]==plan.chain_id),wallet.address)
         try:
-            if await web3.eth.get_balance(account.address) < settings.MINT_RELAYER_MAX_FEE_WEI:
-                raise OpenSeaUnavailable('Operator gas relayer needs funding before automatic permissions can be accepted.',409)
+            operator_balance = await web3.eth.get_balance(account.address)
             if plan.status=='scheduled': tx=await scheduled_public_execution(web3,plan,wallet)
             # A fixed fee budget is quoted before signing; never silently increased.
             gas_quote = int(await web3.eth.gas_price) * 450000
@@ -85,6 +84,9 @@ async def create_permission(req:CreatePermission,user:User=Depends(get_current_u
         if int(execution['value'])>int(req.max_mint_value_wei) or (plan.mint_value_wei is not None and int(execution['value'])!=plan.mint_value_wei):
             raise OpenSeaUnavailable('Mint price changed or exceeds your cap. Refresh the cost preview.',409)
         execution=with_gas_reimbursement(execution,account.address,gas_quote)
+        if operator_balance < gas_quote:
+            quoted_eth=format(Decimal(gas_quote)/Decimal(10**18),'f')
+            raise OpenSeaUnavailable(f'Operator gas relayer needs funding of at least {quoted_eth} ETH on this network for this quote. Users reimburse successful execution.',409)
         if user_balance < total_user_debit(execution):
             raise OpenSeaUnavailable('Your wallet needs the mint price plus the quoted gas fee before authorizing.',409)
         expiry=min(execute_after+timedelta(minutes=req.expiry_minutes),aware(plan.ends_at))
