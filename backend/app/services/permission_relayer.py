@@ -15,7 +15,9 @@ from app.services.mint_permission import REGISTRY, checked_provider, relayer_acc
 from app.services.opensea import CHAINS
 
 async def process_one_permission(db):
-    if not settings.ENABLE_MINT_PERMISSIONS: return
+    # The real wallet rejects both custom signatures. Local contract tests are
+    # experimental; enabling an old production flag must not activate them.
+    if settings.APP_ENV == 'production' or not settings.ENABLE_MINT_PERMISSIONS: return
     # Serialize the operator nonce across workers; held through durable preparation.
     if db.bind.dialect.name == 'postgresql':
         await db.execute(text('SELECT pg_advisory_xact_lock(731654202)'))

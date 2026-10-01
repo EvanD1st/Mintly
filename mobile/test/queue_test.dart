@@ -10,6 +10,7 @@ void main() {
     )));
     expect(find.text('Mint plans'), findsOneWidget);
     expect(find.text('No mint plans yet'), findsOneWidget);
-    expect(find.textContaining('MetaMask asks you to approve'), findsOneWidget);
+    expect(find.textContaining('MetaMask ask you to confirm'), findsOneWidget);
+    expect(find.textContaining('Scheduled automatic minting is currently unavailable'), findsOneWidget);
   });
 }

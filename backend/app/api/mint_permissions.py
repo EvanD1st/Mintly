@@ -15,6 +15,7 @@ from app.services.auth import token_digest
 from app.services.mint_plans import aware, refresh_mint_plan
 from app.services.opensea import CHAINS, OpenSeaClient, OpenSeaUnavailable
 from app.services.mint_permission import checked_provider, relayer_account, permission_typed_data, validate_signature, revoke_calldata, scheduled_public_execution, with_gas_reimbursement, total_user_debit
+from app.services.wallet_signing_policy import require_browser_mint_signing
 
 def user_cost(plan,execution):
     value=total_user_debit(execution)
@@ -41,7 +42,7 @@ class SignPermission(PermissionCode):
     userop_signature: str | None = Field(default=None,pattern=r'^0x[0-9a-fA-F]{130}$')
 
 def public_status(p):
-    return {'id':p.id,'plan_id':p.plan_id,'status':p.status,'note':p.note,'expires_at':p.expires_at,'execute_after':p.execute_after,'tx_hash':p.tx_hash}
+    return {'id':p.id,'plan_id':p.plan_id,'status':p.status,'note':p.note,'expires_at':p.expires_at,'execute_after':p.execute_after,'tx_hash':p.tx_hash,'can_revoke':p.status=='cancelled' and bool(p.signature)}
 
 def enabled():
     if not settings.ENABLE_MINT_PERMISSIONS:
@@ -54,6 +55,7 @@ async def list_permissions(user:User=Depends(get_current_user),db:AsyncSession=D
 
 @router.post('')
 async def create_permission(req:CreatePermission,user:User=Depends(get_current_user),db:AsyncSession=Depends(get_db)):
+    require_browser_mint_signing()
     enabled()
     plan=(await db.execute(select(MintPlan).where(MintPlan.id==req.plan_id,MintPlan.user_id==user.id).with_for_update())).scalar_one_or_none()
     if plan is None: raise HTTPException(404,'Mint plan not found.')
@@ -121,19 +123,22 @@ async def code_permission(code,db):
 
 @public_router.post('/challenge')
 async def challenge(req:PermissionCode,db:AsyncSession=Depends(get_db)):
-    enabled(); p=await code_permission(req.code,db)
+    p=await code_permission(req.code,db)
     plan=await db.get(MintPlan,p.plan_id)
     if p.status=='cancelled':
         if not p.signature: raise HTTPException(409,'No spending signature was granted; nothing needs on-chain revocation.')
         return {'mode':'revoke','wallet_address':p.typed_data['message']['delegator'],'chain_id':plan.chain_id,
                 'transaction':{'to':p.typed_data['domain']['verifyingContract'],'data':revoke_calldata(p.typed_data,p.signature),'value':'0x0'},
                 'collection':plan.collection_name}
+    require_browser_mint_signing()
+    enabled()
     return {**user_cost(plan,p.execution),'typed_data':p.typed_data,'wallet_address':p.typed_data['message']['delegator'],'chain_id':plan.chain_id,
             'stage_name':plan.stage_name,'stage_type':plan.stage_type,'collection':plan.collection_name,'nft_contract':plan.contract_address,'quantity':plan.quantity,'mint_value_wei':p.execution['value'],
             'execute_after':p.execute_after,'expires_at':p.expires_at,'note':p.note}
 
 @public_router.post('/prepare-userop')
 async def prepare_userop(req:SignPermission,db:AsyncSession=Depends(get_db)):
+    require_browser_mint_signing()
     enabled(); p=await code_permission(req.code,db)
     if p.status!='awaiting_signature' or 'direct_gas' not in p.execution:
         raise HTTPException(409,'Direct wallet gas permission unavailable.')
@@ -151,6 +156,7 @@ async def prepare_userop(req:SignPermission,db:AsyncSession=Depends(get_db)):
 
 @public_router.post('/complete')
 async def complete(req:SignPermission,db:AsyncSession=Depends(get_db)):
+    require_browser_mint_signing()
     enabled(); p=await code_permission(req.code,db)
     if p.status!='awaiting_signature': raise HTTPException(409,'This code is for revocation, not mint approval.')
     try:

@@ -37,8 +37,8 @@ class QueueScreen extends ConsumerWidget {
           if(['awaiting_signature','armed'].contains(permission['status'])) TextButton(onPressed:() async {
             try {await notifier.cancelMintPermission(permission['id'] as String);} catch(error) {if(context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('$error')));}
           },child:const Text('Cancel permission')),
-          if(permission['status']=='cancelled') TextButton(onPressed:() async {
-            try {final result=await notifier.requestMintRevocation(permission['id'] as String);if(context.mounted) await _permissionDialog(context,result,revoke:true);} catch(error) {if(context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('$error')));}
+          if(permission['can_revoke']==true) TextButton(onPressed:() async {
+            try {final result=await notifier.requestMintRevocation(permission['id'] as String);if(context.mounted) await _revocationDialog(context,result);} catch(error) {if(context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('$error')));}
           },child:const Text('Revoke on-chain')),
         ])))),
         Text(
@@ -63,10 +63,14 @@ class QueueScreen extends ConsumerWidget {
         ),
         const SizedBox(height: 4),
         Text(
-          'OpenSea checks the stage and linked wallet. MetaMask asks you to approve each mint.',
+          'Check eligibility and costs here. OpenSea and MetaMask ask you to confirm the mint when the eligible stage opens.',
           style: TextStyle(fontSize: 13, color: muted),
         ),
         const SizedBox(height: 20),
+        const Card(child: Padding(
+          padding: EdgeInsets.all(16),
+          child: Text('Scheduled automatic minting is currently unavailable with MetaMask. Wallet linking does not grant spending approval. Use Open on OpenSea for a wallet-ready plan and review its transaction in MetaMask.'),
+        )),
 
         if (state.isLoading) const LinearProgressIndicator(),
         if (state.error != null) Card(child: Padding(
@@ -229,11 +233,11 @@ class QueueScreen extends ConsumerWidget {
     ));
   }
 
-  Future<void> _permissionDialog(BuildContext context, Map<String,dynamic> result,{bool revoke=false}) => showDialog<void>(context:context,builder:(dialogContext)=>AlertDialog(
-    title:Text(revoke ? 'Revoke in MetaMask' : 'Review mint and gas fee'),
+  Future<void> _revocationDialog(BuildContext context, Map<String,dynamic> result) => showDialog<void>(context:context,builder:(dialogContext)=>AlertDialog(
+    title:const Text('Revoke in MetaMask'),
     content:SingleChildScrollView(child:Column(mainAxisSize:MainAxisSize.min,crossAxisAlignment:CrossAxisAlignment.start,children:[
-      if(!revoke) Text('${result['gas_mode'] == 'direct_wallet' ? 'Maximum network gas' : 'Fixed gas fee'}: ${result['gas_fee_eth']} ETH\nMaximum total: ${result['user_debit_eth']} ETH\nEstimated equivalent: ${result['user_debit_usdt'] ?? 'Unavailable'} USDT\n${result['gas_mode'] == 'direct_wallet' ? 'Your main wallet pays actual gas up to this ceiling. Approve two signatures when arming; no prompt at mint time. Failed operations can consume gas.' : 'The total includes mint price and the fixed fee. Both revert together if minting fails.'} Payment is ETH; USDT is a display estimate. Requires an already-enabled compatible MetaMask Smart Account. Mintly never holds your wallet key.'),
-      Text('Open ${result['approve_url']} in your MetaMask browser. Enter this code and review before signing. Permission expires after the scheduled mint window.'),
+      const Text('Revocation requires your confirmation in MetaMask and costs network gas. It revokes an existing signed permission; it does not mint.'),
+      Text('Open ${result['approve_url']} in your MetaMask browser. Enter this code and review the revocation transaction.'),
       SelectableText('${result['code']}'),
     ])),
     actions:[TextButton(onPressed:()=>Clipboard.setData(ClipboardData(text:result['code'] as String)),child:const Text('Copy code')),TextButton(onPressed:()=>Navigator.pop(dialogContext),child:const Text('Done'))],
@@ -272,9 +276,6 @@ class QueueScreen extends ConsumerWidget {
           SelectableText(plan.openSeaUrl, style: TextStyle(color: muted, fontSize: 11)),
           const SizedBox(height: 10),
           Wrap(spacing: 8, children: [
-            if ((ready || (plan.status == 'scheduled' && plan.stageType == 'public_sale')) && plan.priceEth != null) FilledButton(onPressed:() async {
-              try {final result=await notifier.requestMintPermission(plan);if(context.mounted) await _permissionDialog(context,result);} catch(error) {if(context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('$error')));}
-            },child:const Text('Quote automatic mint')),
             OutlinedButton(onPressed: () async {
               final controller = TextEditingController(text: '${plan.quantity}');
               final selected = await showDialog<int>(context: context, builder: (dialogContext) => AlertDialog(

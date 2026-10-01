@@ -1,16 +1,36 @@
 # One-use mint permissions
 
-Implemented through MetaMask's deployed delegation framework, not an unrestricted
-ETH allowance. The standard ERC-7715 permission types currently cover transfers;
-an exact mint uses a custom signed delegation with exact batch execution, timestamp and
-one-use enforcers. The SDK 2.0.0 registry is pinned in the backend and live code,
-chain ID and the delegator's EIP-7702 implementation are checked before approval.
+## Production status: unsupported browser signing (2026-10-01)
+
+Scheduled automatic minting through the linked MetaMask wallet is unavailable.
+MetaMask rejects the custom delegation signature from an external website. It also
+rejects the proposed owner UserOperation typed signature because its verifying
+contract is an internal wallet account. Local contract tests used ephemeral signing
+keys and did not establish compatibility with the MetaMask browser prompt.
+
+Production API and worker guards reject this experimental path even if its old
+activation flags are enabled. The app and website no longer request these signatures.
+Mint plans, eligibility checks, quantity selection and cost estimates remain available.
+Users must use **Open on OpenSea** for a wallet-ready plan and confirm the actual mint
+and fee in MetaMask when the eligible stage opens. Existing signed permissions remain
+revocable; cancelled unsigned requests do not need on-chain revocation.
+
+MetaMask's published Advanced Permissions types cover token transfers. Its supported
+Advanced Permissions network table does not include Robinhood, although its smart-account
+contracts support Robinhood. Broadening the wallet permission is not a substitute for
+the promised exact-mint scope. See [browser signing review](metamask-browser-signing.md).
+
+## Local contract experiments
+
+The experimental contract implementation uses exact batch execution, timestamp and
+one-use enforcers. The SDK 2.0.0 registry is pinned in the backend. These contracts and
+their tests are retained for research; they are not a working production wallet flow.
 
 Users must already have the compatible MetaMask Smart Account enabled on the
 selected network. The address stays the same. Mintly never upgrades an account,
 imports its key, stores seed phrases, or creates a custodial user wallet.
-The user signs one exact spending permission in the browser. OpenSea and MetaMask
-do not need to be opened again at the scheduled execution time.
+The local tests create exact spending signatures with disposable test keys. Real
+MetaMask accounts cannot produce these signatures through Mintly's browser flow.
 
 Scope: native ETH SeaDrop public mints. Future stages can be authorized up to 24
 hours before opening, only when the on-chain public stage matches OpenSea's price,
@@ -41,7 +61,8 @@ operator-only key with `tools/setup_mint_relayer.py --key-file
 The helper prints the public address only and writes a mode-600 key. Never put a
 user wallet key there. Keep a secure operator backup; keep gas balances small.
 
-Set `ENABLE_MINT_PERMISSIONS=true` for both containers and keep the default
+For isolated local experiments only, `ENABLE_MINT_PERMISSIONS=true` enables the
+test lifecycle. Keep production disabled. The experimental default is
 `MINT_RELAYER_KEY_FILE=/run/opensea/mint-relayer.key`. The maximum estimated gas
 fee per execution is `MINT_RELAYER_MAX_FEE_WEI` (default 0.001 ETH).
 The relayer must hold at least the current quoted gas budget before requests
@@ -50,9 +71,8 @@ This is a relayer operating limit; L2 data fees can be additional. The user
 permission fixes their exact debit independently of the operator's gas cost.
 Legacy signer and unattended task routes remain disabled.
 
-An operator-funded relayer and a verified RPC are required for live activation.
-The repository default is disabled, so installing code alone never authorizes
-spending. A compatible user account must still explicitly approve each permission.
+An operator-funded relayer and verified RPC alone do not establish browser support.
+Production rejects this signing path regardless of those balances or flags.
 
 ## Cancellation and transaction recovery
 

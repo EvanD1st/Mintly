@@ -11,7 +11,7 @@ from app.services.mint_plans import aware
 
 
 async def process_direct_permission(db,p,plan,wallet,chain):
-    if not settings.ENABLE_DIRECT_WALLET_GAS:
+    if settings.APP_ENV == 'production' or not settings.ENABLE_DIRECT_WALLET_GAS:
         return
     now=datetime.now(timezone.utc)
     web3=None

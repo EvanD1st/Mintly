@@ -1,6 +1,6 @@
 # Direct smart-wallet gas investigation
 
-Investigated and implemented locally 2026-10-01. Live direct-wallet submission remains disabled pending a verified bundler endpoint.
+Investigated and implemented locally 2026-10-01. **The candidate is not compatible with MetaMask browser signing. Production approval and submission are disabled.** Verified bundler endpoints do not fix the wallet's signing restrictions. See [browser signing review](metamask-browser-signing.md).
 
 ## Verified read-only on Robinhood mainnet
 
@@ -36,9 +36,9 @@ No live transaction was signed or broadcast in this investigation. No production
 
 ## Implemented flow and local verification
 
-`ENABLE_DIRECT_WALLET_GAS=true` selects direct wallet gas for new permissions. `ENABLE_DIRECT_WALLET_BROADCAST=false` allows approvals and live bundler simulation without sending; set it true only after verifying compatibility. The default is false. Existing legacy permissions retain their original execution path. Direct mode requires no operator key or balance and does not fall back to the legacy relayer when its bundler is missing.
+In isolated local contract tests, `ENABLE_DIRECT_WALLET_GAS=true` selects direct wallet gas for new permissions. These tests generate signatures using ephemeral keys. The production API and both production worker paths now reject this experiment even if its old flags are enabled. Production flags must remain disabled; the previous browser approval instructions were incorrect.
 
-The user signs two typed messages during arming: a self-delegation with exact-execution, timestamp and single-use caveats, then an owner-signed UserOperation wrapping redemption of that delegation. Signing the delegation alone does not arm the plan. The operation uses an independent random nonce key, no factory and no paymaster. No user private key reaches the backend.
+The local experiment requires two typed signatures: a self-delegation with exact-execution, timestamp and single-use caveats, then an owner-signed UserOperation wrapping redemption of that delegation. MetaMask blocks both requests from websites for its internal accounts. These signatures are produced only by test keys in the contract tests. The operation uses an independent random nonce key, no factory and no paymaster. No user private key reaches the backend.
 
 The backend verifies the wallet EntryPoint, bundler chain ID and supported EntryPoint. It quotes bounded gas limits and a fee ceiling before approval. At mint time it estimates the signed operation and rejects gas requirements above its limits. It stores the expected operation hash before submission, never changes signed fields, never obtains a fresh nonce for retries and tracks receipts after ambiguous submission outcomes. The permission status hash is a UserOperation hash in this mode, rather than an enclosing transaction hash.
 
@@ -54,7 +54,7 @@ Create a provider app for Robinhood mainnet and obtain an authenticated ERC-4337
 
 Place a mode-600 JSON file at `/run/opensea/mint-bundlers.json`, mapping supported chain ID strings to HTTPS bundler URLs. For example, the object should have key `"4663"` and your provider endpoint as its value. This is already inside the backend/worker private mounted directory. Alternatively set `MINT_BUNDLER_CONFIG_FILE` to another private mounted path.
 
-Enable `ENABLE_DIRECT_WALLET_GAS` after verifying the endpoint, with `ENABLE_DIRECT_WALLET_BROADCAST=false` for the user-reviewed browser/simulation test. Enable broadcasting only after that test passes. Keep `ENABLE_MINT_PERMISSIONS=true` for the permission API/worker. Then deploy the backend and the Flutter review wording together. No database migration or new native mobile dependency is required.
+Keep `ENABLE_MINT_PERMISSIONS=false` and `ENABLE_DIRECT_WALLET_BROADCAST=false` in production. The API and workers also enforce the production block independently of these flags. A supported, narrowly scoped wallet authorization protocol must be designed and verified in the actual wallet before any activation is reconsidered.
 
 ## Primary references
 

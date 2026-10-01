@@ -2,9 +2,10 @@
 <title>Authorize one mint · Mintly</title><style>
 body{background:#101713;color:#e5f8e2;font-family:system-ui;margin:0;padding:30px;display:grid;place-items:center}main{max-width:520px;background:#19231c;padding:24px;border-radius:18px}p{line-height:1.5;overflow-wrap:anywhere}input,button{font:inherit;padding:12px;margin:8px 0;width:100%;box-sizing:border-box}button{background:#b5eea3;border:0;border-radius:8px}button:disabled{opacity:.5}#review{white-space:pre-line}
 </style><script src="/authorize-mint.js" defer></script></head><body><main>
-<h1>Authorize one exact mint</h1>
-<p>These approvals authorize spending for one mint. It is different from wallet linking. Never enter a recovery phrase or private key. Your account must already be a compatible MetaMask Smart Account; Mintly will not upgrade it.</p>
+<h1>Scheduled signing unavailable</h1>
+<p>MetaMask blocks the custom signatures used by this scheduled mint flow. Mintly cannot arm it with your current MetaMask account. Your saved mint plan is still available. At the eligible stage's start, use <strong>Open on OpenSea</strong> in Mint plans and confirm the mint in MetaMask.</p>
+<p>Wallet linking still works. Never enter your recovery phrase or private key. This page can still revoke a previously signed permission.</p>
 <form id="review-form"><label for="code">Permission code from Mintly</label><input id="code" maxlength="32" autocomplete="off" spellcheck="false" required><button id="load">Review permission</button></form>
-<p id="review"></p><button id="approve" disabled>Approve this one mint in MetaMask</button>
-<p>The review shows how gas is paid. With direct wallet gas, your main wallet pays actual network gas up to the approved ceiling; failed or prematurely submitted operations can still consume gas. Mintly does not hold your wallet key. The legacy relayer mode uses the fixed reimbursement shown in its review. This permission is valid for at most 30 minutes from its scheduled start and allows only the exact mint. Direct wallet gas also requires a second signature binding the operation and gas ceiling. Future public stages can be authorized up to 24 hours before opening. Cancelling in Mintly stops its worker; a signed permission remains valid on-chain until expiry unless you revoke it in your wallet. Submitted transactions cannot be cancelled here.</p>
+<p id="review"></p><button id="approve" disabled>Revoke existing permission in MetaMask</button>
+<p>For existing signed permissions, cancelling in Mintly stops its worker. On-chain revocation requires your confirmation in MetaMask and costs network gas. Submitted transactions cannot be cancelled here.</p>
 <p id="status" role="status"></p></main></body></html>

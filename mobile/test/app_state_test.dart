@@ -17,6 +17,7 @@ const savedPlan = <String, dynamic>{
   'wallet_address': '0x2222222222222222222222222222222222222222',
   'status': 'ready_for_approval',
   'status_note': 'Ready for approval',
+  'price_eth': '0.0001',
 };
 
 http.Response liveResponse(http.Request request) {
@@ -64,6 +65,7 @@ void main() {
     expect(find.text('Saved collection'), findsOneWidget);
     expect(find.textContaining('Mint permissions:'), findsOneWidget);
     expect(find.text('No mint plans yet'), findsNothing);
+    expect(find.text('Quote automatic mint'), findsNothing);
 
     permissionsFail = false;
     await notifier.loadInitialData();
