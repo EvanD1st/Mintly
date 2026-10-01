@@ -90,9 +90,9 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
 
           Row(children: [
             const Expanded(child: Text('NFT quantity')),
-            IconButton(onPressed: _isImporting || _quantity <= 1 ? null : () => setState(() => _quantity--), icon: const Icon(Icons.remove)),
+            TextButton(onPressed: _isImporting || _quantity <= 1 ? null : () => setState(() => _quantity--), child: const Text('−')),
             Text('$_quantity'),
-            IconButton(onPressed: _isImporting || _quantity >= 100 ? null : () => setState(() => _quantity++), icon: const Icon(Icons.add)),
+            TextButton(onPressed: _isImporting || _quantity >= 100 ? null : () => setState(() => _quantity++), child: const Text('+')),
           ]),
           Text('OpenSea checks this quantity against your wallet’s stage limit and remaining supply.', style: TextStyle(color: muted, fontSize: 11)),
 
