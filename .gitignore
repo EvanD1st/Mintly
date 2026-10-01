@@ -9,6 +9,7 @@
 *.jks
 cookies.json
 *cookies*
+opensea-key.json
 private_keys*
 
 # Python

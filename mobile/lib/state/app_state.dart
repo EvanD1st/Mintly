@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/drop_model.dart';
 import '../models/task_model.dart';
 import '../models/activity_model.dart';
+import '../models/mint_plan_model.dart';
 import '../services/api_service.dart';
 
 class MintlyState {
@@ -12,6 +13,7 @@ class MintlyState {
   final int selectedQty;
   final String feeCap;
   final List<MintTaskModel> queue;
+  final List<MintPlanModel> mintPlans;
   final List<ActivityModel> activities;
   final bool isMonitoring;
   final bool isConsentChecked;
@@ -29,6 +31,7 @@ class MintlyState {
     this.selectedQty = 1,
     this.feeCap = '0.0001',
     required this.queue,
+    this.mintPlans = const [],
     required this.activities,
     this.isMonitoring = true,
     this.isConsentChecked = false,
@@ -47,6 +50,7 @@ class MintlyState {
     int? selectedQty,
     String? feeCap,
     List<MintTaskModel>? queue,
+    List<MintPlanModel>? mintPlans,
     List<ActivityModel>? activities,
     bool? isMonitoring,
     bool? isConsentChecked,
@@ -64,6 +68,7 @@ class MintlyState {
       selectedQty: selectedQty ?? this.selectedQty,
       feeCap: feeCap ?? this.feeCap,
       queue: queue ?? this.queue,
+      mintPlans: mintPlans ?? this.mintPlans,
       activities: activities ?? this.activities,
       isMonitoring: isMonitoring ?? this.isMonitoring,
       isConsentChecked: isConsentChecked ?? this.isConsentChecked,
@@ -96,12 +101,14 @@ class MintlyNotifier extends StateNotifier<MintlyState> {
     try {
       final drops = await _api.fetchDrops(state.filter);
       final queue = await _api.fetchQueue();
+      final mintPlans = await _api.fetchMintPlans();
       final activities = await _api.fetchActivity();
       state = state.copyWith(
         drops: drops,
         selectedDrop: drops.isNotEmpty ? drops.first : null,
         selectedStage: drops.isNotEmpty && drops.first.stages.isNotEmpty ? drops.first.stages.first : null,
         queue: queue,
+        mintPlans: mintPlans,
         activities: activities,
         sourceStatusText: _api.sourceStatusText,
         checkedWalletLabel: _api.checkedWalletLabel,
@@ -180,6 +187,22 @@ class MintlyNotifier extends StateNotifier<MintlyState> {
     final ok = await _api.importDrop(text);
     await loadInitialData();
     return ok;
+  }
+
+  Future<void> importOpenSeaMint(String url) async {
+    await _api.importOpenSeaMint(url);
+    await loadInitialData();
+  }
+
+  Future<MintPlanModel> refreshMintPlan(String id) async {
+    final plan = await _api.refreshMintPlan(id);
+    await loadInitialData();
+    return plan;
+  }
+
+  Future<void> removeMintPlan(String id) async {
+    await _api.removeMintPlan(id);
+    await loadInitialData();
   }
 }
 

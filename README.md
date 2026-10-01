@@ -6,6 +6,9 @@ production API runs at https://mintly.duckdns.org/api. The [account and wallet
 guide](docs/real-data-accounts-wallet.md) explains sign-in, MetaMask linking,
 security limits, and the live feed.
 
+Users can prepare private [OpenSea mint plans](docs/opensea-mint-plans.md) for
+their linked wallet, with stage checks, gas estimates, and timed notifications.
+
 An admin creates accounts. Members must change their temporary passwords before
 using the app. A MetaMask address is linked through a short-lived, one-use message
 signature in a browser with the extension installed. Mintly never imports wallet

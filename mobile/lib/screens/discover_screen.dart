@@ -40,9 +40,9 @@ class DiscoverScreen extends ConsumerWidget {
         const SizedBox(height: 18),
         Row(children: [
           Expanded(child: Text('Current drops', style: Theme.of(context).textTheme.titleLarge)),
-          if (api.isAdmin) TextButton.icon(
+          TextButton.icon(
             onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ImportScreen())),
-            icon: const Icon(Icons.add), label: const Text('Import')),
+            icon: const Icon(Icons.add), label: const Text('Prepare mint')),
         ]),
         const SizedBox(height: 8),
         Wrap(spacing: 8, children: [

@@ -1,0 +1,11 @@
+services:
+  backend:
+    environment:
+      OPENSEA_KEY_FILE: /run/opensea/key.json
+    volumes:
+      - ${MINTLY_OPENSEA_DIR:?Set MINTLY_OPENSEA_DIR}:/run/opensea:rw
+  worker:
+    environment:
+      OPENSEA_KEY_FILE: /run/opensea/key.json
+    volumes:
+      - ${MINTLY_OPENSEA_DIR:?Set MINTLY_OPENSEA_DIR}:/run/opensea:rw

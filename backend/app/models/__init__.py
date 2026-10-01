@@ -6,6 +6,7 @@ from app.models.drop import Drop, MintStage
 from app.models.task import MintAuthorization, MintTask
 from app.models.activity import ActivityEvent, NotificationDevice
 from app.models.user import User, AuthSession, LoginAttempt, WalletPairing
+from app.models.mint_plan import MintPlan
 
 __all__ = [
     "Wallet",

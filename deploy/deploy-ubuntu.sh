@@ -15,7 +15,7 @@ if ! command -v docker >/dev/null || ! docker compose version >/dev/null 2>&1; t
     sudo -n systemctl enable --now docker
 fi
 DOCKER=(docker)
-if ! docker info >/dev/null 2>&1; then DOCKER=(sudo -n --preserve-env=MINTLY_ENV_FILE,MINTLY_RELEASE,MINTLY_FIREBASE_FILE,MINTLY_X_COOKIES_FILE docker); fi
+if ! docker info >/dev/null 2>&1; then DOCKER=(sudo -n --preserve-env=MINTLY_ENV_FILE,MINTLY_RELEASE,MINTLY_FIREBASE_FILE,MINTLY_X_COOKIES_FILE,MINTLY_OPENSEA_DIR docker); fi
 
 export MINTLY_ENV_FILE="$APP_DIR/shared/.env"
 export MINTLY_RELEASE="${MINTLY_RELEASE:-local}"
@@ -34,6 +34,10 @@ PY
 fi
 chmod 600 "$MINTLY_ENV_FILE"
 COMPOSE=("${DOCKER[@]}" compose --env-file "$MINTLY_ENV_FILE" -f "$RELEASE_DIR/backend/docker-compose.yml")
+export MINTLY_OPENSEA_DIR="$APP_DIR/shared/opensea"
+mkdir -p "$MINTLY_OPENSEA_DIR"
+chmod 700 "$MINTLY_OPENSEA_DIR"
+COMPOSE+=(-f "$RELEASE_DIR/backend/docker-compose.opensea.yml")
 if [[ -f "$APP_DIR/shared/firebase-service-account.json" ]]; then
     chmod 600 "$APP_DIR/shared/firebase-service-account.json"
     export MINTLY_FIREBASE_FILE="$APP_DIR/shared/firebase-service-account.json"

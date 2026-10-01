@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     TWIKIT_COOKIES_FILE: str = "./cookies.json"
     X_MONITORED_USER: str = "lakzonevn"
 
+    # Free OpenSea drop API key, rotated by the server before its 7-day expiry.
+    OPENSEA_KEY_FILE: str = "./opensea-key.json"
+
     # RPC Configuration
     RPC_ETHEREUM: str = "https://rpc.ankr.com/eth"
     RPC_BASE: str = "https://mainnet.base.org"

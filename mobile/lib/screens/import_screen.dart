@@ -12,6 +12,7 @@ class ImportScreen extends ConsumerStatefulWidget {
 
 class _ImportScreenState extends ConsumerState<ImportScreen> {
   final TextEditingController _textController = TextEditingController();
+  bool _isImporting = false;
 
   @override
   void dispose() {
@@ -22,6 +23,7 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
   @override
   Widget build(BuildContext context) {
     final notifier = ref.read(mintlyProvider.notifier);
+    final api = ref.watch(apiServiceProvider);
 
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final bg = MintlyColors.getBg(isDark);
@@ -43,7 +45,7 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
         children: [
           Text(
-            'BRING YOUR OWN LIST',
+            'PREPARE AN OPENSEA MINT',
             style: TextStyle(
               fontSize: 10,
               fontWeight: FontWeight.w700,
@@ -53,7 +55,7 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
           ),
           const SizedBox(height: 6),
           Text(
-            'Import a drop.',
+            'Check a mint.',
             style: TextStyle(
               fontSize: 28,
               fontWeight: FontWeight.w700,
@@ -64,13 +66,14 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
           ),
           const SizedBox(height: 4),
           Text(
-            'Paste a mint link or the full daily list.',
+            api.isAdmin ? 'Paste a direct OpenSea collection link or an admin list.' :
+              'Paste a direct OpenSea collection link for your linked MetaMask wallet.',
             style: TextStyle(fontSize: 13, color: muted),
           ),
           const SizedBox(height: 20),
 
           Text(
-            'Mint link or post text',
+            'OpenSea collection link${api.isAdmin ? ' or list text' : ''}',
             style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: ink),
           ),
           const SizedBox(height: 8),
@@ -79,50 +82,62 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
             maxLines: 7,
             style: TextStyle(fontSize: 14, color: ink),
             decoration: const InputDecoration(
-              hintText: 'Paste a mint link or the full daily list here…',
+              hintText: 'https://opensea.io/collection/example',
             ),
           ),
           const SizedBox(height: 14),
 
           Text(
-            'A post link may need an active X connection. Paste the full text when monitoring is unavailable.',
+            'Mintly checks OpenSea stage timing and wallet readiness. Gas is an estimate until MetaMask shows the final transaction. No mint is signed by importing.',
             style: TextStyle(fontSize: 11, color: muted, height: 1.4),
           ),
           const SizedBox(height: 24),
 
           ElevatedButton(
-            onPressed: () async {
+            onPressed: _isImporting ? null : () async {
               final text = _textController.text.trim();
               if (text.isEmpty) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
-                    content: Text('Paste a mint link or list first.'),
+                    content: Text('Paste an OpenSea link or list first.'),
                     duration: Duration(seconds: 2),
                   ),
                 );
                 return;
               }
 
+              setState(() => _isImporting = true);
               try {
-                final imported = await notifier.importList(text);
+                final uri = Uri.tryParse(text);
+                final isOpenSeaLink = uri != null && uri.scheme == 'https' && uri.host == 'opensea.io' &&
+                  uri.pathSegments.length >= 2 && uri.pathSegments.first == 'collection';
+                if (isOpenSeaLink) {
+                  await notifier.importOpenSeaMint(text);
+                } else if (api.isAdmin) {
+                  await notifier.importList(text);
+                } else {
+                  throw StateError('Members can import direct OpenSea collection links only.');
+                }
                 if (context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                    content: Text(imported ? 'Import complete.' : 'Connect to your server in Wallet before importing.'),
+                    content: Text(isOpenSeaLink ? 'Mint check saved. See Mint plans.' : 'List imported.'),
                   ));
-                  if (imported) Navigator.of(context).pop();
+                  Navigator.of(context).pop();
                 }
               } catch (error) {
                 if (context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$error')));
                 }
+              } finally {
+                if (mounted) setState(() => _isImporting = false);
               }
             },
-            child: const Row(
+            child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Text('Preview imported drops'),
-                SizedBox(width: 8),
-                Icon(Icons.arrow_forward, size: 16),
+                Text(_isImporting ? 'Checking OpenSea…' : 'Import and check'),
+                const SizedBox(width: 8),
+                const Icon(Icons.arrow_forward, size: 16),
               ],
             ),
           ),

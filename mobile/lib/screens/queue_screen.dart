@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../theme/colors.dart';
 import '../state/app_state.dart';
+import '../models/mint_plan_model.dart';
 
 class QueueScreen extends ConsumerWidget {
   const QueueScreen({super.key});
@@ -20,8 +23,10 @@ class QueueScreen extends ConsumerWidget {
     final soft = MintlyColors.getSoft(isDark);
 
     final hasTasks = state.queue.isNotEmpty;
+    final hasPlans = state.mintPlans.isNotEmpty;
 
-    return ListView(
+    return RefreshIndicator(onRefresh: notifier.loadInitialData, child: ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
       children: [
         Text(
@@ -35,7 +40,7 @@ class QueueScreen extends ConsumerWidget {
         ),
         const SizedBox(height: 6),
         Text(
-          'Mint history',
+          'Mint plans',
           style: TextStyle(
             fontSize: 28,
             fontWeight: FontWeight.w700,
@@ -46,14 +51,17 @@ class QueueScreen extends ConsumerWidget {
         ),
         const SizedBox(height: 4),
         Text(
-          hasTasks
-              ? 'Previous task records for your account.'
-              : 'MetaMask asks you to approve each mint transaction.',
+          'OpenSea checks the stage and linked wallet. MetaMask asks you to approve each mint.',
           style: TextStyle(fontSize: 13, color: muted),
         ),
         const SizedBox(height: 20),
 
-        if (!hasTasks) ...[
+        if (hasPlans) ...[
+          ...state.mintPlans.map((plan) => _planCard(context, notifier, plan, ink, muted, panel, line)),
+          const SizedBox(height: 16),
+        ],
+
+        if (!hasPlans && !hasTasks) ...[
           const SizedBox(height: 40),
           Center(
             child: Container(
@@ -71,19 +79,20 @@ class QueueScreen extends ConsumerWidget {
           const SizedBox(height: 18),
           Center(
             child: Text(
-              'No task history',
+              'No mint plans yet',
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: ink),
             ),
           ),
           const SizedBox(height: 8),
           Center(
             child: Text(
-              'Browse live drops and open the source to mint with MetaMask.',
+              'Import an OpenSea collection link to check its stage and your linked wallet.',
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 13, color: muted, height: 1.4),
             ),
           ),
-        ] else ...[
+        ] else if (hasTasks) ...[
+          Text('Previous mint task records', style: TextStyle(color: ink, fontWeight: FontWeight.w600)),
           ...state.queue.map((task) {
             return Container(
               margin: const EdgeInsets.only(bottom: 14),
@@ -199,6 +208,67 @@ class QueueScreen extends ConsumerWidget {
         ],
         const SizedBox(height: 24),
       ],
-    );
+    ));
+  }
+
+  Widget _planCard(BuildContext context, MintlyNotifier notifier, MintPlanModel plan,
+      Color ink, Color muted, Color panel, Color line) {
+    final starts = plan.startsAt == null ? 'Time unavailable' :
+      '${DateFormat('d MMM, HH:mm').format(plan.startsAt!.toUtc().add(const Duration(hours: 1)))} WAT';
+    final ready = plan.status == 'ready_for_approval';
+    return Card(color: panel, margin: const EdgeInsets.only(bottom: 12),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: line)),
+      child: Padding(padding: const EdgeInsets.all(16), child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(plan.collectionName, style: TextStyle(color: ink, fontSize: 17, fontWeight: FontWeight.w700)),
+          const SizedBox(height: 4),
+          Text('${plan.chain} · ${plan.stageName ?? 'No scheduled stage'} · $starts',
+            style: TextStyle(color: muted)),
+          const SizedBox(height: 8),
+          Text(plan.statusNote),
+          Text('Checked wallet: ${plan.walletAddress.substring(0, 6)}…${plan.walletAddress.substring(plan.walletAddress.length - 4)}',
+            style: TextStyle(color: muted, fontSize: 12)),
+          const SizedBox(height: 8),
+          Text('Mint value: ${plan.mintValueEth ?? plan.priceEth ?? 'Unknown'} ETH',
+            style: TextStyle(color: ink)),
+          Text('Estimated network fee: ${plan.estimatedNetworkFeeEth ?? 'Unavailable'} ETH',
+            style: TextStyle(color: muted)),
+          Text('MetaMask shows the final network fee before approval.',
+            style: TextStyle(color: muted, fontSize: 11)),
+          const SizedBox(height: 8),
+          SelectableText(plan.openSeaUrl, style: TextStyle(color: muted, fontSize: 11)),
+          const SizedBox(height: 10),
+          Wrap(spacing: 8, children: [
+            OutlinedButton(onPressed: () async {
+              try {
+                await notifier.refreshMintPlan(plan.id);
+              } catch (error) {
+                if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$error')));
+              }
+            }, child: const Text('Check again')),
+            if (ready) FilledButton(onPressed: () async {
+              try {
+                final latest = await notifier.refreshMintPlan(plan.id);
+                if (latest.status != 'ready_for_approval') {
+                  throw StateError('OpenSea no longer reports this wallet ready. Check the plan.');
+                }
+                final uri = Uri.parse(latest.openSeaUrl);
+                if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+                  throw StateError('Could not open OpenSea.');
+                }
+              } catch (error) {
+                if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$error')));
+              }
+            }, child: const Text('Open on OpenSea')),
+            TextButton(onPressed: () async {
+              try { await notifier.removeMintPlan(plan.id); }
+              catch (error) {
+                if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$error')));
+              }
+            }, child: const Text('Remove')),
+          ]),
+        ],
+      )));
   }
 }

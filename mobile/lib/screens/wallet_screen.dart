@@ -157,14 +157,14 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
             },
           )),
       ]))),
+      OutlinedButton.icon(onPressed: () => Navigator.push(context,
+        MaterialPageRoute(builder: (_) => const ImportScreen())),
+        icon: const Icon(Icons.add_link), label: const Text('Prepare OpenSea mint')),
       if (api.isAdmin) ...[
         const SizedBox(height: 14),
         OutlinedButton.icon(onPressed: () => Navigator.push(context,
           MaterialPageRoute(builder: (_) => const AdminScreen())),
           icon: const Icon(Icons.admin_panel_settings_outlined), label: const Text('Manage accounts')),
-        OutlinedButton.icon(onPressed: () => Navigator.push(context,
-          MaterialPageRoute(builder: (_) => const ImportScreen())),
-          icon: const Icon(Icons.add_link), label: const Text('Import a mint link')),
       ],
       const SizedBox(height: 18),
       OutlinedButton.icon(onPressed: () async {

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../theme/colors.dart';
+import '../state/app_state.dart';
 import 'discover_screen.dart';
 import 'queue_screen.dart';
 import 'activity_screen.dart';
@@ -51,7 +52,7 @@ class _MainShellState extends ConsumerState<MainShell> {
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
                 _buildNavItem(0, Icons.today, 'Today', green, muted),
-                _buildNavItem(1, Icons.timer_outlined, 'Queue', green, muted),
+                _buildNavItem(1, Icons.timer_outlined, 'Mint plans', green, muted),
                 _buildNavItem(2, Icons.history, 'Activity', green, muted),
                 _buildNavItem(3, Icons.account_balance_wallet_outlined, 'Wallet', green, muted),
               ],
@@ -65,7 +66,10 @@ class _MainShellState extends ConsumerState<MainShell> {
   Widget _buildNavItem(int index, IconData icon, String label, Color activeColor, Color inactiveColor) {
     final isSelected = _currentIndex == index;
     return InkWell(
-      onTap: () => setState(() => _currentIndex = index),
+      onTap: () {
+        setState(() => _currentIndex = index);
+        if (index == 1) ref.read(mintlyProvider.notifier).loadInitialData();
+      },
       borderRadius: BorderRadius.circular(12),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),

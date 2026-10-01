@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import '../models/drop_model.dart';
 import '../models/task_model.dart';
 import '../models/activity_model.dart';
+import '../models/mint_plan_model.dart';
 
 class ApiService extends ChangeNotifier {
   static String baseUrl = const String.fromEnvironment(
@@ -83,10 +84,11 @@ class ApiService extends ChangeNotifier {
     return _decode(response);
   }
 
-  Future<dynamic> _post(String path, Map<String, dynamic> body) async {
+  Future<dynamic> _post(String path, Map<String, dynamic> body,
+      {Duration timeout = const Duration(seconds: 15)}) async {
     _requireHttps();
     final response = await _client.post(Uri.parse('$baseUrl$path'), headers: _headers,
-      body: jsonEncode(body)).timeout(const Duration(seconds: 15));
+      body: jsonEncode(body)).timeout(timeout);
     return _decode(response);
   }
 
@@ -130,6 +132,21 @@ class ApiService extends ChangeNotifier {
     await _post('/drops/import', {'raw_content': text, 'source_author': username});
     return true;
   }
+
+  Future<List<MintPlanModel>> fetchMintPlans() async {
+    final data = await _get('/mint-plans') as List;
+    return data.map((item) => MintPlanModel.fromJson(item as Map<String, dynamic>)).toList();
+  }
+
+  Future<MintPlanModel> importOpenSeaMint(String url) async =>
+    MintPlanModel.fromJson((await _post('/mint-plans', {'url': url},
+      timeout: const Duration(seconds: 60))) as Map<String, dynamic>);
+
+  Future<MintPlanModel> refreshMintPlan(String id) async =>
+    MintPlanModel.fromJson((await _post('/mint-plans/$id/refresh', {},
+      timeout: const Duration(seconds: 60))) as Map<String, dynamic>);
+
+  Future<void> removeMintPlan(String id) async { await _delete('/mint-plans/$id'); }
 
   Future<List<Map<String, dynamic>>> fetchWallets() async {
     final data = await _get('/wallets') as List;

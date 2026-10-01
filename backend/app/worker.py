@@ -7,11 +7,13 @@ from datetime import datetime, timezone, timedelta
 from sqlalchemy import select, and_, or_
 from app.config import settings
 from app.database import AsyncSessionLocal
-from app.models import MintTask, MintAuthorization, Drop, MintStage, Wallet, ActivityEvent
+from app.models import MintTask, MintAuthorization, MintPlan, Drop, MintStage, Wallet, User, ActivityEvent
 from app.services.mint_executor import MintExecutor
 from app.services.signer.base import SignerPolicy, SEADROP_V1_ADDRESS
 from app.services.notifier import NotificationService
 from app.services.x_feed import sync_x_drops
+from app.services.mint_plans import refresh_mint_plan
+from app.services.opensea import OpenSeaUnavailable
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("mintly.worker")
@@ -262,6 +264,42 @@ class MintlyWorker:
         except Exception as e:
             logger.warning(f"Discovery poll failed: {e}")
 
+    async def check_due_mint_plan(self, session):
+        """Check at most one wallet/stage per call to respect the free API limit."""
+        now = datetime.now(timezone.utc)
+        plan = (await session.execute(select(MintPlan).join(User, User.id == MintPlan.user_id).where(
+            MintPlan.next_check_at.is_not(None), MintPlan.next_check_at <= now,
+            User.is_active.is_(True), User.deleted_at.is_(None),
+        ).order_by(MintPlan.next_check_at.asc()).limit(1)
+          .with_for_update(skip_locked=True))).scalar_one_or_none()
+        if plan is None:
+            return
+        wallet = (await session.execute(select(Wallet).where(
+            Wallet.id == plan.wallet_id, Wallet.user_id == plan.user_id,
+        ))).scalar_one_or_none()
+        if wallet is None:
+            plan.status = "error"
+            plan.status_note = "Linked wallet is unavailable."
+            plan.next_check_at = None
+            await session.commit()
+            return
+        try:
+            await refresh_mint_plan(plan, wallet, now=now)
+        except OpenSeaUnavailable as error:
+            plan.status = "error"
+            plan.status_note = str(error)
+            plan.next_check_at = now + timedelta(minutes=5)
+        notify = plan.status == "ready_for_approval" and plan.notified_stage_uuid != plan.stage_uuid
+        if notify:
+            plan.notified_stage_uuid = plan.stage_uuid
+        await session.commit()
+        if notify:
+            await NotificationService.send_notification(
+                title="OpenSea mint ready for MetaMask",
+                body=f"{plan.collection_name} is ready for your wallet. Review the price and gas in MetaMask.",
+                category="mint_status", deep_link="mintly://queue", user_id=plan.user_id,
+            )
+
     async def start(self):
         """Main worker execution loop."""
         self.running = True
@@ -282,6 +320,10 @@ class MintlyWorker:
                     # 3. Refresh the real feed roughly every five minutes.
                     if iteration % 60 == 0:
                         await self.run_discovery_poll(session)
+
+                    # Free OpenSea key: at most four timed wallet checks per minute.
+                    if iteration % 3 == 0:
+                        await self.check_due_mint_plan(session)
 
                 iteration += 1
                 await asyncio.sleep(5)
