@@ -22,6 +22,7 @@ from app.services.signer.base import SEADROP_V1_ADDRESS
 API_ROOT = "https://api.opensea.io/api/v2"
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,99}$")
 HEX_RE = re.compile(r"^0x[0-9a-fA-F]*$")
+DECIMAL_WEI_RE = re.compile(r"^[0-9]{1,19}$")
 CHAINS = {"ethereum": (1, "Ethereum"), "base": (8453, "Base"),
           "robinhood": (4663, "Robinhood Chain"),
           "arbitrum": (42161, "Arbitrum One"), "optimism": (10, "Optimism")}
@@ -31,6 +32,16 @@ def chain_rpc(chain: str) -> str:
     return {"ethereum": settings.RPC_ETHEREUM, "base": settings.RPC_BASE,
             "robinhood": settings.RPC_ROBINHOOD, "arbitrum": settings.RPC_ARBITRUM,
             "optimism": settings.RPC_OPTIMISM}[chain]
+
+
+def transaction_value_wei(value: str) -> int:
+    """OpenSea's mint API specifies decimal wei, not hexadecimal."""
+    if not isinstance(value, str) or not DECIMAL_WEI_RE.fullmatch(value):
+        raise OpenSeaUnavailable("OpenSea returned an invalid mint value.")
+    amount = int(value, 10)
+    if amount >= 2**63:
+        raise OpenSeaUnavailable("OpenSea returned a mint value outside supported limits.")
+    return amount
 
 
 class OpenSeaUnavailable(Exception):
@@ -182,9 +193,9 @@ class OpenSeaClient:
             target, calldata, value = data.get("to"), data.get("data"), data.get("value")
             if (not is_address(target or "") or target.lower() != SEADROP_V1_ADDRESS.lower()
                     or not isinstance(calldata, str) or len(calldata) < 10
-                    or not HEX_RE.fullmatch(calldata) or not isinstance(value, str)
-                    or not HEX_RE.fullmatch(value)):
+                    or not HEX_RE.fullmatch(calldata) or len(calldata) % 2):
                 raise OpenSeaUnavailable("OpenSea returned an unexpected mint transaction.")
+            transaction_value_wei(value)
             return status, data
         if status in (409, 422):
             return status, None
@@ -203,7 +214,7 @@ async def estimate_network_fee(transaction: dict, wallet_address: str, chain: st
             return None
         tx = {"from": to_checksum_address(wallet_address),
               "to": to_checksum_address(transaction["to"]),
-              "data": transaction["data"], "value": int(transaction["value"], 16)}
+              "data": transaction["data"], "value": transaction_value_wei(transaction["value"])}
         gas_units = await web3.eth.estimate_gas(tx)
         gas_price = await web3.eth.gas_price
         return int(gas_units) * int(gas_price)

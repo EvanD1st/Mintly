@@ -3,7 +3,7 @@
 from datetime import datetime, timedelta, timezone
 
 from app.models import MintPlan, Wallet
-from app.services.opensea import CHAINS, OpenSeaClient, OpenSeaUnavailable, estimate_network_fee, stage_schedule
+from app.services.opensea import CHAINS, OpenSeaClient, OpenSeaUnavailable, estimate_network_fee, stage_schedule, transaction_value_wei
 
 
 def aware(value: datetime | None) -> datetime | None:
@@ -56,7 +56,7 @@ async def refresh_mint_plan(plan: MintPlan, wallet: Wallet, client: OpenSeaClien
     if status == 200 and transaction is not None:
         if transaction.get("chain") != detail["chain"]:
             raise OpenSeaUnavailable("OpenSea returned a different mint chain.")
-        value = int(transaction["value"], 16)
+        value = transaction_value_wei(transaction["value"])
         max_active_price = max((stage["price_wei"] or 0) for stage in active)
         if value > max_active_price or value >= 2**63:
             raise OpenSeaUnavailable("Mint value exceeds the verified active-stage price.")
