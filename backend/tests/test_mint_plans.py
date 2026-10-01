@@ -96,6 +96,14 @@ async def test_member_import_checks_wallet_and_never_creates_mint_task(test_db, 
             assert refreshed.status_code == 200, refreshed.text
             assert refreshed.json()["status"] == "not_ready"
             assert refreshed.json()["mint_value_eth"] is None
+            stored_plan.last_checked_at = now - timedelta(minutes=1)
+            await test_db.commit()
+            fake.build_mint.side_effect = OpenSeaUnavailable("OpenSea is rate-limiting mint checks.", 503)
+            retrying = await client.post(f"/api/mint-plans/{imported.json()['id']}/refresh")
+            assert retrying.status_code == 200
+            assert retrying.json()["status"] == "unverified"
+            assert "rate-limiting" in retrying.json()["status_note"]
+            assert retrying.json()["mint_value_eth"] is None
             admin_login = await client.post("/api/auth/login", json={
                 "username": "admin", "password": "Admin test password 123"})
             client.headers["Authorization"] = "Bearer " + admin_login.json()["token"]
@@ -164,4 +172,15 @@ async def test_real_decimal_mint_response_passes_contract_validation():
     assert transaction_value_wei(prepared["value"]) == 37000000000000
     tx["to"] = "0x" + "2" * 40
     with pytest.raises(OpenSeaUnavailable, match="unexpected mint transaction"):
+        await client.build_mint("example", "0x" + "1" * 40)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status,message", [(429, "rate-limiting"), (403, "API access"),
+    (400, "rejected the mint request"), (404, "could not find"), (503, "temporarily unavailable")])
+async def test_mint_api_errors_have_specific_reasons(status, message):
+    client = OpenSeaClient()
+    client._key = AsyncMock(return_value="test-key")
+    client._request = AsyncMock(return_value=(status, {"errors": ["private upstream detail"]}))
+    with pytest.raises(OpenSeaUnavailable, match=message):
         await client.build_mint("example", "0x" + "1" * 40)

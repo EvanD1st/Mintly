@@ -199,6 +199,16 @@ class OpenSeaClient:
             return status, data
         if status in (409, 422):
             return status, None
+        if status == 429:
+            raise OpenSeaUnavailable("OpenSea is rate-limiting mint checks. Your wallet's eligibility has not been determined; Mintly will retry later.", 503)
+        if status in (401, 403):
+            raise OpenSeaUnavailable("OpenSea denied the server's mint API access. This is not a wallet eligibility result.", 503)
+        if status == 404:
+            raise OpenSeaUnavailable("OpenSea could not find this mint drop. Check the collection link.", 404)
+        if status == 400:
+            raise OpenSeaUnavailable("OpenSea rejected the mint request. The drop or wallet is not supported by this mint endpoint.", 400)
+        if status >= 500:
+            raise OpenSeaUnavailable("OpenSea's mint service is temporarily unavailable. Mintly will retry later.", 503)
         raise OpenSeaUnavailable("OpenSea could not prepare this wallet's mint.")
 
 

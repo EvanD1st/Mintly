@@ -52,7 +52,15 @@ async def refresh_mint_plan(plan: MintPlan, wallet: Wallet, client: OpenSeaClien
             plan.next_check_at = None
         return plan
 
-    status, transaction = await client.build_mint(plan.collection_slug, wallet.address)
+    try:
+        status, transaction = await client.build_mint(plan.collection_slug, wallet.address)
+    except OpenSeaUnavailable as error:
+        if error.status != 503:
+            raise
+        plan.status = "unverified"
+        plan.status_note = str(error)
+        plan.next_check_at = now + timedelta(minutes=5)
+        return plan
     if status == 200 and transaction is not None:
         if transaction.get("chain") != detail["chain"]:
             raise OpenSeaUnavailable("OpenSea returned a different mint chain.")
