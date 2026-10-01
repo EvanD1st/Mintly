@@ -22,7 +22,8 @@ void main() {
       return http.Response('{"detail":"Live source unavailable"}', 503);
     }));
     await api.login('member', 'password');
-    await expectLater(api.fetchDrops('all'), throwsException);
+    await expectLater(api.fetchDrops('all'), throwsA(isA<ApiException>().having(
+      (error) => error.toString(), 'display message', 'Live source unavailable')));
     await expectLater(api.disarmTask('existing-task'), throwsException);
     await expectLater(api.importDrop('text'), throwsStateError);
     api.dispose();

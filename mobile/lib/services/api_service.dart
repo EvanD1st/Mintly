@@ -6,6 +6,13 @@ import '../models/task_model.dart';
 import '../models/activity_model.dart';
 import '../models/mint_plan_model.dart';
 
+class ApiException implements Exception {
+  final String message;
+  const ApiException(this.message);
+  @override
+  String toString() => message;
+}
+
 class ApiService extends ChangeNotifier {
   static String baseUrl = const String.fromEnvironment(
     'MINTLY_API_URL', defaultValue: 'https://mintly.duckdns.org/api');
@@ -39,7 +46,7 @@ class ApiService extends ChangeNotifier {
     try { data = jsonDecode(response.body); } catch (_) { data = null; }
     if (response.statusCode < 200 || response.statusCode >= 300) {
       final detail = data is Map ? data['detail'] : null;
-      throw Exception(detail is String ? detail : 'Server request failed (${response.statusCode}).');
+      throw ApiException(detail is String ? detail : 'Server request failed (${response.statusCode}).');
     }
     return data;
   }

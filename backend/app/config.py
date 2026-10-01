@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     # RPC Configuration
     RPC_ETHEREUM: str = "https://rpc.ankr.com/eth"
     RPC_BASE: str = "https://mainnet.base.org"
+    RPC_ROBINHOOD: str = "https://rpc.mainnet.chain.robinhood.com"
+    RPC_ARBITRUM: str = "https://arb1.arbitrum.io/rpc"
+    RPC_OPTIMISM: str = "https://mainnet.optimism.io"
     RPC_SEPOLIA: str = "https://rpc.sepolia.org"
     RPC_BASE_SEPOLIA: str = "https://sepolia.base.org"
 

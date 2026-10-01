@@ -10,7 +10,7 @@ from sqlalchemy import select
 from app.api.deps import get_db
 from app.main import app
 from app.models import MintPlan, User, Wallet
-from app.services.opensea import OpenSeaUnavailable, collection_slug, stage_schedule
+from app.services.opensea import CHAINS, OpenSeaClient, OpenSeaUnavailable, chain_rpc, collection_slug, stage_schedule
 from app.services.signer.base import SEADROP_V1_ADDRESS
 
 
@@ -39,7 +39,8 @@ def test_stage_schedule_is_sorted_and_uses_native_price():
 
 
 @pytest.mark.asyncio
-async def test_member_import_checks_wallet_and_never_creates_mint_task(test_db, monkeypatch):
+@pytest.mark.parametrize("chain", list(CHAINS))
+async def test_member_import_checks_wallet_and_never_creates_mint_task(test_db, monkeypatch, chain):
     user = (await test_db.execute(select(User).where(User.username == "member"))).scalar_one()
     wallet = Wallet(user_id=user.id, label="MetaMask", address="0x" + "1" * 40,
                     signing_capability="interactive", supported_chains=["Base"], is_default=True)
@@ -50,7 +51,7 @@ async def test_member_import_checks_wallet_and_never_creates_mint_task(test_db, 
     detail = {
         "collection_slug": "example", "collection_name": "Example",
         "opensea_url": "https://opensea.io/collection/example",
-        "drop_type": "seadrop_v1_erc721", "chain": "base",
+        "drop_type": "seadrop_v1_erc721", "chain": chain,
         "contract_address": "0x" + "2" * 40,
         "stages": [{"uuid": "public-1", "stage_type": "public_sale", "label": "Public",
                     "start_time": (now - timedelta(minutes=1)).isoformat(),
@@ -58,7 +59,7 @@ async def test_member_import_checks_wallet_and_never_creates_mint_task(test_db, 
                     "price": "1000000000000000", "max_per_wallet": "2",
                     "price_currency_address": "0x" + "0" * 40}],
     }
-    transaction = {"chain": "base", "to": SEADROP_V1_ADDRESS,
+    transaction = {"chain": chain, "to": SEADROP_V1_ADDRESS,
                    "data": "0x12345678", "value": hex(10**15)}
     fake = type("FakeOpenSea", (), {"get_drop": AsyncMock(return_value=detail),
                                     "build_mint": AsyncMock(return_value=(200, transaction))})()
@@ -80,6 +81,7 @@ async def test_member_import_checks_wallet_and_never_creates_mint_task(test_db, 
                 "url": "https://opensea.io/collection/example"})
             assert imported.status_code == 200, imported.text
             assert imported.json()["status"] == "ready_for_approval"
+            assert imported.json()["chain"] == CHAINS[chain][1]
             assert imported.json()["estimated_network_fee_eth"] == "0.00001"
             assert len((await client.get("/api/mint-plans")).json()) == 1
             assert (await client.get("/api/tasks/queue")).json()["tasks"] == []
@@ -100,3 +102,40 @@ async def test_member_import_checks_wallet_and_never_creates_mint_task(test_db, 
             assert (await client.post(f"/api/mint-plans/{imported.json()['id']}/refresh")).status_code == 404
     finally:
         app.dependency_overrides.pop(get_db, None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("chain", list(CHAINS))
+async def test_drop_validation_accepts_supported_networks(chain):
+    client = OpenSeaClient()
+    client._key = AsyncMock(return_value="test-key")
+    data = {"collection_slug": "example", "chain": chain, "drop_type": "seadrop_v1_erc721",
+            "contract_address": "0x" + "2" * 40,
+            "opensea_url": "https://opensea.io/collection/example", "stages": []}
+    client._request = AsyncMock(return_value=(200, data))
+    assert await client.get_drop("example") == data
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("field,value,message", [
+    ("chain", "unsupported", "network is not supported"),
+    ("drop_type", "custom", "SeaDrop V1 ERC-721"),
+    ("contract_address", "invalid", "inconsistent collection"),
+])
+async def test_drop_rejection_identifies_actual_reason(field, value, message):
+    client = OpenSeaClient()
+    client._key = AsyncMock(return_value="test-key")
+    data = {"collection_slug": "example", "chain": "robinhood", "drop_type": "seadrop_v1_erc721",
+            "contract_address": "0x" + "2" * 40,
+            "opensea_url": "https://opensea.io/collection/example", "stages": []}
+    data[field] = value
+    client._request = AsyncMock(return_value=(200, data))
+    with pytest.raises(OpenSeaUnavailable, match=message):
+        await client.get_drop("example")
+
+
+def test_robinhood_fee_rpc_never_falls_back_to_ethereum():
+    assert CHAINS["robinhood"][0] == 4663
+    assert chain_rpc("robinhood") == "https://rpc.mainnet.chain.robinhood.com"
+    with pytest.raises(KeyError):
+        chain_rpc("unsupported")

@@ -6,7 +6,7 @@ default linked wallet. It does not add a drop to the shared @lakzonevn feed.
 Admin text-list imports still use the shared feed.
 
 The first supported integration is native-ETH SeaDrop V1 ERC-721 drops on
-Ethereum and Base, one NFT per check. Mintly reads the contract, stage schedule,
+Ethereum, Base, Robinhood Chain, Arbitrum One and Optimism, one NFT per check. Mintly reads the contract, stage schedule,
 and price from OpenSea's official Drops API. It sorts stages by their start
 time and rechecks the wallet when a stage opens. A successful mint preparation
 response from OpenSea is required for **ready for approval**. Missing allowlist
@@ -20,6 +20,9 @@ periods, and delivery to a phone is not guaranteed. Opening OpenSea rechecks
 the plan before handing off to the official mint page. Use the same wallet
 shown on the plan, and approve the transaction in MetaMask. On a phone, use
 MetaMask's built-in browser if the normal browser cannot connect to MetaMask.
+Existing MetaMask links work across the supported EVM networks without relinking.
+Select the drop's network in MetaMask and hold ETH there for mint price and gas.
+Unsupported networks and other mint contract types return separate explanatory errors.
 
 The mint price comes from OpenSea in integer wei. Network gas is an RPC
 estimate at the time of checking; it can change before inclusion in a block.

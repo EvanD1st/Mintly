@@ -22,7 +22,15 @@ from app.services.signer.base import SEADROP_V1_ADDRESS
 API_ROOT = "https://api.opensea.io/api/v2"
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,99}$")
 HEX_RE = re.compile(r"^0x[0-9a-fA-F]*$")
-CHAINS = {"ethereum": (1, "Ethereum"), "base": (8453, "Base")}
+CHAINS = {"ethereum": (1, "Ethereum"), "base": (8453, "Base"),
+          "robinhood": (4663, "Robinhood Chain"),
+          "arbitrum": (42161, "Arbitrum One"), "optimism": (10, "Optimism")}
+
+
+def chain_rpc(chain: str) -> str:
+    return {"ethereum": settings.RPC_ETHEREUM, "base": settings.RPC_BASE,
+            "robinhood": settings.RPC_ROBINHOOD, "arbitrum": settings.RPC_ARBITRUM,
+            "optimism": settings.RPC_OPTIMISM}[chain]
 
 
 class OpenSeaUnavailable(Exception):
@@ -152,10 +160,14 @@ class OpenSeaClient:
             raise OpenSeaUnavailable("This collection has no OpenSea drop.", 404)
         if status != 200:
             raise OpenSeaUnavailable("OpenSea could not verify this drop.")
-        if (data.get("collection_slug") != slug or data.get("drop_type") != "seadrop_v1_erc721"
-                or data.get("chain") not in CHAINS or not is_address(data.get("contract_address", ""))
+        if data.get("chain") not in CHAINS:
+            raise OpenSeaUnavailable(
+                "This drop's network is not supported yet. Supported networks: Ethereum, Base, Robinhood Chain, Arbitrum One, Optimism.", 400)
+        if data.get("drop_type") != "seadrop_v1_erc721":
+            raise OpenSeaUnavailable("This collection does not use the supported SeaDrop V1 ERC-721 mint flow.", 400)
+        if (data.get("collection_slug") != slug or not is_address(data.get("contract_address", ""))
                 or data.get("opensea_url") != f"https://opensea.io/collection/{slug}"):
-            raise OpenSeaUnavailable("Only verified Ethereum or Base SeaDrop V1 drops are supported.", 400)
+            raise OpenSeaUnavailable("OpenSea returned inconsistent collection details; mint preparation was stopped.")
         stage_schedule(data)
         return data
 
@@ -181,10 +193,14 @@ class OpenSeaClient:
 
 async def estimate_network_fee(transaction: dict, wallet_address: str, chain: str) -> int | None:
     """A snapshot estimate; MetaMask shows the actual fee before signing."""
-    rpc = settings.RPC_BASE if chain == "base" else settings.RPC_ETHEREUM
+    if chain not in CHAINS:
+        return None
+    rpc = chain_rpc(chain)
     provider = AsyncWeb3.AsyncHTTPProvider(rpc, request_kwargs={"timeout": 8})
     web3 = AsyncWeb3(provider)
     try:
+        if await web3.eth.chain_id != CHAINS[chain][0]:
+            return None
         tx = {"from": to_checksum_address(wallet_address),
               "to": to_checksum_address(transaction["to"]),
               "data": transaction["data"], "value": int(transaction["value"], 16)}

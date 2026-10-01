@@ -88,7 +88,7 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
           const SizedBox(height: 14),
 
           Text(
-            'Mintly checks OpenSea stage timing and wallet readiness. Gas is an estimate until MetaMask shows the final transaction. No mint is signed by importing.',
+            'Supports native-ETH SeaDrop V1 drops on Ethereum, Base, Robinhood Chain, Arbitrum One and Optimism. Mintly checks stage timing and wallet readiness. Gas is estimated. Approve in MetaMask on the drop’s network; importing does not sign a mint.',
             style: TextStyle(fontSize: 11, color: muted, height: 1.4),
           ),
           const SizedBox(height: 24),

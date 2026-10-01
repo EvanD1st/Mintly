@@ -17,6 +17,7 @@ from app.config import settings
 from app.models import MintPlan, MintTask, User, Wallet, WalletPairing
 from app.schemas.wallet import WalletSchema
 from app.services.auth import token_digest
+from app.services.opensea import CHAINS
 
 router = APIRouter(prefix="/wallets", tags=["wallets"])
 public_router = APIRouter(prefix="/wallet-link", tags=["wallet-link"])
@@ -145,7 +146,7 @@ async def complete_pairing(req: CompleteRequest, db: AsyncSession = Depends(get_
             Wallet.user_id == pairing.user_id,
         ))).scalar_one()
         existing = Wallet(user_id=pairing.user_id, label="MetaMask", address=address,
-                          signing_capability="interactive", supported_chains=["Ethereum", "Base"],
+                          signing_capability="interactive", supported_chains=[label for _, label in CHAINS.values()],
                           is_default=count == 0, is_demo=False)
         db.add(existing)
         await db.flush()
