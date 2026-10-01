@@ -86,7 +86,7 @@ balance overrides. No authorization or mint was broadcast to a live network.
 A local fork of Robinhood's real state successfully minted 2 Robinhood Ape Club
 NFTs to an ephemeral smart account. The user debit matched exactly the mint
 price plus signed fixed reimbursement; a replay failed. The padded estimate was
-367,152 gas and the confirmed local receipt used 300,098 gas. Fork gas prices and
+367,254 gas and the confirmed local receipt used 300,182 gas. Fork gas prices and
 fees are test data, not a production quote. The local Prague EVM tests the real
 contracts but does not reproduce every Orbit gas or L1 data fee rule.
 
@@ -104,3 +104,8 @@ python tools/test_robinhood_fork.py --rpc http://127.0.0.1:18546
 The helper refuses non-localhost endpoints and any chain ID except 31337.
 Never fund the public Hardhat accounts on a real network. Users' compatible
 accounts and the relayer's operating balance remain prerequisites for live use.
+
+OpenSea's known four-byte SIP-6 suffix (`3d958fe2`) is accepted after the static
+public-mint arguments and preserved in the exact signed calldata. Unknown suffixes
+and extra arguments are rejected. The collection, recipient and quantity are
+still validated against the plan.

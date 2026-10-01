@@ -38,9 +38,11 @@ def public_mint_execution(tx, contract, wallet, quantity):
         raise OpenSeaUnavailable('Automatic permission currently supports SeaDrop public mint calls only.', 409)
     try:
         raw = bytes.fromhex(data[10:])
-        if len(raw) != 128:
+        # OpenSea's SIP-6 domain attribution follows the four static ABI words.
+        # Keep the known suffix in the exact signed execution; reject other tails.
+        if len(raw) != 128 and not (len(raw) == 132 and raw[128:] == bytes.fromhex('3d958fe2')):
             raise ValueError()
-        nft, fee, recipient, count = decode(['address','address','address','uint256'], raw)
+        nft, fee, recipient, count = decode(['address','address','address','uint256'], raw[:128])
         if nft.lower() != contract.lower() or count != quantity or recipient.lower() not in (wallet.lower(), '0x' + '0'*40):
             raise ValueError()
     except Exception as error:

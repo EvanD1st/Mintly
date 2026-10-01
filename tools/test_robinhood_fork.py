@@ -37,7 +37,7 @@ def run(rpc,contract,quantity):
     receipt=w.eth.wait_for_transaction_receipt(w.eth.send_transaction({'from':w.eth.accounts[0],'to':user.address,'authorizationList':[{'chainId':auth.chain_id,'address':auth.address,'nonce':auth.nonce,'yParity':auth.y_parity,'r':auth.r,'s':auth.s}],'type':4}))
     assert receipt.status==1
     assert bytes(w.eth.get_code(user.address))==bytes.fromhex('ef0100'+env['implementation'][2:])
-    data='0x'+MINT_PUBLIC_SELECTOR+encode(['address','address','address','uint256'],[contract,fee_recipient,user.address,quantity]).hex()
+    data='0x'+MINT_PUBLIC_SELECTOR+encode(['address','address','address','uint256'],[contract,fee_recipient,user.address,quantity]).hex()+'3d958fe2'
     mint_value=price*quantity
     fee_quote=w.eth.gas_price*450000
     execution=with_gas_reimbursement({'target':SEADROP_V1_ADDRESS,'value':str(mint_value),'data':data},operator,fee_quote)
@@ -59,7 +59,7 @@ def run(rpc,contract,quantity):
         raise AssertionError('Replay unexpectedly succeeded')
     except AssertionError: raise
     except Exception: pass
-    return {'local_only':True,'source_network':'robinhood','fork_chain_id':31337,'collection_contract':contract,'quantity_minted':quantity,'mint_value_wei':str(mint_value),'gas_reimbursement_wei':str(fee_quote),'total_user_debit_wei':str(mint_value+fee_quote),'estimated_gas_with_padding':gas,'confirmed_gas_used':receipt.gasUsed,'exact_user_debit_verified':True,'replay_rejected':True,'live_funds_spent':False}
+    return {'local_only':True,'source_network':'robinhood','fork_chain_id':31337,'collection_contract':contract,'quantity_minted':quantity,'mint_value_wei':str(mint_value),'gas_reimbursement_wei':str(fee_quote),'total_user_debit_wei':str(mint_value+fee_quote),'estimated_gas_with_padding':gas,'confirmed_gas_used':receipt.gasUsed,'opensea_attribution_preserved':True,'exact_user_debit_verified':True,'replay_rejected':True,'live_funds_spent':False}
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--rpc',required=True)

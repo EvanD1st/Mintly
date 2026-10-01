@@ -47,6 +47,18 @@ def test_tampered_collection_quantity_recipient_or_key_is_rejected():
     typed['message']['caveats'][0]['terms']='0x00'
     with pytest.raises(OpenSeaUnavailable): validate_signature(typed,signature,account.address)
 
+
+def test_opensea_attribution_is_preserved_and_unknown_tails_rejected():
+    wallet='0x'+'1'*40;contract='0x'+'2'*40
+    data=calldata(contract,wallet,2)
+    tx={'to':SEADROP_V1_ADDRESS,'value':'20','data':data+'3d958fe2'}
+    execution=public_mint_execution(tx,contract,wallet,2)
+    assert execution['data']==tx['data']
+    assert execution['value']=='20'
+    for suffix in ['3d958fe200','12345678','00'*32]:
+        with pytest.raises(OpenSeaUnavailable):public_mint_execution({**tx,'data':data+suffix},contract,wallet,2)
+    with pytest.raises(OpenSeaUnavailable):public_mint_execution(tx,contract,wallet,1)
+
 @pytest.mark.asyncio
 async def test_future_public_mint_requires_exact_onchain_schedule_price_and_limit():
     start=datetime.now(timezone.utc)+timedelta(hours=1); end=start+timedelta(hours=1)
