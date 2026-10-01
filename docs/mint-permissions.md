@@ -73,3 +73,34 @@ Sources:
 - https://docs.metamask.io/smart-accounts-kit/get-started/supported-advanced-permissions/
 - https://docs.metamask.io/smart-accounts-kit/reference/delegation/caveats/
 - https://github.com/ProjectOpenSea/seadrop/blob/main/src/lib/SeaDropStructs.sol
+
+## Robinhood verification (2026-10-01)
+
+All five production RPCs and the SeaDrop and pinned permission contracts were
+checked. Ethereum's unauthenticated Ankr endpoint failed; PublicNode chain ID 1
+and contract deployment checks passed and it replaces the default endpoint.
+Robinhood's RPC verified chain ID 4663 and successfully simulated an EIP-7702
+(type 4) authorization using ephemeral accounts and `eth_estimateGas` state
+balance overrides. No authorization or mint was broadcast to a live network.
+
+A local fork of Robinhood's real state successfully minted 2 Robinhood Ape Club
+NFTs to an ephemeral smart account. The user debit matched exactly the mint
+price plus signed fixed reimbursement; a replay failed. The padded estimate was
+367,152 gas and the confirmed local receipt used 300,098 gas. Fork gas prices and
+fees are test data, not a production quote. The local Prague EVM tests the real
+contracts but does not reproduce every Orbit gas or L1 data fee rule.
+
+Reproduce while this public stage is open (requires Hardhat 3.1.8):
+
+```powershell
+cd backend/tests/evm
+npm ci --ignore-scripts
+npx hardhat node --config robinhood-fork.config.js --network hardhat --hostname 127.0.0.1 --port 18546
+# In another PowerShell at the repository root:
+$env:PYTHONPATH = "$PWD/backend"
+python tools/test_robinhood_fork.py --rpc http://127.0.0.1:18546
+```
+
+The helper refuses non-localhost endpoints and any chain ID except 31337.
+Never fund the public Hardhat accounts on a real network. Users' compatible
+accounts and the relayer's operating balance remain prerequisites for live use.

@@ -1,0 +1,1 @@
+export default {chainDescriptors:{4663:{name:'Robinhood fork source',chainType:'l1',hardforkHistory:{prague:{blockNumber:0}}}},networks:{hardhat:{type:'edr-simulated',chainType:'l1',hardfork:'prague',chainId:31337,forking:{url:'https://rpc.mainnet.chain.robinhood.com'}}}};

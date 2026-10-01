@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     OPENSEA_KEY_FILE: str = "./opensea-key.json"
 
     # RPC Configuration
-    RPC_ETHEREUM: str = "https://rpc.ankr.com/eth"
+    RPC_ETHEREUM: str = "https://ethereum-rpc.publicnode.com"
     RPC_BASE: str = "https://mainnet.base.org"
     RPC_ROBINHOOD: str = "https://rpc.mainnet.chain.robinhood.com"
     RPC_ARBITRUM: str = "https://arb1.arbitrum.io/rpc"

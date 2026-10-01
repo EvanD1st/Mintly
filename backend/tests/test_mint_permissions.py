@@ -86,6 +86,11 @@ async def test_permission_is_private_single_use_cancellable_and_never_imports_us
             login=await client.post('/api/auth/login',json={'username':'member','password':'Member test password 123'})
             client.headers['Authorization']='Bearer '+login.json()['token']
             req={'plan_id':plan.id,'max_mint_value_wei':'20'}
+            provider.eth.get_balance=AsyncMock(return_value=0)
+            unfunded=await client.post('/api/mint-permissions',json=req)
+            assert unfunded.status_code==409 and 'funding' in unfunded.json()['detail']
+            assert (await client.get('/api/mint-permissions')).json()==[]
+            provider.eth.get_balance=AsyncMock(return_value=10**18)
             too_low=await client.post('/api/mint-permissions',json={**req,'max_mint_value_wei':'19'})
             assert too_low.status_code==409
             provider.eth.gas_price=__import__('asyncio').sleep(0,result=1000000000)
