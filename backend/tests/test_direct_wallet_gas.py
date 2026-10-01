@@ -145,3 +145,22 @@ async def test_quote_respects_bundler_priority_floor_and_does_not_sign(monkeypat
     assert int(op['maxPriorityFeePerGas'],16)==2_000_000_000
     assert int(op['maxFeePerGas'],16)==4_000_000_000
     assert op['signature']=='0x' and op['nonce']=='0x7b'
+
+
+@pytest.mark.asyncio
+async def test_bundler_transport_hides_endpoint_secret_and_disables_redirects(monkeypatch,caplog):
+    from unittest.mock import MagicMock
+    import logging
+    bundler=object.__new__(Bundler);bundler.url='https://example.invalid/v2/PRIVATE_TEST_TOKEN'
+    response=AsyncMock();response.status=200
+    response.content.read=AsyncMock(return_value=b'{"result":"0x1237"}')
+    request=AsyncMock();request.__aenter__.return_value=response
+    session=AsyncMock();session.post=MagicMock(return_value=request)
+    client=AsyncMock();client.__aenter__.return_value=session
+    monkeypatch.setattr('app.services.direct_wallet_gas.aiohttp.ClientSession',lambda **kwargs:client)
+    with caplog.at_level(logging.INFO):
+        assert await bundler.call('eth_chainId',[])=='0x1237'
+        assert session.post.call_args.kwargs['allow_redirects'] is False
+        response.content.read.side_effect=RuntimeError(bundler.url)
+        with pytest.raises(OpenSeaUnavailable) as error:await bundler.call('eth_chainId',[])
+    assert 'PRIVATE_TEST_TOKEN' not in str(error.value) and 'PRIVATE_TEST_TOKEN' not in caplog.text

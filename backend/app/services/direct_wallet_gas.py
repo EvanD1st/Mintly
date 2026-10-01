@@ -3,7 +3,7 @@ import json
 import secrets
 from pathlib import Path
 
-import httpx
+import aiohttp
 from eth_abi import encode, decode
 from eth_utils import keccak, to_checksum_address
 
@@ -30,13 +30,17 @@ class Bundler:
 
     async def call(self, method, params):
         try:
-            async with httpx.AsyncClient(timeout=20, follow_redirects=False) as client:
-                response = await client.post(self.url, json={'jsonrpc':'2.0','id':1,'method':method,'params':params})
-                response.raise_for_status()
-                result = response.json()
-                if 'error' in result or 'result' not in result:
-                    raise ValueError()
-                return result['result']
+            # aiohttp does not emit HTTPX's INFO request log, which would include
+            # the API key embedded in this URL under the worker's INFO logging.
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20),trust_env=False) as client:
+                async with client.post(self.url,json={'jsonrpc':'2.0','id':1,'method':method,'params':params},allow_redirects=False) as response:
+                    if response.status!=200:raise ValueError()
+                    raw=await response.content.read(256*1024+1)
+                    if len(raw)>256*1024:raise ValueError()
+                    result=json.loads(raw)
+                    if not isinstance(result,dict) or 'error' in result or 'result' not in result:
+                        raise ValueError()
+                    return result['result']
         except Exception:
             # URLs can contain API keys; upstream exceptions must never escape.
             raise OpenSeaUnavailable('Bundler request failed. No replacement operation was authorized.', 409) from None
