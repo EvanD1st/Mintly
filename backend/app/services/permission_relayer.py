@@ -7,10 +7,11 @@ from datetime import datetime, timezone
 from sqlalchemy import select, text, or_, and_
 from eth_utils import to_checksum_address
 from web3.exceptions import TransactionNotFound
+from app.services.seadrop_mint import decode_mint, verify_presale
 from app.config import settings
 from app.models import MintPermission, MintPlan, Wallet, User
 from app.services.mint_plans import aware
-from app.services.mint_permission import REGISTRY, checked_provider, relayer_account, redeem_calldata, validate_signature, public_mint_execution
+from app.services.mint_permission import REGISTRY, checked_provider, relayer_account, redeem_calldata, validate_signature
 from app.services.opensea import CHAINS
 
 async def process_one_permission(db):
@@ -31,6 +32,10 @@ async def process_one_permission(db):
     chain=next(k for k,v in CHAINS.items() if v[0]==plan.chain_id)
     web3=None
     try:
+        if 'direct_gas' in p.execution:
+            from app.services.direct_wallet_worker import process_direct_permission
+            await process_direct_permission(db,p,plan,wallet,chain)
+            return
         account=relayer_account()
         web3=await checked_provider(chain,wallet.address)
         if p.status=='armed':
@@ -41,7 +46,7 @@ async def process_one_permission(db):
             if msg['delegate'].lower()!=account.address.lower() or msg['delegator'].lower()!=wallet.address.lower() or typed['domain']['chainId']!=plan.chain_id or typed['domain']['verifyingContract'].lower()!=REGISTRY[str(plan.chain_id)]['manager'].lower():
                 raise ValueError('Permission account mismatch')
             validate_signature(typed,p.signature,wallet.address)
-            public_mint_execution({'to':p.execution['target'],'data':p.execution['data'],'value':p.execution['value']},plan.contract_address,wallet.address,plan.quantity)
+            await verify_presale(web3,decode_mint({'to':p.execution['target'],'data':p.execution['data'],'value':p.execution['value']},plan.contract_address,wallet.address,plan.quantity))
             fee_payment=p.execution.get('gas_reimbursement')
             if not fee_payment: raise ValueError('A user-paid gas permission is required')
             if fee_payment and (fee_payment['target'].lower()!=account.address.lower() or not 0<int(fee_payment['value'])<=settings.MINT_RELAYER_MAX_FEE_WEI):

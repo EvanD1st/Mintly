@@ -2,6 +2,7 @@
 
 from datetime import datetime, timedelta, timezone
 
+from app.services.signer.base import MINT_PUBLIC_SELECTOR
 from app.models import MintPlan, Wallet
 from app.services.price_quote import eth_usdt_quote
 from app.services.opensea import CHAINS, OpenSeaClient, OpenSeaUnavailable, estimate_network_fee, stage_schedule, transaction_value_wei
@@ -73,15 +74,27 @@ async def refresh_mint_plan(plan: MintPlan, wallet: Wallet, client: OpenSeaClien
         max_active_price = max((stage["price_wei"] or 0) for stage in active) * (plan.quantity or 1)
         if value > max_active_price or value >= 2**63:
             raise OpenSeaUnavailable("Mint value exceeds the verified active-stage price.")
+        # OpenSea chooses the first *eligible* active stage, which need not be
+        # the first entry in the schedule. Bind presale params to that stage.
+        from app.services.seadrop_mint import decode_mint, match_stage, ALLOW_SELECTOR, SIGNED_SELECTOR
+        if transaction['data'][2:10].lower() in (ALLOW_SELECTOR,SIGNED_SELECTOR):
+            mint=decode_mint(transaction,plan.contract_address,wallet.address,plan.quantity)
+            selected=match_stage(mint,active)
+            plan.stage_uuid=selected['uuid'];plan.stage_name=selected['name'];plan.stage_type=selected['type']
+            plan.starts_at=selected['starts_at'];plan.ends_at=selected['ends_at'];plan.price_wei=selected['price_wei']
+        elif transaction['data'][2:10].lower() == MINT_PUBLIC_SELECTOR:
+            public=[stage for stage in active if stage['type']=='public_sale']
+            if len(public)!=1:raise OpenSeaUnavailable('The eligible public stage is ambiguous.',409)
+            selected=public[0]
+            plan.stage_uuid=selected['uuid'];plan.stage_name=selected['name'];plan.stage_type=selected['type']
+            plan.starts_at=selected['starts_at'];plan.ends_at=selected['ends_at'];plan.price_wei=selected['price_wei']
         plan.status = "ready_for_approval"
         plan.status_note = "OpenSea prepared this wallet's mint. Approve the transaction in MetaMask."
         plan.mint_value_wei = value
-        if len(active) > 1:
-            plan.stage_name = "Eligible active stage"
         plan.estimated_network_fee_wei = await estimate_network_fee(transaction, wallet.address, detail["chain"])
         if transaction_out is not None:
             transaction_out.update(transaction)
-        plan.next_check_at = min(stage["ends_at"] for stage in active)
+        plan.next_check_at = plan.ends_at
         return plan
 
     if status == 422:

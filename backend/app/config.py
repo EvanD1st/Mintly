@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     ALLOW_LIVE_BROADCAST: bool = False
     MINT_RELAYER_KEY_FILE: str = "/run/opensea/mint-relayer.key"
     ENABLE_MINT_PERMISSIONS: bool = False
+    ENABLE_DIRECT_WALLET_GAS: bool = False
+    ENABLE_DIRECT_WALLET_BROADCAST: bool = False
+    MINT_BUNDLER_CONFIG_FILE: str = "/run/opensea/mint-bundlers.json"
     MINT_RELAYER_MAX_FEE_WEI: int = 1000000000000000
     CORS_ORIGINS: list[str] = []
 

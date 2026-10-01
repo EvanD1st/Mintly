@@ -1,7 +1,7 @@
 """One-use MetaMask delegation. User keys never reach the relayer.
 
 ABI, EIP-712 structure and caveat terms matched against Smart Accounts Kit 2.0.0.
-Only an existing EIP-7702 MetaMask account and an exact public mint are accepted.
+Only an existing EIP-7702 MetaMask account and an exact supported SeaDrop mint are accepted.
 """
 import json
 import secrets

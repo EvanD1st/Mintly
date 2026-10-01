@@ -226,7 +226,7 @@ class QueueScreen extends ConsumerWidget {
   Future<void> _permissionDialog(BuildContext context, Map<String,dynamic> result,{bool revoke=false}) => showDialog<void>(context:context,builder:(dialogContext)=>AlertDialog(
     title:Text(revoke ? 'Revoke in MetaMask' : 'Review mint and gas fee'),
     content:SingleChildScrollView(child:Column(mainAxisSize:MainAxisSize.min,crossAxisAlignment:CrossAxisAlignment.start,children:[
-      if(!revoke) Text('Fixed gas fee: ${result['gas_fee_eth']} ETH\nTotal: ${result['user_debit_eth']} ETH\nEstimated equivalent: ${result['user_debit_usdt'] ?? 'Unavailable'} USDT\nThe total includes mint price and the fixed fee. Both revert together if minting fails. Payment is ETH; USDT is a display estimate. Requires an already-enabled compatible MetaMask Smart Account. Mintly never holds your wallet key.'),
+      if(!revoke) Text('${result['gas_mode'] == 'direct_wallet' ? 'Maximum network gas' : 'Fixed gas fee'}: ${result['gas_fee_eth']} ETH\nMaximum total: ${result['user_debit_eth']} ETH\nEstimated equivalent: ${result['user_debit_usdt'] ?? 'Unavailable'} USDT\n${result['gas_mode'] == 'direct_wallet' ? 'Your main wallet pays actual gas up to this ceiling. Approve two signatures when arming; no prompt at mint time. Failed operations can consume gas.' : 'The total includes mint price and the fixed fee. Both revert together if minting fails.'} Payment is ETH; USDT is a display estimate. Requires an already-enabled compatible MetaMask Smart Account. Mintly never holds your wallet key.'),
       Text('Open ${result['approve_url']} in your MetaMask browser. Enter this code and review before signing. Permission expires after the scheduled mint window.'),
       SelectableText('${result['code']}'),
     ])),
@@ -266,7 +266,7 @@ class QueueScreen extends ConsumerWidget {
           SelectableText(plan.openSeaUrl, style: TextStyle(color: muted, fontSize: 11)),
           const SizedBox(height: 10),
           Wrap(spacing: 8, children: [
-            if ((ready || plan.status == 'scheduled') && plan.stageType == 'public_sale' && plan.priceEth != null) FilledButton(onPressed:() async {
+            if ((ready || (plan.status == 'scheduled' && plan.stageType == 'public_sale')) && plan.priceEth != null) FilledButton(onPressed:() async {
               try {final result=await notifier.requestMintPermission(plan);if(context.mounted) await _permissionDialog(context,result);} catch(error) {if(context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('$error')));}
             },child:const Text('Quote automatic mint')),
             OutlinedButton(onPressed: () async {
