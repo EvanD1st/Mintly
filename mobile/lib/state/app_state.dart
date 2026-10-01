@@ -87,6 +87,7 @@ class MintlyState {
 
 class MintlyNotifier extends StateNotifier<MintlyState> {
   final ApiService _api;
+  int _loadGeneration = 0;
 
   MintlyNotifier(this._api)
       : super(MintlyState(
@@ -97,32 +98,42 @@ class MintlyNotifier extends StateNotifier<MintlyState> {
         ));
 
   Future<void> loadInitialData() async {
+    final generation = ++_loadGeneration;
     if (!_api.isLiveBackendConnected) {
       state = MintlyState(drops: [], queue: [], activities: []);
       return;
     }
     state = state.copyWith(isLoading: true);
-    try {
-      final drops = await _api.fetchDrops(state.filter);
-      final queue = await _api.fetchQueue();
-      final mintPlans = await _api.fetchMintPlans();
-      final mintPermissions = await _api.fetchMintPermissions();
-      final activities = await _api.fetchActivity();
-      state = state.copyWith(
+    final errors = <String>[];
+    bool isCurrent() => mounted && generation == _loadGeneration && _api.isLiveBackendConnected;
+
+    Future<void> loadSection<T>(String label, Future<T> Function() fetch,
+        MintlyState Function(T) apply) async {
+      try {
+        final result = await fetch();
+        if (isCurrent()) state = apply(result);
+      } catch (error) {
+        errors.add('$label: $error');
+      }
+    }
+
+    await Future.wait([
+      loadSection('Drops', () => _api.fetchDrops(state.filter), (drops) => state.copyWith(
         drops: drops,
         selectedDrop: drops.isNotEmpty ? drops.first : null,
         selectedStage: drops.isNotEmpty && drops.first.stages.isNotEmpty ? drops.first.stages.first : null,
-        queue: queue,
-        mintPlans: mintPlans,
-        mintPermissions: mintPermissions,
-        activities: activities,
         sourceStatusText: _api.sourceStatusText,
         checkedWalletLabel: _api.checkedWalletLabel,
         lastCheckedText: _api.lastCheckedText,
-        isLoading: false,
-      );
-    } catch (error) {
-      state = state.copyWith(isLoading: false, error: '$error');
+      )),
+      loadSection('Mint tasks', _api.fetchQueue, (queue) => state.copyWith(queue: queue)),
+      loadSection('Mint plans', _api.fetchMintPlans, (plans) => state.copyWith(mintPlans: plans)),
+      loadSection('Mint permissions', _api.fetchMintPermissions,
+        (permissions) => state.copyWith(mintPermissions: permissions)),
+      loadSection('Activity', _api.fetchActivity, (activities) => state.copyWith(activities: activities)),
+    ]);
+    if (isCurrent()) {
+      state = state.copyWith(isLoading: false, error: errors.isEmpty ? null : errors.join('\n'));
     }
   }
 
@@ -196,18 +207,28 @@ class MintlyNotifier extends StateNotifier<MintlyState> {
   }
 
   Future<void> importOpenSeaMint(String url, {int quantity = 1, String? walletId}) async {
-    await _api.importOpenSeaMint(url, quantity: quantity, walletId: walletId);
+    final plan = await _api.importOpenSeaMint(url, quantity: quantity, walletId: walletId);
+    _saveMintPlan(plan);
     await loadInitialData();
+  }
+
+  void _saveMintPlan(MintPlanModel plan) {
+    state = state.copyWith(mintPlans: [
+      plan,
+      ...state.mintPlans.where((existing) => existing.id != plan.id),
+    ]);
   }
 
   Future<MintPlanModel> refreshMintPlan(String id) async {
     final plan = await _api.refreshMintPlan(id);
+    _saveMintPlan(plan);
     await loadInitialData();
     return plan;
   }
 
   Future<void> removeMintPlan(String id) async {
     await _api.removeMintPlan(id);
+    state = state.copyWith(mintPlans: state.mintPlans.where((plan) => plan.id != id).toList());
     await loadInitialData();
   }
 

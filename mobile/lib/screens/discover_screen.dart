@@ -55,10 +55,10 @@ class DiscoverScreen extends ConsumerWidget {
         ]),
         const SizedBox(height: 14),
         if (state.isLoading) const Center(child: Padding(
-          padding: EdgeInsets.all(32), child: CircularProgressIndicator()))
-        else if (state.error != null) Card(child: Padding(
-          padding: const EdgeInsets.all(16), child: Text('Could not load live data: ${state.error}')))
-        else if (state.drops.isEmpty) const Card(child: Padding(
+          padding: EdgeInsets.all(32), child: CircularProgressIndicator())),
+        if (state.error != null) Card(child: Padding(
+          padding: const EdgeInsets.all(16), child: Text('Some data could not refresh. Pull down to retry.\n${state.error}'))),
+        if (!state.isLoading && state.drops.isEmpty && state.error == null) const Card(child: Padding(
           padding: EdgeInsets.all(18), child: Text('No drops from @lakzonevn yet. Admin-imported lists will also appear here.')))
         else for (final drop in state.drops) _dropCard(context, notifier, drop),
         const SizedBox(height: 16),

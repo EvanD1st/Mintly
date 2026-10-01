@@ -68,12 +68,18 @@ class QueueScreen extends ConsumerWidget {
         ),
         const SizedBox(height: 20),
 
+        if (state.isLoading) const LinearProgressIndicator(),
+        if (state.error != null) Card(child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Text('Some data could not refresh. Pull down to retry.\n${state.error}'),
+        )),
+
         if (hasPlans) ...[
           ...state.mintPlans.map((plan) => _planCard(context, notifier, plan, ink, muted, panel, line)),
           const SizedBox(height: 16),
         ],
 
-        if (!hasPlans && !hasTasks) ...[
+        if (!hasPlans && !hasTasks && !state.isLoading && state.error == null) ...[
           const SizedBox(height: 40),
           Center(
             child: Container(
