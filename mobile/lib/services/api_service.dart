@@ -155,6 +155,17 @@ class ApiService extends ChangeNotifier {
 
   Future<void> removeMintPlan(String id) async { await _delete('/mint-plans/$id'); }
 
+  Future<List<Map<String, dynamic>>> fetchMintPermissions() async => ((await _get('/mint-permissions')) as List).cast<Map<String, dynamic>>();
+
+  Future<Map<String, dynamic>> requestMintPermission(String planId, String mintEth, {int priceMultiplier = 1}) async {
+    final parts = mintEth.split('.');
+    final wei = BigInt.parse(parts[0]) * BigInt.from(10).pow(18) + BigInt.parse((parts.length > 1 ? parts[1] : '').padRight(18, '0'));
+    return (await _post('/mint-permissions', {'plan_id': planId, 'max_mint_value_wei': (wei * BigInt.from(priceMultiplier)).toString(), 'expiry_minutes': 15}, timeout: const Duration(seconds: 90))) as Map<String, dynamic>;
+  }
+
+  Future<void> cancelMintPermission(String id) async { await _post('/mint-permissions/$id/cancel', {}); }
+  Future<Map<String, dynamic>> requestMintRevocation(String id) async => (await _post('/mint-permissions/$id/revocation', {})) as Map<String,dynamic>;
+
   Future<List<Map<String, dynamic>>> fetchWallets() async {
     final data = await _get('/wallets') as List;
     return data.cast<Map<String, dynamic>>();

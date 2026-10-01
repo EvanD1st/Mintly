@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
-from app.models import MintPlan, User, Wallet
+from app.models import MintPlan, MintPermission, User, Wallet
 from app.services.mint_plans import aware, refresh_mint_plan
 from app.services.opensea import CHAINS, OpenSeaClient, OpenSeaUnavailable, collection_slug
 
@@ -94,6 +94,9 @@ async def import_open_sea_plan(req: ImportMintPlanRequest,
                             opensea_url=detail["opensea_url"],
                             status="unverified", status_note="Checking OpenSea drop")
             db.add(plan)
+        if plan.id and plan.quantity != req.quantity:
+            pending=(await db.execute(select(MintPermission.id).where(MintPermission.plan_id==plan.id,MintPermission.status.in_(['awaiting_signature','armed','prepared','submitted'])))).first()
+            if pending: raise OpenSeaUnavailable('Cancel the pending mint permission before changing quantity.',409)
         plan.quantity = req.quantity
         plan.notified_stage_uuid = None
         await refresh_mint_plan(plan, wallet, client, detail=detail)
@@ -146,6 +149,8 @@ async def remove_mint_plan(plan_id: str, user: User = Depends(get_current_user),
     ))).scalar_one_or_none()
     if plan is None:
         raise HTTPException(status_code=404, detail="Mint plan not found.")
+    if (await db.execute(select(MintPermission.id).where(MintPermission.plan_id==plan.id).limit(1))).first():
+        raise HTTPException(409,'This plan has permission history and must be retained for transaction tracking.')
     await db.delete(plan)
     await db.commit()
     return {"status": "removed"}

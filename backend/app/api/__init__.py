@@ -10,10 +10,12 @@ from app.api.wallets import router as wallets_router, public_router as wallet_pu
 from app.api.source import router as source_router
 from app.api.notifications import router as notifications_router
 from app.api.mint_plans import router as mint_plans_router
+from app.api.mint_permissions import router as permission_router, public_router as permission_public_router
 
 api_router = APIRouter(prefix="/api")
 api_router.include_router(auth_router)
 api_router.include_router(wallet_public_router)
+api_router.include_router(permission_public_router)
 protected = APIRouter(dependencies=[Depends(get_current_user)])
 protected.include_router(drops_router)
 protected.include_router(import_router)
@@ -22,6 +24,7 @@ protected.include_router(wallets_router)
 protected.include_router(source_router)
 protected.include_router(notifications_router)
 protected.include_router(mint_plans_router)
+protected.include_router(permission_router)
 protected.include_router(admin_router)
 api_router.include_router(protected)
 

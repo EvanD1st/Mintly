@@ -14,6 +14,7 @@ from app.services.notifier import NotificationService
 from app.services.x_feed import sync_x_drops
 from app.services.mint_plans import refresh_mint_plan
 from app.services.opensea import OpenSeaUnavailable
+from app.services.permission_relayer import process_one_permission
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("mintly.worker")
@@ -316,6 +317,7 @@ class MintlyWorker:
 
                     # 2. Reconcile in-flight submitted tasks
                     await self.reconcile_pending_tasks(session)
+                    await process_one_permission(session)
 
                     # 3. Refresh the real feed roughly every five minutes.
                     if iteration % 60 == 0:

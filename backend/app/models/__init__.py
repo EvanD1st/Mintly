@@ -7,6 +7,7 @@ from app.models.task import MintAuthorization, MintTask
 from app.models.activity import ActivityEvent, NotificationDevice
 from app.models.user import User, AuthSession, LoginAttempt, WalletPairing
 from app.models.mint_plan import MintPlan
+from app.models.mint_permission import MintPermission
 
 __all__ = [
     "Wallet",

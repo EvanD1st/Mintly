@@ -6,6 +6,7 @@ class MintPlanModel {
   final String contractAddress;
   final String walletAddress;
   final String? stageName;
+  final String? stageType;
   final DateTime? startsAt;
   final DateTime? endsAt;
   final String? priceEth;
@@ -25,7 +26,7 @@ class MintPlanModel {
     required this.stageName, required this.startsAt, required this.endsAt,
     required this.priceEth, required this.mintValueEth,
     required this.estimatedNetworkFeeEth, required this.status,
-    required this.statusNote, this.quantity = 1, this.walletId, this.estimatedTotalEth,
+    required this.statusNote, this.stageType, this.quantity = 1, this.walletId, this.estimatedTotalEth,
     this.estimatedTotalUsdt, this.rateCheckedAt});
 
   factory MintPlanModel.fromJson(Map<String, dynamic> json) => MintPlanModel(
@@ -36,6 +37,7 @@ class MintPlanModel {
     contractAddress: json['contract_address'] as String,
     walletAddress: json['wallet_address'] as String,
     stageName: json['stage_name'] as String?,
+    stageType: json['stage_type'] as String?,
     startsAt: DateTime.tryParse(json['starts_at']?.toString() ?? ''),
     endsAt: DateTime.tryParse(json['ends_at']?.toString() ?? ''),
     priceEth: json['price_eth'] as String?,

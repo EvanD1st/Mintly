@@ -38,12 +38,11 @@ the total for display only. Quotes expire after five minutes; unavailable gas
 or pricing leaves the corresponding total unavailable rather than inventing it.
 No exchange or USDT payment is performed.
 
-Automatic execution remains disabled. The product must not hold users' primary
-wallet keys or create server-custodied user wallets. Future automation requires
-user-approved, revocable on-chain permission with a specific collection, chain,
-mint call, quantity, recipient, expiration and maximum spend. An ordinary
-address-link signature grants none of those permissions. Network support,
-allowlist behavior and gas accounting must be verified before activation.
+Automatic execution defaults to disabled. The [one-use permission flow](mint-permissions.md)
+implements exact public mint plus fixed gas reimbursement without user keys.
+It requires compatible smart accounts, a funded operator relayer and verified RPCs
+before live activation. Ordinary wallet linking grants no spending permission;
+allowlist stages still require manual MetaMask approval.
 
 The server obtains an [instant free OpenSea API key](https://docs.opensea.io/reference/api-keys)
 and renews it near its seven-day expiry. The key lives in the private

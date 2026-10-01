@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
 from app.config import settings
-from app.models import MintPlan, MintTask, User, Wallet, WalletPairing
+from app.models import MintPlan, MintPermission, MintTask, User, Wallet, WalletPairing
 from app.schemas.wallet import WalletSchema
 from app.services.auth import token_digest
 from app.services.opensea import CHAINS
@@ -166,6 +166,8 @@ async def unlink_wallet(wallet_id: str, user: User = Depends(get_current_user),
         raise HTTPException(status_code=404, detail="Wallet not found.")
     if (await db.execute(select(MintTask.id).where(MintTask.wallet_id == wallet.id).limit(1))).first():
         raise HTTPException(status_code=409, detail="Wallet has transaction history and cannot be unlinked here.")
+    if (await db.execute(select(MintPermission.id).join(MintPlan,MintPlan.id==MintPermission.plan_id).where(MintPlan.wallet_id==wallet.id).limit(1))).first():
+        raise HTTPException(409,'Wallet has mint permission history and must be retained for tracking.')
     await db.execute(delete(MintPlan).where(MintPlan.wallet_id == wallet.id))
     await db.execute(delete(WalletPairing).where(WalletPairing.linked_wallet_id == wallet.id))
     await db.delete(wallet)

@@ -14,6 +14,7 @@ class MintlyState {
   final String feeCap;
   final List<MintTaskModel> queue;
   final List<MintPlanModel> mintPlans;
+  final List<Map<String, dynamic>> mintPermissions;
   final List<ActivityModel> activities;
   final bool isMonitoring;
   final bool isConsentChecked;
@@ -32,6 +33,7 @@ class MintlyState {
     this.feeCap = '0.0001',
     required this.queue,
     this.mintPlans = const [],
+    this.mintPermissions = const [],
     required this.activities,
     this.isMonitoring = true,
     this.isConsentChecked = false,
@@ -51,6 +53,7 @@ class MintlyState {
     String? feeCap,
     List<MintTaskModel>? queue,
     List<MintPlanModel>? mintPlans,
+    List<Map<String, dynamic>>? mintPermissions,
     List<ActivityModel>? activities,
     bool? isMonitoring,
     bool? isConsentChecked,
@@ -69,6 +72,7 @@ class MintlyState {
       feeCap: feeCap ?? this.feeCap,
       queue: queue ?? this.queue,
       mintPlans: mintPlans ?? this.mintPlans,
+      mintPermissions: mintPermissions ?? this.mintPermissions,
       activities: activities ?? this.activities,
       isMonitoring: isMonitoring ?? this.isMonitoring,
       isConsentChecked: isConsentChecked ?? this.isConsentChecked,
@@ -102,6 +106,7 @@ class MintlyNotifier extends StateNotifier<MintlyState> {
       final drops = await _api.fetchDrops(state.filter);
       final queue = await _api.fetchQueue();
       final mintPlans = await _api.fetchMintPlans();
+      final mintPermissions = await _api.fetchMintPermissions();
       final activities = await _api.fetchActivity();
       state = state.copyWith(
         drops: drops,
@@ -109,6 +114,7 @@ class MintlyNotifier extends StateNotifier<MintlyState> {
         selectedStage: drops.isNotEmpty && drops.first.stages.isNotEmpty ? drops.first.stages.first : null,
         queue: queue,
         mintPlans: mintPlans,
+        mintPermissions: mintPermissions,
         activities: activities,
         sourceStatusText: _api.sourceStatusText,
         checkedWalletLabel: _api.checkedWalletLabel,
@@ -204,6 +210,20 @@ class MintlyNotifier extends StateNotifier<MintlyState> {
     await _api.removeMintPlan(id);
     await loadInitialData();
   }
+
+  Future<Map<String, dynamic>> requestMintPermission(MintPlanModel plan) async {
+    final price = plan.mintValueEth ?? plan.priceEth;
+    if (price == null) throw StateError('Check the exact mint price first.');
+    final result = await _api.requestMintPermission(plan.id, price, priceMultiplier: plan.mintValueEth == null ? plan.quantity : 1);
+    await loadInitialData();
+    return result;
+  }
+
+  Future<void> cancelMintPermission(String id) async {
+    await _api.cancelMintPermission(id);
+    await loadInitialData();
+  }
+  Future<Map<String,dynamic>> requestMintRevocation(String id) => _api.requestMintRevocation(id);
 }
 
 final apiServiceProvider = ChangeNotifierProvider<ApiService>((ref) {

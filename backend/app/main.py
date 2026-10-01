@@ -43,7 +43,7 @@ app.include_router(api_router)
 @app.middleware("http")
 async def prevent_sensitive_response_caching(request: Request, call_next):
     response = await call_next(request)
-    if request.url.path.startswith(("/api/auth/", "/api/admin/", "/api/wallet-link/")):
+    if request.url.path.startswith(("/api/auth/", "/api/admin/", "/api/wallet-link/", "/api/mint-permission")):
         response.headers["Cache-Control"] = "no-store"
     return response
 
@@ -64,6 +64,16 @@ async def connect_wallet_page():
 @app.get("/connect.js", include_in_schema=False)
 async def connect_wallet_script():
     return FileResponse(_web_dir / "connect.js", media_type="application/javascript", headers=_connect_headers)
+
+
+@app.get('/authorize-mint',include_in_schema=False)
+async def authorize_mint_page():
+    return FileResponse(_web_dir/'authorize-mint.html',media_type='text/html',headers=_connect_headers)
+
+
+@app.get('/authorize-mint.js',include_in_schema=False)
+async def authorize_mint_script():
+    return FileResponse(_web_dir/'authorize-mint.js',media_type='application/javascript',headers=_connect_headers)
 
 
 @app.get("/")

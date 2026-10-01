@@ -45,6 +45,9 @@ class Settings(BaseSettings):
     SIGNER_MODE: str = "disabled"  # legacy signer code is not exposed to MetaMask users
     SIGNER_PRIVATE_KEY: Optional[str] = None
     ALLOW_LIVE_BROADCAST: bool = False
+    MINT_RELAYER_KEY_FILE: str = "/run/opensea/mint-relayer.key"
+    ENABLE_MINT_PERMISSIONS: bool = False
+    MINT_RELAYER_MAX_FEE_WEI: int = 1000000000000000
     CORS_ORIGINS: list[str] = []
 
     # Notifications

@@ -1,0 +1,65 @@
+{
+  "version": "2.0.0",
+  "chains": {
+    "1": {
+      "manager": "0xdb9B1e94B5b69Df7e401DDbedE43491141047dB3",
+      "implementation": "0x63c0c19a282a1B52b07dD5a65b58948A07DAE32B",
+      "enforcers": {
+        "ExactExecutionEnforcer": "0x146713078D39eCC1F5338309c28405ccf85Abfbb",
+        "TimestampEnforcer": "0x1046bb45C8d673d4ea75321280DB34899413c069",
+        "LimitedCallsEnforcer": "0x04658B29F6b82ed55274221a06Fc97D318E25416",
+        "ExactExecutionBatchEnforcer": "0x1e141e455d08721Dd5BCDA1BaA6Ea5633Afd5017"
+      }
+    },
+    "10": {
+      "manager": "0xdb9B1e94B5b69Df7e401DDbedE43491141047dB3",
+      "implementation": "0x63c0c19a282a1B52b07dD5a65b58948A07DAE32B",
+      "enforcers": {
+        "ExactExecutionEnforcer": "0x146713078D39eCC1F5338309c28405ccf85Abfbb",
+        "TimestampEnforcer": "0x1046bb45C8d673d4ea75321280DB34899413c069",
+        "LimitedCallsEnforcer": "0x04658B29F6b82ed55274221a06Fc97D318E25416",
+        "ExactExecutionBatchEnforcer": "0x1e141e455d08721Dd5BCDA1BaA6Ea5633Afd5017"
+      }
+    },
+    "4663": {
+      "manager": "0xdb9B1e94B5b69Df7e401DDbedE43491141047dB3",
+      "implementation": "0x63c0c19a282a1B52b07dD5a65b58948A07DAE32B",
+      "enforcers": {
+        "ExactExecutionEnforcer": "0x146713078D39eCC1F5338309c28405ccf85Abfbb",
+        "TimestampEnforcer": "0x1046bb45C8d673d4ea75321280DB34899413c069",
+        "LimitedCallsEnforcer": "0x04658B29F6b82ed55274221a06Fc97D318E25416",
+        "ExactExecutionBatchEnforcer": "0x1e141e455d08721Dd5BCDA1BaA6Ea5633Afd5017"
+      }
+    },
+    "8453": {
+      "manager": "0xdb9B1e94B5b69Df7e401DDbedE43491141047dB3",
+      "implementation": "0x63c0c19a282a1B52b07dD5a65b58948A07DAE32B",
+      "enforcers": {
+        "ExactExecutionEnforcer": "0x146713078D39eCC1F5338309c28405ccf85Abfbb",
+        "TimestampEnforcer": "0x1046bb45C8d673d4ea75321280DB34899413c069",
+        "LimitedCallsEnforcer": "0x04658B29F6b82ed55274221a06Fc97D318E25416",
+        "ExactExecutionBatchEnforcer": "0x1e141e455d08721Dd5BCDA1BaA6Ea5633Afd5017"
+      }
+    },
+    "42161": {
+      "manager": "0xdb9B1e94B5b69Df7e401DDbedE43491141047dB3",
+      "implementation": "0x63c0c19a282a1B52b07dD5a65b58948A07DAE32B",
+      "enforcers": {
+        "ExactExecutionEnforcer": "0x146713078D39eCC1F5338309c28405ccf85Abfbb",
+        "TimestampEnforcer": "0x1046bb45C8d673d4ea75321280DB34899413c069",
+        "LimitedCallsEnforcer": "0x04658B29F6b82ed55274221a06Fc97D318E25416",
+        "ExactExecutionBatchEnforcer": "0x1e141e455d08721Dd5BCDA1BaA6Ea5633Afd5017"
+      }
+    },
+    "11155111": {
+      "manager": "0xdb9B1e94B5b69Df7e401DDbedE43491141047dB3",
+      "implementation": "0x63c0c19a282a1B52b07dD5a65b58948A07DAE32B",
+      "enforcers": {
+        "ExactExecutionEnforcer": "0x146713078D39eCC1F5338309c28405ccf85Abfbb",
+        "TimestampEnforcer": "0x1046bb45C8d673d4ea75321280DB34899413c069",
+        "LimitedCallsEnforcer": "0x04658B29F6b82ed55274221a06Fc97D318E25416",
+        "ExactExecutionBatchEnforcer": "0x1e141e455d08721Dd5BCDA1BaA6Ea5633Afd5017"
+      }
+    }
+  }
+}

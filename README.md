@@ -31,6 +31,9 @@ records the earlier demo release and is historical context.
 
 ## Local development
 
+See [one-use mint permissions](docs/mint-permissions.md) for the non-custodial
+automatic-public-mint flow, Smart Account prerequisites and operator gas setup.
+
 Use Python 3.12 and Flutter 3.44.8. From `backend`:
 
 ```bash

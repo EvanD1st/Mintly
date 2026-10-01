@@ -14,7 +14,8 @@ def aware(value: datetime | None) -> datetime | None:
 
 
 async def refresh_mint_plan(plan: MintPlan, wallet: Wallet, client: OpenSeaClient | None = None,
-                            now: datetime | None = None, detail: dict | None = None) -> MintPlan:
+                            now: datetime | None = None, detail: dict | None = None,
+                            transaction_out: dict | None = None) -> MintPlan:
     """The only path to ready_for_approval is a successful OpenSea mint check."""
     now = now or datetime.now(timezone.utc)
     client = client or OpenSeaClient()
@@ -78,6 +79,8 @@ async def refresh_mint_plan(plan: MintPlan, wallet: Wallet, client: OpenSeaClien
         if len(active) > 1:
             plan.stage_name = "Eligible active stage"
         plan.estimated_network_fee_wei = await estimate_network_fee(transaction, wallet.address, detail["chain"])
+        if transaction_out is not None:
+            transaction_out.update(transaction)
         plan.next_check_at = min(stage["ends_at"] for stage in active)
         return plan
 
