@@ -146,7 +146,7 @@ class ApiService extends ChangeNotifier {
   }
 
   Future<MintPlanModel> importOpenSeaMint(String url, {int quantity = 1, String? walletId}) async =>
-    MintPlanModel.fromJson((await _post('/mint-plans', {'url': url, 'quantity': quantity, if (walletId != null) 'wallet_id': walletId},
+    MintPlanModel.fromJson((await _post('/mint-plans', {'url': url, 'quantity': quantity, 'wallet_id': walletId},
       timeout: const Duration(seconds: 60))) as Map<String, dynamic>);
 
   Future<MintPlanModel> refreshMintPlan(String id) async =>
