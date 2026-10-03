@@ -49,6 +49,19 @@ class Settings(BaseSettings):
     ENABLE_MINT_PERMISSIONS: bool = False
     ENABLE_DIRECT_WALLET_GAS: bool = False
     ENABLE_DIRECT_WALLET_BROADCAST: bool = False
+    # Explicit custody, separate from blocked MetaMask permission experiments.
+    ENABLE_CUSTODIAL_AUTOMATIC: bool = False
+    ENABLE_CUSTODY_IMPORT: bool = False
+    AUTOMATIC_CHAIN_ID: int = 31337
+    ENABLE_ROBINHOOD_AUTOMATIC: bool = False  # separate explicit mainnet opt-in
+    AUTOMATIC_RPC: str = 'http://127.0.0.1:18545'
+    AUTOMATIC_SIGNER_URL: str = 'http://127.0.0.1:18766'
+    AUTOMATIC_SIGNER_TOKEN_FILE: str = ''
+    CUSTODY_VAULT_DIR: str = ''  # mounted only in signer container
+    CUSTODY_PASSWORD_FILE: str = ''  # independent runtime secret mount
+    CUSTODY_JOURNAL_FILE: str = ''  # signer-only durable journal
+    AUTOMATIC_CONFIRMATIONS: int = 2
+    AUTOMATIC_POLL_SECONDS: float = 0.5
     MINT_BUNDLER_CONFIG_FILE: str = "/run/opensea/mint-bundlers.json"
     MINT_RELAYER_MAX_FEE_WEI: int = 1000000000000000
     CORS_ORIGINS: list[str] = []

@@ -6,7 +6,6 @@ from eth_utils import to_checksum_address
 from web3 import AsyncWeb3
 from app.services.signer.base import SignerPolicy, SignerBoundaryException, SEADROP_V1_ADDRESS, MINT_PUBLIC_SELECTOR
 from app.services.signer.mock_signer import MockSigner
-from app.services.signer.local_signer import LocalServerSigner
 from app.config import settings
 
 
@@ -21,9 +20,9 @@ class MintExecutor:
     def __init__(self, signer=None):
         if signer:
             self.signer = signer
-        elif settings.SIGNER_MODE == "isolated_server_signer" and settings.SIGNER_PRIVATE_KEY:
-            self.signer = LocalServerSigner(settings.SIGNER_PRIVATE_KEY)
         else:
+            # Legacy execution is demo-only. Real custody runs in automatic_signer,
+            # with no key material loaded into this discovery/legacy worker.
             self.signer = MockSigner()
 
     def build_mint_public_calldata(

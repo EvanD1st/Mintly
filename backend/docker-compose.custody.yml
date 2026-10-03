@@ -1,0 +1,108 @@
+# Explicit custody overlay; never included by the production deploy workflow.
+# Defaults to Sepolia. Robinhood requires CUSTODY_CHAIN_ID=4663, CUSTODY_RPC and the separate opt-in.
+# docker compose -f docker-compose.yml -f docker-compose.custody.yml --profile custody up -d
+x-custody: &custody
+  image: mintly-backend:${MINTLY_RELEASE:-local}
+  restart: unless-stopped
+  user: "10001:10001"
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  pids_limit: 128
+  ulimits:
+    core: 0
+  tmpfs: ["/tmp:rw,noexec,nosuid,size=64m"]
+  profiles: [custody]
+  env_file: ["${MINTLY_ENV_FILE:-.env}"]
+  environment: &custody-env
+    DATABASE_URL: postgresql+asyncpg://mintly:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/mintly
+    APP_ENV: production
+    DEBUG: "false"
+    SIGNER_PRIVATE_KEY: ""
+    ENABLE_CUSTODIAL_AUTOMATIC: "true"
+    AUTOMATIC_CHAIN_ID: ${CUSTODY_CHAIN_ID:-11155111}
+    ENABLE_ROBINHOOD_AUTOMATIC: ${ENABLE_ROBINHOOD_AUTOMATIC:-false}
+    AUTOMATIC_RPC: ${CUSTODY_RPC:-${CUSTODY_SEPOLIA_RPC:-}}
+    AUTOMATIC_SIGNER_URL: http://automatic-signer:18766
+    AUTOMATIC_SIGNER_TOKEN_FILE: /run/custody-token/token
+    AUTOMATIC_CONFIRMATIONS: "12"
+  depends_on:
+    migrate:
+      condition: service_completed_successfully
+
+services:
+  postgres:
+    networks: [default, custody-control]
+
+  backend:
+    networks: [default, custody-control]
+    environment:
+      ENABLE_CUSTODIAL_AUTOMATIC: ${CUSTODY_TASK_ARMING:-false}
+      AUTOMATIC_CHAIN_ID: ${CUSTODY_CHAIN_ID:-11155111}
+      ENABLE_ROBINHOOD_AUTOMATIC: ${ENABLE_ROBINHOOD_AUTOMATIC:-false}
+      AUTOMATIC_RPC: ${CUSTODY_RPC:-${CUSTODY_SEPOLIA_RPC:-}}
+      AUTOMATIC_SIGNER_URL: http://automatic-signer:18766
+      AUTOMATIC_SIGNER_TOKEN_FILE: /run/custody-token/token
+    volumes:
+      - ${CUSTODY_TOKEN_DIR:?Set protected token directory}:/run/custody-token:ro
+
+  automatic-signer:
+    <<: *custody
+    networks: [custody-control, signer-egress]
+    command: uvicorn app.services.automatic_signer:app --host 0.0.0.0 --port 18766 --no-access-log
+    environment:
+      <<: *custody-env
+      CUSTODY_VAULT_DIR: /run/custody-vault
+      CUSTODY_PASSWORD_FILE: /run/custody-password/password
+      CUSTODY_JOURNAL_FILE: /var/lib/custody/journal.sqlite
+      OPENSEA_KEY_FILE: /tmp/opensea-key.json
+    # No host port. Only this service receives the encrypted keys and decrypting secret.
+    volumes:
+      - ${CUSTODY_VAULT_HOST_DIR:?Set signer vault directory}:/run/custody-vault:ro
+      - ${CUSTODY_PASSWORD_DIR:?Set independent password secret directory}:/run/custody-password:ro
+      - ${CUSTODY_TOKEN_DIR:?Set protected token directory}:/run/custody-token:ro
+      - ${CUSTODY_JOURNAL_DIR:?Set durable signer journal directory}:/var/lib/custody:rw
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,pathlib; r=urllib.request.Request('http://127.0.0.1:18766/readyz',headers={'Authorization':'Bearer '+pathlib.Path('/run/custody-token/token').read_text().strip()}); urllib.request.urlopen(r,timeout=10)"]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+
+  automatic-worker:
+    <<: *custody
+    networks: [default, custody-control]
+    command: python -m app.automatic_worker
+    volumes:
+      - ${CUSTODY_TOKEN_DIR:?Set protected token directory}:/run/custody-token:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import pathlib,time; assert time.time()-pathlib.Path('/tmp/mintly-automatic.heartbeat').stat().st_mtime < 120"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+
+  automatic-notifications:
+    <<: *custody
+    command: python -m app.automatic_notifications
+
+  custody-import:
+    <<: *custody
+    profiles: [custody-import]
+    networks: [custody-control, signer-egress]
+    # Only the host TLS proxy may reach this loopback port. Do not publish it publicly.
+    ports: ["127.0.0.1:18768:18768"]
+    command: uvicorn app.custody_import:app --host 0.0.0.0 --port 18768 --no-access-log --proxy-headers --forwarded-allow-ips=*
+    environment:
+      <<: *custody-env
+      ENABLE_CUSTODY_IMPORT: "true"
+      CUSTODY_VAULT_DIR: /run/custody-vault
+      CUSTODY_PASSWORD_FILE: /run/custody-password/password
+      CUSTODY_JOURNAL_FILE: /var/lib/custody/journal.sqlite
+    volumes:
+      - ${CUSTODY_VAULT_HOST_DIR:?Set signer vault directory}:/run/custody-vault:rw
+      - ${CUSTODY_PASSWORD_DIR:?Set independent password secret directory}:/run/custody-password:ro
+
+networks:
+  custody-control:
+    internal: true
+  signer-egress: {}

@@ -2,10 +2,12 @@
 .env
 .env.*
 !.env.example
+!.env.custody.example
 *.pem
 *.key
 *.p12
 *.keystore
+*.keystore.json
 *.jks
 cookies.json
 *cookies*
@@ -44,6 +46,8 @@ backend/.venv/
 *.db
 *.sqlite
 *.sqlite3
+*.sqlite-*
+*.db-*
 mintly.db
 
 # Testing & Coverage
@@ -75,3 +79,5 @@ ios/Pods/
 Thumbs.db
 desktop.ini
 mint-relayer.key
+node_modules/
+*.signer-token

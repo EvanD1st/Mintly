@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Deploy the supplied checkout; never pull a different revision after CI tests.
-RELEASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+RELEASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 APP_DIR="${APP_DIR:-$HOME/Mintly}"
 mkdir -p "$APP_DIR/shared"
 chmod 700 "$APP_DIR/shared"
@@ -38,6 +38,11 @@ export MINTLY_OPENSEA_DIR="$APP_DIR/shared/opensea"
 mkdir -p "$MINTLY_OPENSEA_DIR"
 chmod 700 "$MINTLY_OPENSEA_DIR"
 COMPOSE+=(-f "$RELEASE_DIR/backend/docker-compose.opensea.yml")
+if [[ -f "$APP_DIR/shared/custody.env" ]]; then
+    # Import/signing services are deployed separately; never start the spending
+    # scheduler implicitly during a normal release.
+    COMPOSE+=(--env-file "$APP_DIR/shared/custody.env" -f "$RELEASE_DIR/backend/docker-compose.custody.yml")
+fi
 if [[ -f "$APP_DIR/shared/firebase-service-account.json" ]]; then
     chmod 600 "$APP_DIR/shared/firebase-service-account.json"
     export MINTLY_FIREBASE_FILE="$APP_DIR/shared/firebase-service-account.json"
@@ -51,6 +56,9 @@ fi
 "${COMPOSE[@]}" config --quiet
 "${COMPOSE[@]}" build backend
 "${COMPOSE[@]}" up -d --wait --wait-timeout 180
+if [[ -f "$APP_DIR/shared/custody.env" ]]; then
+    "${COMPOSE[@]}" up -d --wait --wait-timeout 180 automatic-signer custody-import
+fi
 curl --fail --silent --show-error "http://127.0.0.1:$(sed -n 's/^MINTLY_PORT=//p' "$MINTLY_ENV_FILE")/healthz"
 if [[ "$RELEASE_DIR" != "$APP_DIR" ]]; then
     ln -sfn "$RELEASE_DIR" "$APP_DIR/current"

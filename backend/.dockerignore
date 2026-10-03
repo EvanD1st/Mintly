@@ -2,6 +2,9 @@
 .env.*
 *.pem
 *.key
+*.keystore.json
+*.signer-token
+**/node_modules
 *cookies*
 *.db
 *.sqlite*

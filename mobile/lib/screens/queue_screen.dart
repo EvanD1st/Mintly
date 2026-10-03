@@ -63,13 +63,13 @@ class QueueScreen extends ConsumerWidget {
         ),
         const SizedBox(height: 4),
         Text(
-          'Check eligibility and costs here. OpenSea and MetaMask ask you to confirm the mint when the eligible stage opens.',
+          'Armed automatic tasks execute on the server while the app is closed. Manual plans still require wallet confirmation.',
           style: TextStyle(fontSize: 13, color: muted),
         ),
         const SizedBox(height: 20),
         const Card(child: Padding(
           padding: EdgeInsets.all(16),
-          child: Text('Scheduled automatic minting is currently unavailable with MetaMask. Wallet linking does not grant spending approval. Use Open on OpenSea for a wallet-ready plan and review its transaction in MetaMask.'),
+          child: Text('Automatic execution requires an explicitly provisioned custodial signer policy. A MetaMask connection or token allowance does not authorize SeaDrop calls. Manual plans remain available for unsupported accounts and networks.'),
         )),
 
         if (state.isLoading) const LinearProgressIndicator(),
@@ -114,7 +114,7 @@ class QueueScreen extends ConsumerWidget {
             ),
           ),
         ] else if (hasTasks) ...[
-          Text('Previous mint task records', style: TextStyle(color: ink, fontWeight: FontWeight.w600)),
+          Text('Automatic tasks and history', style: TextStyle(color: ink, fontWeight: FontWeight.w600)),
           ...state.queue.map((task) {
             return Container(
               margin: const EdgeInsets.only(bottom: 14),
@@ -199,7 +199,18 @@ class QueueScreen extends ConsumerWidget {
                     ],
                   ),
                   const SizedBox(height: 12),
-                  OutlinedButton(
+                  Text('Status: ${task.status}'),
+                  if (task.failureReason != null) Text(task.failureReason!),
+                  if (task.transactionHash != null) SelectableText(task.transactionHash!),
+                  if (task.explorerUrl != null) TextButton(onPressed: () async {
+                    final uri = Uri.tryParse(task.explorerUrl!);
+                    if (uri != null && uri.scheme == 'https' && uri.host == 'sepolia.etherscan.io') {
+                      await launchUrl(uri, mode: LaunchMode.externalApplication);
+                    }
+                  }, child: const Text('View transaction')),
+                  if (['prepared', 'submitted', 'uncertain'].contains(task.status))
+                    const Text('Transaction may be in flight. A database cancellation cannot undo it.'),
+                  if (['armed', 'preparing'].contains(task.status)) OutlinedButton(
                     onPressed: () async {
                       try {
                         await notifier.disarmTask(task.id);
@@ -223,7 +234,7 @@ class QueueScreen extends ConsumerWidget {
           const SizedBox(height: 8),
           Center(
             child: Text(
-              'Times shown in WAT. New mints require approval in MetaMask.',
+              'Times shown in WAT. Only armed tasks authorize automatic execution.',
               style: TextStyle(fontSize: 11, color: muted),
             ),
           ),

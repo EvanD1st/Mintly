@@ -10,8 +10,15 @@ class DraftTaskRequest(BaseModel):
     wallet_id: str
     drop_id: str
     stage_id: str
-    quantity: int = Field(..., ge=1)
+    quantity: int = Field(..., ge=1, le=100, strict=True)
     fee_cap_eth: str = Field(..., pattern=r"^[0-9]+(\.[0-9]+)?$")
+    grant_id: str | None = None
+    mint_kind: str = Field(default='public', pattern='^(public|allowlist|signed)$')
+    price_cap_eth: str | None = Field(default=None, pattern=r'^[0-9]+(\.[0-9]+)?$')
+    total_cap_eth: str | None = Field(default=None, pattern=r'^[0-9]+(\.[0-9]+)?$')
+    expires_at: datetime | None = None
+    conditional_eligibility: bool = False
+    onchain_stage_index: int | None = Field(default=None, ge=1, strict=True)
 
 
 class DraftTaskResponse(BaseModel):
@@ -29,14 +36,10 @@ class DraftTaskResponse(BaseModel):
     signer_status_note: str
 
 
-class ArmTaskRequest(BaseModel):
-    wallet_id: str
-    drop_id: str
-    stage_id: str
-    quantity: int = Field(..., ge=1)
-    fee_cap_eth: str = Field(..., pattern=r"^[0-9]+(\.[0-9]+)?$")
+class ArmTaskRequest(DraftTaskRequest):
+    review_hash: str | None = Field(default=None, pattern=r'^[a-f0-9]{64}$')
     user_consent_confirmed: bool = Field(...)
-    idempotency_key: str = Field(..., min_length=8)
+    idempotency_key: str = Field(..., min_length=8, max_length=128)
 
 
 class TaskSchema(BaseModel):
@@ -68,6 +71,8 @@ class TaskSchema(BaseModel):
     submitted_at: Optional[datetime] = None
     confirmed_at: Optional[datetime] = None
     actual_total_cost_wei: Optional[int] = None
+    execution_mode: Optional[str] = None
+    wallet_address: Optional[str] = None
 
 
 class QueueResponse(BaseModel):

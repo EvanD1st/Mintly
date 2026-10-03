@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../models/drop_model.dart';
 import '../state/app_state.dart';
+import 'automatic_review_screen.dart';
 
 class DropDetailScreen extends ConsumerWidget {
   final DropModel drop;
@@ -53,9 +54,15 @@ class DropDetailScreen extends ConsumerWidget {
           title: const Text('Linked wallet'), subtitle: Text(state.checkedWalletLabel),
         )),
         const SizedBox(height: 12),
-        const Text('Mintly cannot verify your wallet-specific eligibility from this feed or sign for you. '
+        const Text('A feed listing does not establish wallet-specific eligibility or authorize spending. '
           'Never enter a recovery phrase. In MetaMask, check the destination, network, and total amount before approving any transaction.'),
         const SizedBox(height: 20),
+        if (drop.stages.isNotEmpty) ...[
+          FilledButton.icon(onPressed: () => Navigator.push(context, MaterialPageRoute(
+            builder: (_) => AutomaticReviewScreen(drop: drop))),
+            icon: const Icon(Icons.timer_outlined), label: const Text('Set up automatic mint')),
+          const SizedBox(height: 12),
+        ],
         if (trustedOpenSea)
           FilledButton.icon(onPressed: () async {
             try {

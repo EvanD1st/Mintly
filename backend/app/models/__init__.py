@@ -8,6 +8,7 @@ from app.models.activity import ActivityEvent, NotificationDevice
 from app.models.user import User, AuthSession, LoginAttempt, WalletPairing
 from app.models.mint_plan import MintPlan
 from app.models.mint_permission import MintPermission
+from app.models.automatic import AutomaticGrant, AutomaticNonce, AutomaticLock
 
 __all__ = [
     "Wallet",

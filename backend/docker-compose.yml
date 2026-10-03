@@ -13,6 +13,7 @@ x-app: &app
     DEBUG: "false"
     SIGNER_MODE: disabled
     ALLOW_LIVE_BROADCAST: "false"
+    ENABLE_CUSTODIAL_AUTOMATIC: "false"
     TIMEZONE: Africa/Lagos
   logging:
     driver: json-file

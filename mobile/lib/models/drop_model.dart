@@ -3,6 +3,7 @@ class MintStageModel {
   final String dropId;
   final String stageName;
   final DateTime startTimeUtc;
+  final DateTime? endTimeUtc;
   final int priceWei;
   final String priceEthStr;
   final int limitPerWallet;
@@ -14,6 +15,7 @@ class MintStageModel {
     required this.dropId,
     required this.stageName,
     required this.startTimeUtc,
+    this.endTimeUtc,
     required this.priceWei,
     required this.priceEthStr,
     required this.limitPerWallet,
@@ -27,6 +29,7 @@ class MintStageModel {
       dropId: json['drop_id'] ?? '',
       stageName: json['stage_name'] ?? 'Unknown stage',
       startTimeUtc: DateTime.parse(json['start_time_utc'] as String),
+      endTimeUtc: DateTime.tryParse(json['end_time_utc'] as String? ?? ''),
       priceWei: json['price_wei'] ?? 0,
       priceEthStr: json['price_eth_str'] ?? '',
       limitPerWallet: json['limit_per_wallet'] ?? 0,
