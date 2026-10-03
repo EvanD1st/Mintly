@@ -171,11 +171,12 @@ class _AutomaticReviewState extends ConsumerState<AutomaticReviewScreen> {
                   return const Padding(
                     padding: EdgeInsets.symmetric(vertical: 16),
                     child: Text(
-                      'No enabled signer policy for this chain. Connect your wallet, then have the operator provision custody with explicit contract limits, budget and expiry. Mainnet and L2 execution are currently unsupported.',
+                      'No enabled signer policy for this chain. Open Wallets and use the lock button to import your wallet with collection limits, a budget and an expiry.',
                     ),
                   );
                 }
                 return DropdownButtonFormField<String>(
+          icon: const RotatedBox(quarterTurns: 1, child: Icon(Icons.chevron_right)),
                   initialValue: _policy?['id'] as String?,
                   decoration: const InputDecoration(
                     labelText: 'Executing wallet policy',
@@ -203,6 +204,7 @@ class _AutomaticReviewState extends ConsumerState<AutomaticReviewScreen> {
               },
             ),
             DropdownButtonFormField<String>(
+          icon: const RotatedBox(quarterTurns: 1, child: Icon(Icons.chevron_right)),
               initialValue: _stage.id,
               decoration: const InputDecoration(labelText: 'Exact stage'),
               items: widget.drop.stages
@@ -219,6 +221,7 @@ class _AutomaticReviewState extends ConsumerState<AutomaticReviewScreen> {
                     }),
             ),
             DropdownButtonFormField<String>(
+          icon: const RotatedBox(quarterTurns: 1, child: Icon(Icons.chevron_right)),
               initialValue: _kind,
               decoration: const InputDecoration(labelText: 'Mint method'),
               items: const [

@@ -97,7 +97,8 @@ class _CustodyImportScreenState extends ConsumerState<CustodyImportScreen> with 
         TextFormField(controller: _budget, enabled: !_busy && !_attempted, decoration: const InputDecoration(labelText: 'Total minting budget (ETH, including gas)'), validator: _amount),
         TextFormField(controller: _maximum, enabled: !_busy && !_attempted, decoration: const InputDecoration(labelText: 'Maximum per mint task (ETH, including gas)'),
           validator: (v) => _amount(v) ?? ((double.tryParse(v ?? '') ?? 0) > (double.tryParse(_budget.text) ?? 0) ? 'Must fit the total budget' : null)),
-        DropdownButtonFormField<int>(initialValue: _days, decoration: const InputDecoration(labelText: 'Permission expires after'),
+        DropdownButtonFormField<int>(
+          icon: const RotatedBox(quarterTurns: 1, child: Icon(Icons.chevron_right)),initialValue: _days, decoration: const InputDecoration(labelText: 'Permission expires after'),
           items: [for (final days in [1, 7, 30]) DropdownMenuItem(value: days, child: Text('$days day${days == 1 ? '' : 's'}'))],
           onChanged: _busy || _attempted ? null : (v) => setState(() { _days = v!; _expiry = DateTime.now().toUtc().add(Duration(days: v)); })),
         Text('Expires: ${_expiry.toIso8601String()}'),
