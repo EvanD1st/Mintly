@@ -1,7 +1,7 @@
 {
   "date": "2026-10-03",
   "host": "https://mintly.duckdns.org",
-  "release": "custody-5b27aadf42ab",
+  "release": "410a8e1ffa596049f7e083094897ae826471abee-37124053110-1",
   "uploaded_snapshot_sha256": "5b27aadf42ab7e10b5a141d9274b96f47d8876b4e839047b90bd358b75daf303",
   "migration": "007_automatic_execution",
   "chain_id": 4663,
@@ -10,9 +10,22 @@
   "automatic_worker_running": false,
   "api_task_arming_enabled": false,
   "database_backup_archive_verified": true,
-  "android_patch_status": "build pending",
+  "android_patch_status": "published",
   "operational_files_updated_after_snapshot": {
     "backend/docker-compose.custody.yml": "d0a3eb0c761570ce76dffd7b63436ae830c480e331bfe8744b9d4bdcecc55052",
     "deploy/deploy-ubuntu.sh": "22c3121ea1febcd5ac29ab90e29596849dd72d2a17d81581f36e9a0bb17302d3"
-  }
+  },
+  "initial_release": "custody-5b27aadf42ab",
+  "backend_health_http_status": 200,
+  "import_config_unauthenticated_http_status": 401,
+  "public_signer_readiness_http_status": 404,
+  "mobile_tests_passed": 14,
+  "mobile_analysis": "no issues",
+  "android_patch_run": "https://github.com/EvanD1st/Mintly/actions/runs/37125486086",
+  "android_patch_source": "550f7fba880f8ae35bd8f796fb02c238829d3d05",
+  "android_patch_number": 9,
+  "android_release_version": "1.1.0+3",
+  "android_track": "stable",
+  "android_published_at": "2026-10-03T13:21:55Z",
+  "android_asset_override_used": false
 }
