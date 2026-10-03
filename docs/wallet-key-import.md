@@ -1,6 +1,6 @@
 # Wallet-screen private-key import
 
-The wallet screen now offers a key icon beside each linked address. Its import
+The wallet screen now offers a lock icon beside each linked address. Its import
 form requires the matching private key, the current Mintly password, a collection
 contract, total and per-task ETH limits including gas, an expiry of at most 30
 days, and explicit consent to custody. No recovery phrase is accepted.

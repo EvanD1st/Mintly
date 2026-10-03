@@ -118,7 +118,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
         crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Text('MetaMask wallets', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600, color: ink)),
           const SizedBox(height: 8),
-          const Text('Step 1: Connect your address with a message signature. To enable automatic minting, select the key icon beside your linked wallet and review the custody limits.'),
+          const Text('Step 1: Connect your address with a message signature. To enable automatic minting, select the lock icon beside your linked wallet and review the custody limits.'),
           FutureBuilder<List<Map<String, dynamic>>>(future: _wallets, builder: (context, snapshot) {
             if (!snapshot.hasData) {
               if (snapshot.hasError) return Text('${snapshot.error}');
@@ -134,7 +134,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
               title: Text(wallet['label'] as String? ?? 'MetaMask'),
               subtitle: SelectableText(wallet['address'] as String),
               trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-                IconButton(tooltip: 'Import private key for automation', icon: const Icon(Icons.key), onPressed: () async {
+                IconButton(tooltip: 'Import private key for automation', icon: const Icon(Icons.lock_outline), onPressed: () async {
                   final imported = await Navigator.push<bool>(context, MaterialPageRoute(builder: (_) => CustodyImportScreen(
                     walletId: wallet['id'] as String, address: wallet['address'] as String)));
                   if (imported == true && mounted) {
@@ -154,7 +154,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
       Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         Text('Step 2: Enable automatic minting', style: Theme.of(context).textTheme.titleMedium),
         const SizedBox(height: 8),
-        const Text('Import using the key icon beside your linked wallet. The signer server stores the encrypted key and enforces your collection, budget and expiry limits. Keep private keys out of chat and support messages.'),
+        const Text('Import using the lock icon beside your linked wallet. The signer server stores the encrypted key and enforces your collection, budget and expiry limits. Keep private keys out of chat and support messages.'),
         const SizedBox(height: 8),
         const Text('MetaMask token allowances cannot authorize SeaDrop mint calls. Linking MetaMask without custodial setup remains manual.'),
         FutureBuilder<List<Map<String, dynamic>>>(future: _policies, builder: (context, snapshot) {
