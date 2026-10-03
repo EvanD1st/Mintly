@@ -40,6 +40,9 @@ dependencies:
   firebase_core: ^4.15.0
   firebase_messaging: ^16.7.0
   url_launcher: ^6.3.2
+  bip39: ^1.0.6
+  bip32: ^2.0.0
+  pointycastle: ^3.9.1
 
 dev_dependencies:
   flutter_launcher_icons: ^0.14.4

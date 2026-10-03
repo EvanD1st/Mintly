@@ -48,170 +48,453 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
             await ref.read(mintlyProvider.notifier).loadInitialData();
             if (mounted) {
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('MetaMask address linked.')));
+                const SnackBar(content: Text('MetaMask address linked.')),
+              );
             }
           } else if (result['status'] == 'expired') {
             Navigator.of(context, rootNavigator: true).pop();
             if (mounted) {
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Pairing code expired. Try again.')));
+                const SnackBar(
+                  content: Text('Pairing code expired. Try again.'),
+                ),
+              );
             }
           }
         } catch (_) {
           // The next poll may succeed after a brief network interruption.
-        } finally { polling = false; }
+        } finally {
+          polling = false;
+        }
       });
-      await showDialog<void>(context: context, builder: (context) => AlertDialog(
-        title: const Text('Connect MetaMask on your PC'),
-        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Open this address in the browser where MetaMask is installed:'),
-            const SizedBox(height: 8),
-            SelectableText(pairing['connect_url'] as String),
-            const SizedBox(height: 18),
-            const Text('Enter this one-time code there:'),
-            const SizedBox(height: 8),
-            SelectableText(pairing['code'] as String,
-              style: const TextStyle(fontSize: 21, fontFamily: 'monospace', fontWeight: FontWeight.bold)),
-            const SizedBox(height: 12),
-            const Text('Expires in 5 minutes. Sign only the readable linking message. Never enter a recovery phrase.'),
-          ]),
-        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))],
-      ));
+      await showDialog<void>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Connect MetaMask on your PC'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Open this address in the browser where MetaMask is installed:',
+              ),
+              const SizedBox(height: 8),
+              SelectableText(pairing['connect_url'] as String),
+              const SizedBox(height: 18),
+              const Text('Enter this one-time code there:'),
+              const SizedBox(height: 8),
+              SelectableText(
+                pairing['code'] as String,
+                style: const TextStyle(
+                  fontSize: 21,
+                  fontFamily: 'monospace',
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'Expires in 5 minutes. Sign only the readable linking message. Never enter a recovery phrase.',
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Close'),
+            ),
+          ],
+        ),
+      );
       timer.cancel();
     } catch (error) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$error')));
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('$error')));
+      }
     }
   }
 
   Future<void> _unlink(Map<String, dynamic> wallet) async {
-    final confirmed = await showDialog<bool>(context: context, builder: (context) => AlertDialog(
-      title: const Text('Unlink wallet?'),
-      content: const Text('This removes only the public address. Wallets with custody or transaction history must remain linked. Unlinking cannot erase a server key or cancel signed transactions; disable automatic policies to stop future signing.'),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-        TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Unlink')),
-      ],
-    ));
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Unlink wallet?'),
+        content: const Text(
+          'This removes only the public address. Wallets with custody or transaction history must remain linked. Unlinking cannot erase a server key or cancel signed transactions; disable automatic policies to stop future signing.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Unlink'),
+          ),
+        ],
+      ),
+    );
     if (confirmed != true) return;
     try {
       await ref.read(apiServiceProvider).unlinkWallet(wallet['id'] as String);
       _refresh();
       await ref.read(mintlyProvider.notifier).loadInitialData();
     } catch (error) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$error')));
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('$error')));
+      }
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final api = ref.watch(apiServiceProvider);
-    final state = ref.watch(mintlyProvider);
-    final ink = Theme.of(context).colorScheme.onSurface;
-    final muted = ink.withValues(alpha: 0.65);
-    return ListView(padding: const EdgeInsets.fromLTRB(20, 12, 20, 32), children: [
-      Text('Wallet & account', style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: ink)),
-      const SizedBox(height: 4),
-      Text('Signed in as ${api.username}', style: TextStyle(color: muted)),
-      const SizedBox(height: 20),
-      Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Text('MetaMask wallets', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600, color: ink)),
-          const SizedBox(height: 8),
-          const Text('Step 1: Connect your address with a message signature. To enable automatic minting, select the lock icon beside your linked wallet and review the custody limits.'),
-          FutureBuilder<List<Map<String, dynamic>>>(future: _wallets, builder: (context, snapshot) {
-            if (!snapshot.hasData) {
-              if (snapshot.hasError) return Text('${snapshot.error}');
-              return const Padding(padding: EdgeInsets.all(12), child: Center(child: CircularProgressIndicator()));
-            }
-            if (snapshot.data!.isEmpty) {
-              return const Padding(padding: EdgeInsets.symmetric(vertical: 12),
-                child: Text('No wallet linked yet.'));
-            }
-            return Column(children: [for (final wallet in snapshot.data!) ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: const Icon(Icons.account_balance_wallet_outlined),
-              title: Text(wallet['label'] as String? ?? 'MetaMask'),
-              subtitle: SelectableText(wallet['address'] as String),
-              trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-                IconButton(tooltip: 'Import private key for automation', icon: const Icon(Icons.lock_outline), onPressed: () async {
-                  final imported = await Navigator.push<bool>(context, MaterialPageRoute(builder: (_) => CustodyImportScreen(
-                    walletId: wallet['id'] as String, address: wallet['address'] as String)));
-                  if (imported == true && mounted) {
-                    _refresh();
-                    ScaffoldMessenger.of(this.context).showSnackBar(const SnackBar(content: Text('Wallet imported. Review and arm a mint to start automation.')));
-                  }
-                }),
-                IconButton(onPressed: () => _unlink(wallet), icon: const Icon(Icons.link_off), tooltip: 'Unlink wallet'),
-              ]),
-            )]);
-          }),
-          FilledButton.icon(onPressed: _pair, icon: const Icon(Icons.link),
-            label: const Text('Connect MetaMask')),
-        ],
-      ))),
-      const SizedBox(height: 14),
-      Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Text('Step 2: Enable automatic minting', style: Theme.of(context).textTheme.titleMedium),
-        const SizedBox(height: 8),
-        const Text('Import using the lock icon beside your linked wallet. The signer server stores the encrypted key and enforces your collection, budget and expiry limits. Keep private keys out of chat and support messages.'),
-        const SizedBox(height: 8),
-        const Text('MetaMask token allowances cannot authorize SeaDrop mint calls. Linking MetaMask without custodial setup remains manual.'),
-        FutureBuilder<List<Map<String, dynamic>>>(future: _policies, builder: (context, snapshot) {
-          if (snapshot.hasError) return Text('Automatic policy status unavailable: ${snapshot.error}');
-          if (!snapshot.hasData) return const LinearProgressIndicator();
-          if (snapshot.data!.isEmpty) return const Padding(padding: EdgeInsets.symmetric(vertical: 12), child: Text('Connected only — no automatic policy provisioned.'));
-          return Column(children: [for (final policy in snapshot.data!) ListTile(
-            contentPadding: EdgeInsets.zero,
-            title: Text('Custodial policy: ${policy['status']}'),
-            subtitle: Text('${policy['account']}\nChain ${policy['chain_id']}\nRemaining: ${policy['remaining_wei']} wei\nReserved: ${policy['reserved_wei']} wei\nValid until ${policy['expires_at']}'),
-            trailing: policy['status'] == 'enabled' ? TextButton(onPressed: () async {
-              try { await api.disableAutomaticPolicy(policy['id'] as String); _refresh(); }
-              catch (error) { if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$error'))); }
-            }, child: const Text('Disable')) : null,
-          )]);
-        }),
-        const Text('Disabling stops future signing in Mintly. It cannot cancel a signed transaction or erase server custody. No on-chain MetaMask grant is created by this mode.'),
-        TextButton(onPressed: _refresh, child: const Text('Refresh setup status')),
-      ]))),
-      const SizedBox(height: 14),
-      Card(child: ListTile(leading: const Icon(Icons.public), title: const Text('Live source'),
-        subtitle: Text(state.sourceStatusText))),
-      const SizedBox(height: 14),
-      Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(children: [
-        ValueListenableBuilder<PushPreferences>(valueListenable: PushService.instance.preferences,
-          builder: (context, prefs, _) => SwitchListTile(
-            title: const Text('New drop notifications'), value: prefs.dailyList,
-            onChanged: (value) async {
-              try { await PushService.instance.setPreferences(dailyList: value); }
-              catch (error) { if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$error'))); }
-            },
-          )),
-        ValueListenableBuilder<PushPreferences>(valueListenable: PushService.instance.preferences,
-          builder: (context, prefs, _) => SwitchListTile(
-            title: const Text('Mint status notifications'), value: prefs.mintStatus,
-            onChanged: (value) async {
-              try { await PushService.instance.setPreferences(mintStatus: value); }
-              catch (error) { if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$error'))); }
-            },
-          )),
-      ]))),
-      OutlinedButton.icon(onPressed: () => Navigator.push(context,
-        MaterialPageRoute(builder: (_) => const ImportScreen())),
-        icon: const Icon(Icons.add_link), label: const Text('Prepare OpenSea mint')),
-      if (api.isAdmin) ...[
-        const SizedBox(height: 14),
-        OutlinedButton.icon(onPressed: () => Navigator.push(context,
-          MaterialPageRoute(builder: (_) => const AdminScreen())),
-          icon: const Icon(Icons.admin_panel_settings_outlined), label: const Text('Manage accounts')),
-      ],
-      const SizedBox(height: 18),
-      OutlinedButton.icon(onPressed: () async {
-        final notifier = ref.read(mintlyProvider.notifier);
-        try { await PushService.instance.disconnect(); } catch (_) {}
-        await api.logout();
-        await notifier.loadInitialData();
-      }, icon: const Icon(Icons.logout), label: const Text('Sign out')),
-    ]);
+  String _short(String address) => address.length > 16
+      ? '${address.substring(0, 8)}…${address.substring(address.length - 6)}'
+      : address;
+  String _eth(dynamic wei) {
+    final value = BigInt.tryParse('$wei') ?? BigInt.zero,
+        scale = BigInt.from(10).pow(18);
+    final fraction = (value % scale)
+        .toString()
+        .padLeft(18, '0')
+        .replaceFirst(RegExp(r'0+$'), '');
+    return fraction.isEmpty
+        ? '${value ~/ scale}'
+        : '${value ~/ scale}.$fraction';
   }
+
+  Future<void> _import(Map<String, dynamic> wallet) async {
+    final imported = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => CustodyImportScreen(
+          walletId: wallet['id'] as String,
+          address: wallet['address'] as String,
+        ),
+      ),
+    );
+    if (imported == true && mounted) {
+      _refresh();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Wallet imported. Select an NFT to review an automatic mint.',
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> _details(
+    Map<String, dynamic> wallet,
+    List<Map<String, dynamic>> policies,
+  ) async {
+    final api = ref.read(apiServiceProvider);
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (pageContext) => Scaffold(
+          appBar: AppBar(title: const Text('Wallet details')),
+          body: ListView(
+            padding: const EdgeInsets.all(20),
+            children: [
+              Text(
+                wallet['label'] as String? ?? 'MetaMask',
+                style: Theme.of(pageContext).textTheme.headlineSmall,
+              ),
+              const SizedBox(height: 12),
+              SelectableText(wallet['address'] as String),
+              const SizedBox(height: 24),
+              if (policies.isEmpty)
+                const Text(
+                  'Address linked. Import this wallet to prepare automatic minting.',
+                ),
+              for (final policy in policies)
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Text('Automatic minting: ${policy['status']}'),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Remaining budget: ${_eth(policy['remaining_wei'])} ETH',
+                        ),
+                        Text(
+                          'Pending mints: ${_eth(policy['reserved_wei'])} ETH reserved',
+                        ),
+                        Text(
+                          'Expires: ${DateTime.tryParse('${policy['expires_at']}')?.toLocal().toString().split('.').first ?? policy['expires_at']}',
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          (policy['scope'] as Map?)?['collection_scope'] ==
+                                  'reviewed_mints'
+                              ? 'Collections are selected from the mints you review.'
+                              : 'This setup is limited to the collection chosen during import.',
+                        ),
+                        if (policy['status'] == 'enabled')
+                          TextButton(
+                            onPressed: () async {
+                              try {
+                                await api.disableAutomaticPolicy(
+                                  policy['id'] as String,
+                                );
+                                _refresh();
+                                if (pageContext.mounted) {
+                                  Navigator.pop(pageContext);
+                                }
+                              } catch (_) {
+                                if (pageContext.mounted) {
+                                  ScaffoldMessenger.of(
+                                    pageContext,
+                                  ).showSnackBar(
+                                    const SnackBar(
+                                      content: Text(
+                                        'Could not disable this setup. Please retry.',
+                                      ),
+                                    ),
+                                  );
+                                }
+                              }
+                            },
+                            child: const Text('Disable automatic minting'),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              const SizedBox(height: 20),
+              const Text(
+                'Mintly stores this account’s encrypted key after import. Disabling stops future signing; it cannot erase the key or cancel signed transactions.',
+              ),
+              const SizedBox(height: 20),
+              OutlinedButton.icon(
+                onPressed: () async {
+                  await _unlink(wallet);
+                  if (pageContext.mounted) Navigator.pop(pageContext);
+                },
+                icon: const Icon(Icons.link_off),
+                label: const Text('Unlink address'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _settings() {
+    final api = ref.read(apiServiceProvider);
+    return Scaffold(
+      appBar: AppBar(title: const Text('Account settings')),
+      body: ListView(
+        padding: const EdgeInsets.all(20),
+        children: [
+          Text(
+            'Signed in as ${api.username}',
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          const SizedBox(height: 20),
+          for (final daily in [true, false])
+            ValueListenableBuilder<PushPreferences>(
+              valueListenable: PushService.instance.preferences,
+              builder: (context, prefs, _) => SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: Text(
+                  daily
+                      ? 'New drop notifications'
+                      : 'Mint status notifications',
+                ),
+                value: daily ? prefs.dailyList : prefs.mintStatus,
+                onChanged: (value) async {
+                  try {
+                    await PushService.instance.setPreferences(
+                      dailyList: daily ? value : null,
+                      mintStatus: daily ? null : value,
+                    );
+                  } catch (_) {
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Could not update notifications.'),
+                        ),
+                      );
+                    }
+                  }
+                },
+              ),
+            ),
+          const SizedBox(height: 20),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.public),
+            title: const Text('Live source'),
+            subtitle: Text(ref.read(mintlyProvider).sourceStatusText),
+          ),
+          if (api.isAdmin)
+            OutlinedButton.icon(
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const AdminScreen()),
+              ),
+              icon: const Icon(Icons.admin_panel_settings_outlined),
+              label: const Text('Manage accounts'),
+            ),
+          const SizedBox(height: 24),
+          OutlinedButton.icon(
+            onPressed: () async {
+              final notifier = ref.read(mintlyProvider.notifier);
+              try {
+                await PushService.instance.disconnect();
+              } catch (_) {}
+              await api.logout();
+              await notifier.loadInitialData();
+              if (mounted) Navigator.pop(context);
+            },
+            icon: const Icon(Icons.logout),
+            label: const Text('Sign out'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) => ListView(
+    padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
+    children: [
+      Row(
+        children: [
+          Expanded(
+            child: Text(
+              'Wallets',
+              style: Theme.of(
+                context,
+              ).textTheme.headlineLarge?.copyWith(fontWeight: FontWeight.bold),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => _settings()),
+            ),
+            child: const Text('Settings'),
+          ),
+        ],
+      ),
+      const SizedBox(height: 8),
+      const Text('Choose the wallet Mintly will use for your mints.'),
+      const SizedBox(height: 24),
+      FutureBuilder<List<Map<String, dynamic>>>(
+        future: _wallets,
+        builder: (context, wallets) {
+          if (wallets.hasError) {
+            return const Text('Could not load wallets. Tap refresh to retry.');
+          }
+          if (!wallets.hasData) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (wallets.data!.isEmpty) {
+            return const Card(
+              child: Padding(
+                padding: EdgeInsets.all(24),
+                child: Text('Connect MetaMask to get started.'),
+              ),
+            );
+          }
+          return FutureBuilder<List<Map<String, dynamic>>>(
+            future: _policies,
+            builder: (context, status) => Column(
+              children: [
+                for (final wallet in wallets.data!)
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(20),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Row(
+                            children: [
+                              const Icon(Icons.account_balance_wallet_outlined),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Text(
+                                  wallet['label'] as String? ?? 'MetaMask',
+                                  style: Theme.of(context).textTheme.titleLarge,
+                                ),
+                              ),
+                              if (status.hasData)
+                                TextButton(
+                                  onPressed: () => _details(
+                                    wallet,
+                                    status.data!
+                                        .where(
+                                          (p) => p['wallet_id'] == wallet['id'],
+                                        )
+                                        .toList(),
+                                  ),
+                                  child: const Text('Details'),
+                                ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          Text(_short(wallet['address'] as String)),
+                          const SizedBox(height: 20),
+                          if (status.hasError)
+                            const Text(
+                              'Automatic minting status unavailable. Refresh to retry.',
+                            )
+                          else if (!status.hasData)
+                            const LinearProgressIndicator()
+                          else if (status.data!.any(
+                            (p) =>
+                                p['wallet_id'] == wallet['id'] &&
+                                p['status'] == 'enabled',
+                          )) ...[
+                            const Text('Imported · ready for mint review'),
+                            const SizedBox(height: 12),
+                            Text(
+                              'Remaining budget: ${_eth(status.data!.where((p) => p['wallet_id'] == wallet['id'] && p['status'] == 'enabled').fold<BigInt>(BigInt.zero, (sum, p) => sum + (BigInt.tryParse('${p['remaining_wei']}') ?? BigInt.zero)))} ETH',
+                            ),
+                          ] else ...[
+                            const Text(
+                              'Connected · automatic minting needs setup',
+                            ),
+                            const SizedBox(height: 16),
+                            FilledButton.icon(
+                              onPressed: () => _import(wallet),
+                              icon: const Icon(Icons.lock_outline),
+                              label: const Text('Set up automatic minting'),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          );
+        },
+      ),
+      const SizedBox(height: 20),
+      OutlinedButton.icon(
+        onPressed: _pair,
+        icon: const Icon(Icons.link),
+        label: const Text('Connect MetaMask'),
+      ),
+      const SizedBox(height: 12),
+      OutlinedButton.icon(
+        onPressed: () => Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const ImportScreen()),
+        ),
+        icon: const Icon(Icons.add_link),
+        label: const Text('Add an OpenSea mint'),
+      ),
+      TextButton(onPressed: _refresh, child: const Text('Refresh wallets')),
+    ],
+  );
 }

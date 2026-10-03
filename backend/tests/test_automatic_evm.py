@@ -226,8 +226,12 @@ async def importer(lab, monkeypatch):
     import_app.dependency_overrides.clear()
 
 
-async def test_import_encrypts_and_runs_unattended_without_duplicate_allowance(lab, importer):
+@pytest.mark.parametrize('automatic_collections', [False, True])
+async def test_import_encrypts_and_runs_unattended_without_duplicate_allowance(lab, importer, automatic_collections):
     client, request = importer
+    if automatic_collections:
+        request.pop('contract')
+        request['collection_scope'] = 'reviewed_mints'
     response = await client.post('/api/automatic/import', json=request)
     assert response.status_code == 200, response.text
     assert response.headers['cache-control'] == 'no-store'
@@ -254,7 +258,7 @@ async def test_import_encrypts_and_runs_unattended_without_duplicate_allowance(l
     assert lab.nft.functions.ownerOf(1).call() == lab.owner.address
 
 
-@pytest.mark.parametrize('failure',['wrong_key','wrong_password','other_wallet','consent','expired','malformed','oversized'])
+@pytest.mark.parametrize('failure',['wrong_key','wrong_password','other_wallet','consent','expired','malformed','oversized','empty_scope','mixed_scope','unknown_scope'])
 async def test_import_rejects_invalid_input_without_echoing_secrets(lab, importer, failure):
     client, request = importer
     if failure == 'wrong_key': request['private_key'] = '0x'+Account.create().key.hex()
@@ -264,6 +268,10 @@ async def test_import_rejects_invalid_input_without_echoing_secrets(lab, importe
     if failure == 'expired': request['expires_at'] = '2020-01-01T00:00:00Z'
     if failure == 'malformed': request['budget_eth'] = {'secret':request['private_key']}
     if failure == 'oversized': request['private_key'] *= 100
+    if failure == 'empty_scope': request.pop('contract')
+    if failure == 'mixed_scope': request['collection_scope'] = 'reviewed_mints'
+    if failure == 'unknown_scope':
+        request.pop('contract'); request['collection_scope'] = 'all_transactions'
     response = await client.post('/api/automatic/import',json=request)
     assert response.status_code in (403,404,409,413,422), response.text
     assert request['private_key'] not in response.text and request['password'] not in response.text

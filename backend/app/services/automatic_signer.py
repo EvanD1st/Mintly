@@ -77,7 +77,7 @@ async def prepare_task(db, task_id, vault=None):
         raise ValueError('Authorization ownership, account or task scope mismatch')
     vault = vault or CustodyVault()
     policy = vault.policy(grant)
-    if (s['contract'].lower() not in [a.lower() for a in policy['contracts']]
+    if (not automatic.allows_collection(policy, s['contract'])
             or s['mint_kind'] not in policy['mint_kinds'] or s['expiry'] > policy['expires_at']
             or not 0 < s['total_cap_wei'] <= policy['max_task_wei']
             or not 0 < s['fee_cap_wei'] <= s['total_cap_wei']

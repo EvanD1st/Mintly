@@ -118,7 +118,7 @@ async def make_snapshot(db, req, user_id):
         raise HTTPException(409, 'Signer policy does not belong to this wallet.')
     if drop.chain_id != grant.chain_id or not drop.is_supported_integration or not drop.contract_address or drop.is_demo:
         raise HTTPException(409, 'Drop chain or contract integration is unsupported for this signer.')
-    if drop.contract_address.lower() not in [x.lower() for x in grant.scope['contracts']] or req.mint_kind not in grant.scope['mint_kinds']:
+    if not allows_collection(grant.scope, drop.contract_address) or req.mint_kind not in grant.scope['mint_kinds']:
         raise HTTPException(409, 'Contract or mint method is outside the signer policy.')
     if req.mint_kind != 'public' and req.conditional_eligibility and req.onchain_stage_index is None:
         raise HTTPException(409, 'A conditional presale needs the verified on-chain stage index before arming; an ambiguous stage label is insufficient.')
@@ -146,6 +146,20 @@ async def make_snapshot(db, req, user_id):
         'conditional_eligibility': req.conditional_eligibility,
         'onchain_stage_index': req.onchain_stage_index,
     }
+
+
+def allows_collection(scope, contract):
+    """Explicit task-selected scope; old fixed policies retain their exact allowlist.
+
+    This only selects an NFT collection. The signer still independently decodes
+    the pinned SeaDrop call and checks the persisted recipient/quantity/budget.
+    Unknown modes and implicit empty allowlists must fail closed.
+    """
+    if scope.get('collection_scope') == 'reviewed_mints':
+        return scope.get('contracts') == []
+    if scope.get('collection_scope') is not None:
+        return False
+    return contract.lower() in [x.lower() for x in scope.get('contracts', [])]
 
 
 async def validate_mint(web3, snapshot, transaction):

@@ -13,7 +13,8 @@ from eth_utils import to_checksum_address
 from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, ConfigDict, Field, SecretStr
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
+from typing import Literal
 from sqlalchemy import select, func
 
 from app.api.deps import get_current_user, get_db
@@ -36,11 +37,18 @@ class ImportRequest(BaseModel):
     wallet_id: uuid.UUID
     private_key: SecretStr
     password: SecretStr
-    contract: str = Field(min_length=42, max_length=42)
+    contract: str | None = Field(default=None, min_length=42, max_length=42)
+    collection_scope: Literal['reviewed_mints'] | None = None
     budget_eth: str = Field(max_length=40)
     max_task_eth: str = Field(max_length=40)
     expires_at: datetime
     consent: bool
+
+    @model_validator(mode='after')
+    def collection_selection(self):
+        if (self.contract is None) == (self.collection_scope is None):
+            raise ValueError('Select exactly one collection scope')
+        return self
 
 
 def available():
@@ -71,7 +79,8 @@ async def config(user=Depends(get_current_user)):
     available()
     web3 = await automatic.provider()
     await web3.provider.disconnect()
-    return {'chain_id':settings.AUTOMATIC_CHAIN_ID, 'max_expiry_days':30}
+    return {'chain_id':settings.AUTOMATIC_CHAIN_ID, 'max_expiry_days':30,
+        'automatic_collection_selection': True}
 
 
 @app.post('/api/automatic/import')
@@ -129,7 +138,7 @@ async def store_import(req, user, db):
     req.private_key = SecretStr('')
     if account.address.lower() != wallet.address.lower():
         raise HTTPException(409, 'Private key does not match the linked wallet. Nothing was imported.')
-    contract = to_checksum_address(req.contract)
+    contracts = [to_checksum_address(req.contract)] if req.contract else []
     grant_id = str(req.request_id)
     vault = CustodyVault()
     old = await db.get(AutomaticGrant, grant_id)
@@ -137,7 +146,7 @@ async def store_import(req, user, db):
         if old.user_id != user.id or old.wallet_id != wallet.id:
             raise ValueError('Request owner mismatch')
         policy = vault.policy(old)
-        if (policy['contracts'] != [contract] or policy['budget_wei'] != budget or
+        if (policy['contracts'] != contracts or policy.get('collection_scope') != req.collection_scope or policy['budget_wei'] != budget or
                 policy['max_task_wei'] != maximum or policy['expires_at'] != int(req.expires_at.timestamp())):
             raise ValueError('Request changed')
         return automatic.public_grant(old)  # Never renew/reactivate or reset a budget on retry.
@@ -145,14 +154,16 @@ async def store_import(req, user, db):
     try:
         code = await web3.eth.get_code(account.address, 'pending')
         adapter = await inspect_account(web3, account.address, 'eip7702-direct' if code else 'eoa')
-        if not await web3.eth.get_code(contract):
+        if contracts and not await web3.eth.get_code(contracts[0]):
             raise ValueError('Collection has no deployed code')
     finally:
         await web3.provider.disconnect()
     policy = dict(grant_id=grant_id,key_id=grant_id,user_id=user.id,wallet_id=wallet.id,
-        account=account.address,chain_id=settings.AUTOMATIC_CHAIN_ID,contracts=[contract],
+        account=account.address,chain_id=settings.AUTOMATIC_CHAIN_ID,contracts=contracts,
         mint_kinds=['public','allowlist','signed'],account_adapter=adapter,budget_wei=budget,
         max_task_wei=maximum,expires_at=int(req.expires_at.timestamp()))
+    if req.collection_scope:
+        policy['collection_scope'] = req.collection_scope
     password = private_read(settings.CUSTODY_PASSWORD_FILE)
     if len(password) < 32:
         raise ValueError('Weak vault password')
@@ -175,7 +186,7 @@ async def store_import(req, user, db):
         private_write(policy_path, json.dumps(policy, sort_keys=True))
     grant = AutomaticGrant(id=grant_id,user_id=user.id,wallet_id=wallet.id,
         chain_id=settings.AUTOMATIC_CHAIN_ID,account=wallet.address,context_hash=automatic.digest(policy),
-        expires_at=req.expires_at,scope={k:policy[k] for k in ('contracts','mint_kinds','max_task_wei')},
+        expires_at=req.expires_at,scope={k:policy[k] for k in ('contracts','mint_kinds','max_task_wei','collection_scope') if k in policy},
         budget_wei=budget,reserved_wei=0,spent_wei=0,status='enabled')
     db.add(grant)
     await db.commit()
