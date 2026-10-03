@@ -25,11 +25,13 @@ Users can unlink an address if it has no task history.
 
 The app opens only OpenSea collection links automatically. Other URLs
 are displayed for manual verification. The feed cannot attest that a drop is
-safe or that an address is eligible. Each mint is a separate transaction that
-the user must inspect and approve in MetaMask. Mintly's unattended mint API
-rejects all requests; live broadcasting remains disabled on Ubuntu. These
-controls reduce risk but cannot guarantee that a malicious collection or a
-misread MetaMask prompt will never cause loss.
+safe or that an address is eligible. An ordinary connected wallet still requires
+MetaMask approval for each mint. The separate [custodial automatic mode](automatic-custody.md)
+can execute from an explicitly imported address after the user arms an exact task.
+It is restricted to local EVM and Ethereum Sepolia; default Ubuntu deployments
+keep it disabled. The operator provisions encrypted keys directly on the signer
+host, outside the app and public API. This is full key custody with software limits,
+not a MetaMask grant. No safeguard guarantees a collection or custody server is safe.
 
 Push notifications are sent only to active account devices that opted in.
 Firebase accepting a message proves submission, not that the phone displayed

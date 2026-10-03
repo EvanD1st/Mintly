@@ -89,3 +89,13 @@ async def root():
 @app.get("/healthz")
 async def health_check():
     return {"status": "ok", "env": settings.APP_ENV}
+
+
+@app.get('/wallet-capabilities', include_in_schema=False)
+async def wallet_capabilities_page():
+    return FileResponse(_web_dir / 'wallet-capabilities.html', media_type='text/html', headers=_connect_headers)
+
+
+@app.get('/wallet-capabilities.js', include_in_schema=False)
+async def wallet_capabilities_script():
+    return FileResponse(_web_dir / 'wallet-capabilities.js', media_type='application/javascript', headers=_connect_headers)

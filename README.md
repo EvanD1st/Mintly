@@ -6,14 +6,25 @@ production API runs at https://mintly.duckdns.org/api. The [account and wallet
 guide](docs/real-data-accounts-wallet.md) explains sign-in, MetaMask linking,
 security limits, and the live feed.
 
-Users can prepare private [OpenSea mint plans](docs/opensea-mint-plans.md) for
-their linked wallet, with stage checks, gas estimates, and timed notifications.
+Users can prepare private [OpenSea mint plans](docs/opensea-mint-plans.md) or arm
+an exact mint through the explicitly provisioned [custodial automatic path](docs/automatic-custody.md).
+Local EVM tests demonstrate unattended public, Merkle allowlist and signed-presale
+SeaDrop minting. Ethereum Sepolia is configuration-gated and has not been
+demonstrated with a real imported wallet. Robinhood chain 4663 has an explicit opt-in
+adapter for Nitro fees and finalized receipts, including pinned EIP-7702 accounts;
+see [verification and deployment limits](docs/robinhood-signer-adapter.md). Other mainnets remain blocked.
 
 An admin creates accounts. Members must change their temporary passwords before
 using the app. A MetaMask address is linked through a short-lived, one-use message
-signature in a browser with the extension installed. Mintly never imports wallet
-secrets or signs mint transactions. Users approve any mint directly in MetaMask
-on the official mint page. Wallet-specific eligibility is unverified in the feed.
+signature in a browser with the extension installed. Connection alone grants no
+spending authority. Following the user's explicit custody choice, an operator can
+provision an encrypted key for that same linked address on the isolated signer
+host, or a user can use the [wallet import screen](docs/wallet-key-import.md) when
+the dedicated HTTPS import service is deployed. Flutter handles the key transiently;
+the ordinary API and worker never receive it. This gives the signer
+full wallet authority; its finite policy limits are software-enforced, not
+on-chain permissions. Unprovisioned wallets continue through manual MetaMask
+approval. Wallet-specific eligibility is unverified in the feed.
 
 The worker reads @lakzonevn through Twikit when an authenticated X session is
 configured. Without one, the source reports that it needs attention and admin
@@ -31,8 +42,11 @@ records the earlier demo release and is historical context.
 
 ## Local development
 
-See [one-use mint permissions](docs/mint-permissions.md) for the non-custodial
-automatic-public-mint flow, Smart Account prerequisites and operator gas setup.
+Read [custody setup, execution and recovery](docs/automatic-custody.md),
+[security boundaries](docs/security-and-signing.md), and the
+[verification report](docs/automatic-verification.md).
+The older [one-use permissions experiment](docs/mint-permissions.md) remains
+blocked; the real MetaMask extension probe did not establish NFT-call authority.
 
 Use Python 3.12 and Flutter 3.44.8. From `backend`:
 

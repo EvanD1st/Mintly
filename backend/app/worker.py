@@ -40,6 +40,7 @@ class MintlyWorker:
             .where(
                 and_(
                     MintTask.status == "armed",
+                    MintTask.execution_mode.is_(None),
                     MintTask.scheduled_for_utc <= now,
                     MintTask.expires_at_utc > now,
                     or_(
@@ -191,6 +192,7 @@ class MintlyWorker:
         abandoned = (await session.execute(
             select(MintTask).where(
                 MintTask.status == "preparing",
+                MintTask.execution_mode.is_(None),
                 MintTask.lease_expires_at < now,
             ).with_for_update(skip_locked=True)
         )).scalars().all()
@@ -201,7 +203,7 @@ class MintlyWorker:
         if abandoned:
             await session.commit()
 
-        stmt = select(MintTask).where(MintTask.status.in_(("submitting", "submitted")))
+        stmt = select(MintTask).where(MintTask.status.in_(("submitting", "submitted")), MintTask.execution_mode.is_(None))
         tasks = (await session.execute(stmt)).scalars().all()
 
         for t in tasks:

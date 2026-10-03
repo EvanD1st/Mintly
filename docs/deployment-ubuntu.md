@@ -75,3 +75,20 @@ changes; switching application releases does not undo database migrations.
 Automated backups, retention of old images/releases, and schema rollback are not configured.
 
 See [the review](review-2026-09-29.md) before considering real automatic minting.
+# Custody import deployment
+
+On 3 October 2026 the backend was deployed from the local release snapshot
+`custody-5b27aadf42ab`, with migration `007_automatic_execution`. The signer and
+separate import service run as UID 10001; Caddy routes only the two exact import
+paths to the host-loopback listener on port 18768. The signer has no host port.
+
+`~/Mintly/shared/custody.env` selects Robinhood 4663 and protected paths under
+`/srv/mintly-custody`. Normal deployments preserve these services when this
+configuration exists. They do not start the automatic spending worker.
+`CUSTODY_TASK_ARMING` defaults to false, so the API rejects new automatic tasks
+while the service is staged. Importing a key does not itself enable minting.
+
+A PostgreSQL custom-format backup was taken before migration at
+`~/Mintly/shared/pre-custody-import.dump` (mode 600). The previous application
+release remains available. Caddy retained its previous site configuration backup.
+See [wallet import setup](wallet-key-import.md) for custody boundaries.

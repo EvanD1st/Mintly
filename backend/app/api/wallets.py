@@ -14,7 +14,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
 from app.config import settings
-from app.models import MintPlan, MintPermission, MintTask, User, Wallet, WalletPairing
+from app.models import AutomaticGrant, MintPlan, MintPermission, MintTask, User, Wallet, WalletPairing
+from app.services import automatic
 from app.schemas.wallet import WalletSchema
 from app.services.auth import token_digest
 from app.services.opensea import CHAINS
@@ -159,11 +160,14 @@ async def complete_pairing(req: CompleteRequest, db: AsyncSession = Depends(get_
 @router.delete("/{wallet_id}")
 async def unlink_wallet(wallet_id: str, user: User = Depends(get_current_user),
                         db: AsyncSession = Depends(get_db)):
+    await automatic.lock_execution(db)
     wallet = (await db.execute(select(Wallet).where(
         Wallet.id == wallet_id, Wallet.user_id == user.id,
     ))).scalar_one_or_none()
     if wallet is None:
         raise HTTPException(status_code=404, detail="Wallet not found.")
+    if (await db.execute(select(AutomaticGrant.id).where(AutomaticGrant.wallet_id == wallet.id).limit(1))).first():
+        raise HTTPException(409, 'Wallet has server custody history and must be retained. Disable its policies to stop future signing; unlinking cannot erase the key.')
     if (await db.execute(select(MintTask.id).where(MintTask.wallet_id == wallet.id).limit(1))).first():
         raise HTTPException(status_code=409, detail="Wallet has transaction history and cannot be unlinked here.")
     if (await db.execute(select(MintPermission.id).join(MintPlan,MintPlan.id==MintPermission.plan_id).where(MintPlan.wallet_id==wallet.id).limit(1))).first():

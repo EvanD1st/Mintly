@@ -5,6 +5,7 @@ import '../state/app_state.dart';
 import '../services/push_service.dart';
 import 'admin_screen.dart';
 import 'import_screen.dart';
+import 'custody_import_screen.dart';
 
 class WalletScreen extends ConsumerStatefulWidget {
   const WalletScreen({super.key});
@@ -14,14 +15,19 @@ class WalletScreen extends ConsumerStatefulWidget {
 
 class _WalletScreenState extends ConsumerState<WalletScreen> {
   late Future<List<Map<String, dynamic>>> _wallets;
+  late Future<List<Map<String, dynamic>>> _policies;
 
   @override
   void initState() {
     super.initState();
     _wallets = ref.read(apiServiceProvider).fetchWallets();
+    _policies = ref.read(apiServiceProvider).fetchAutomaticPolicies();
   }
 
-  void _refresh() => setState(() => _wallets = ref.read(apiServiceProvider).fetchWallets());
+  void _refresh() => setState(() {
+    _wallets = ref.read(apiServiceProvider).fetchWallets();
+    _policies = ref.read(apiServiceProvider).fetchAutomaticPolicies();
+  });
 
   Future<void> _pair() async {
     try {
@@ -81,7 +87,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
   Future<void> _unlink(Map<String, dynamic> wallet) async {
     final confirmed = await showDialog<bool>(context: context, builder: (context) => AlertDialog(
       title: const Text('Unlink wallet?'),
-      content: const Text('This removes the public address from your account. Your MetaMask wallet and funds are unaffected.'),
+      content: const Text('This removes only the public address. Wallets with custody or transaction history must remain linked. Unlinking cannot erase a server key or cancel signed transactions; disable automatic policies to stop future signing.'),
       actions: [
         TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
         TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Unlink')),
@@ -112,7 +118,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
         crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Text('MetaMask wallets', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600, color: ink)),
           const SizedBox(height: 8),
-          const Text('Link an address with a message signature on your PC. Mintly never receives a seed phrase or private key.'),
+          const Text('Step 1: Connect your address with a message signature. To enable automatic minting, select the key icon beside your linked wallet and review the custody limits.'),
           FutureBuilder<List<Map<String, dynamic>>>(future: _wallets, builder: (context, snapshot) {
             if (!snapshot.hasData) {
               if (snapshot.hasError) return Text('${snapshot.error}');
@@ -127,14 +133,47 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
               leading: const Icon(Icons.account_balance_wallet_outlined),
               title: Text(wallet['label'] as String? ?? 'MetaMask'),
               subtitle: SelectableText(wallet['address'] as String),
-              trailing: IconButton(onPressed: () => _unlink(wallet), icon: const Icon(Icons.link_off),
-                tooltip: 'Unlink wallet'),
+              trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                IconButton(tooltip: 'Import private key for automation', icon: const Icon(Icons.key), onPressed: () async {
+                  final imported = await Navigator.push<bool>(context, MaterialPageRoute(builder: (_) => CustodyImportScreen(
+                    walletId: wallet['id'] as String, address: wallet['address'] as String)));
+                  if (imported == true && mounted) {
+                    _refresh();
+                    ScaffoldMessenger.of(this.context).showSnackBar(const SnackBar(content: Text('Wallet imported. Review and arm a mint to start automation.')));
+                  }
+                }),
+                IconButton(onPressed: () => _unlink(wallet), icon: const Icon(Icons.link_off), tooltip: 'Unlink wallet'),
+              ]),
             )]);
           }),
           FilledButton.icon(onPressed: _pair, icon: const Icon(Icons.link),
             label: const Text('Connect MetaMask')),
         ],
       ))),
+      const SizedBox(height: 14),
+      Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Text('Step 2: Enable automatic minting', style: Theme.of(context).textTheme.titleMedium),
+        const SizedBox(height: 8),
+        const Text('Import using the key icon beside your linked wallet. The signer server stores the encrypted key and enforces your collection, budget and expiry limits. Keep private keys out of chat and support messages.'),
+        const SizedBox(height: 8),
+        const Text('MetaMask token allowances cannot authorize SeaDrop mint calls. Linking MetaMask without custodial setup remains manual.'),
+        FutureBuilder<List<Map<String, dynamic>>>(future: _policies, builder: (context, snapshot) {
+          if (snapshot.hasError) return Text('Automatic policy status unavailable: ${snapshot.error}');
+          if (!snapshot.hasData) return const LinearProgressIndicator();
+          if (snapshot.data!.isEmpty) return const Padding(padding: EdgeInsets.symmetric(vertical: 12), child: Text('Connected only — no automatic policy provisioned.'));
+          return Column(children: [for (final policy in snapshot.data!) ListTile(
+            contentPadding: EdgeInsets.zero,
+            title: Text('Custodial policy: ${policy['status']}'),
+            subtitle: Text('${policy['account']}\nChain ${policy['chain_id']}\nRemaining: ${policy['remaining_wei']} wei\nReserved: ${policy['reserved_wei']} wei\nValid until ${policy['expires_at']}'),
+            trailing: policy['status'] == 'enabled' ? TextButton(onPressed: () async {
+              try { await api.disableAutomaticPolicy(policy['id'] as String); _refresh(); }
+              catch (error) { if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$error'))); }
+            }, child: const Text('Disable')) : null,
+          )]);
+        }),
+        const Text('Disabling stops future signing in Mintly. It cannot cancel a signed transaction or erase server custody. No on-chain MetaMask grant is created by this mode.'),
+        TextButton(onPressed: _refresh, child: const Text('Refresh setup status')),
+      ]))),
       const SizedBox(height: 14),
       Card(child: ListTile(leading: const Icon(Icons.public), title: const Text('Live source'),
         subtitle: Text(state.sourceStatusText))),

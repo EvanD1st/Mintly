@@ -2,7 +2,10 @@
 
 ## Production status: unsupported browser signing (2026-10-01)
 
-Scheduled automatic minting through the linked MetaMask wallet is unavailable.
+Scheduled automatic minting through a MetaMask-granted permission is unavailable.
+The separate [custodial route](automatic-custody.md) now implements automatic
+execution from an explicitly imported address. The experiment below is not its
+authorization mechanism. See the [actual extension probe findings](automatic-custody.md#metamask-evidence).
 MetaMask rejects the custom delegation signature from an external website. It also
 rejects the proposed owner UserOperation typed signature because its verifying
 contract is an internal wallet account. Local contract tests used ephemeral signing
@@ -69,7 +72,8 @@ The relayer must hold at least the current quoted gas budget before requests
 can be accepted. The 0.001 ETH ceiling is not a required minimum deposit.
 This is a relayer operating limit; L2 data fees can be additional. The user
 permission fixes their exact debit independently of the operator's gas cost.
-Legacy signer and unattended task routes remain disabled.
+Legacy signer and experimental permission routes remain disabled. `/tasks/draft`
+and `/tasks/arm` now accept the separately provisioned `custodial_v1` mode only.
 
 An operator-funded relayer and verified RPC alone do not establish browser support.
 Production rejects this signing path regardless of those balances or flags.

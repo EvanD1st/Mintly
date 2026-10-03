@@ -9,7 +9,12 @@ from app.models import User
 from app.services.auth import hash_password
 import app.models  # load models
 
-TEST_DB_URL = "sqlite+aiosqlite:///./test_mintly.db"
+TEST_DB_URL = os.environ.get('MINTLY_TEST_DATABASE_URL', "sqlite+aiosqlite:///./test_mintly.db")
+if not TEST_DB_URL.startswith('sqlite'):
+    from sqlalchemy.engine import make_url
+    _test_url = make_url(TEST_DB_URL)
+    if _test_url.host not in ('127.0.0.1', 'localhost') or not _test_url.database.startswith('mintly_test'):
+        raise RuntimeError('PostgreSQL tests require a disposable localhost mintly_test* database')
 
 
 
@@ -21,6 +26,8 @@ async def test_db():
     session_factory = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
 
     async with engine.begin() as conn:
+        # The URL above is restricted to a disposable local test database.
+        await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
 
     async with session_factory() as session:
@@ -35,7 +42,7 @@ async def test_db():
         await conn.run_sync(Base.metadata.drop_all)
 
     await engine.dispose()
-    if os.path.exists("./test_mintly.db"):
+    if TEST_DB_URL.startswith('sqlite') and os.path.exists("./test_mintly.db"):
         try:
             os.remove("./test_mintly.db")
         except Exception:

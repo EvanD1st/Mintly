@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mintly wallet compatibility</title>
+<style>body{font:16px system-ui;background:#f4f7f3;color:#183c30;max-width:760px;margin:40px auto;padding:20px}button,select,input{font:inherit;padding:10px;margin:8px 0}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:white;padding:20px;border-radius:16px}label{display:block}</style>
+<h1>Check automatic minting compatibility</h1>
+<p>This check connects your public address and reads wallet capabilities. Connection does not authorize spending. It requests no signatures, permissions, account upgrades or transactions.</p>
+<label>Wallet <select id="wallet"></select></label>
+<label>Platform <select id="platform"><option value="extension">Desktop extension</option><option value="mobile">Mobile wallet browser</option></select></label>
+<label>Version shown in wallet settings (optional) <input id="version" maxlength="40" placeholder="e.g. 13.32.1"></label>
+<button id="check">Connect and check capabilities</button>
+<p id="status">Open this page in the browser containing your wallet.</p>
+<pre id="report">No check performed.</pre>
+<p>A token-spending permission is not evidence of permission for NFT contract calls. Mintly enables automatic minting only after an account-preserving NFT mint and its gas payment have been verified with an actual wallet grant. Mobile support is checked separately.</p>
+<script src="wallet-capabilities.js"></script></html>

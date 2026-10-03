@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime
 from typing import Optional
-from sqlalchemy import String, Boolean, Integer, BigInteger, DateTime, ForeignKey, Text, UniqueConstraint
+from sqlalchemy import String, Boolean, Integer, BigInteger, DateTime, ForeignKey, Text, UniqueConstraint, JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
 
@@ -27,6 +27,9 @@ class MintAuthorization(Base):
     user_consent_text: Mapped[str] = mapped_column(Text, nullable=False)
     authorized_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     is_revoked: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Immutable task scope, independent of mutable discovery and plan rows.
+    snapshot: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    grant_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey('automatic_grants.id'), nullable=True)
 
 
 class MintTask(Base):
@@ -71,3 +74,9 @@ class MintTask(Base):
     
     failure_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     explorer_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    execution_mode: Mapped[Optional[str]] = mapped_column(String(40), nullable=True, index=True)
+    request_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    receipt_block_hash: Mapped[Optional[str]] = mapped_column(String(66), nullable=True)
+    next_attempt_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    preparation_attempts: Mapped[int] = mapped_column(Integer, default=0, server_default='0')
+    notification_pending: Mapped[bool] = mapped_column(Boolean, default=False, server_default='0')

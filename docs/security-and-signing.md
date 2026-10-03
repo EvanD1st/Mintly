@@ -1,97 +1,95 @@
-> Historical implementation notes. Read [the 29 September review](review-2026-09-29.md) for verified status and remaining defects; the claims below are not a production certification.
+# Signing and custody security boundaries
 
-# Mintly Security Architecture & Isolated Signer Boundary
+The current automatic implementation is `custodial_v1`, following the user's
+explicit choice to hold the existing wallet key on the server. See
+[setup and recovery](automatic-custody.md) and [verification](automatic-verification.md).
+It is tested locally, disabled by default, and supports local EVM,
+Ethereum Sepolia and explicitly opted-in Robinhood 4663. It is not a production custody certification.
 
-This document outlines the cryptographic safety principles, transaction authorization model, and boundary controls governing Mintly.
+## What protects the key
 
----
+The isolated signer uses an Ethereum V3 encrypted keystore with scrypt
+`N=262144`. A separate runtime secret decrypts it only within the signer process.
+Keys can be provisioned through the masked operator CLI or the dedicated
+[HTTPS wallet import service](wallet-key-import.md). The key must derive the
+already linked user's address. The import screen handles it transiently; no
+private key environment variable, mobile persistence or seed phrase is used.
+Python memory cannot be reliably zeroized; decrypted key material can remain
+in process memory until reclaimed. The `del` statements do not guarantee erasure.
 
-## 1. Core Security Principle: Software Budget != Cryptographic Protection
+Production instructions require Linux service ownership, mode 0700 directories
+and 0600 files outside Git. File reads validate the opened descriptor, ownership
+and permissions and reject symlinks. The keystore, password and journal are
+mounted only in trusted custody services: the signer reads the vault, the import
+service writes it, and only the signer mounts the journal. Containers run nonroot with read-only filesystems,
+no added capabilities, no new privileges and disabled core dumps. The signer
+has no published port and authenticates every endpoint with a random service token.
+The internal control network separates it from the discovery/notification services.
 
-A critical architectural distinction in Mintly:
+Encryption at rest does not protect against a compromised running signer or host
+administrator who can read its password and memory. The underlying private key
+has full authority across compatible chains. Software budget checks do not
+become cryptographic restrictions because the service is isolated. There is no
+KMS/HSM integration, independent security audit or formal security proof here.
+Use testnet keys until the deployment and its controls have been reviewed.
 
-> **A software budget check in application logic is not cryptographic protection.**
-> If an attacker or software bug compromises application code, an unconstrained signing key can be commanded to sign any transaction, drain funds, or interact with malicious contracts.
-> 
-> True security requires an **isolated cryptographic signer boundary** where signing authority is decoupled from orchestration logic. The signing agent independently parses raw transaction parameters, validates method signatures and calldata structure, checks hard upper bounds on value and gas, and enforces chain ID constraints before any signature is produced.
+## What protects authorization and funds
 
----
+The API uses existing authenticated users and wallet-link challenges. An explicit
+custody provisioning operation binds the user, wallet, key-derived address, chain,
+collection allowlist, SeaDrop methods, finite lifetime budget, task cap and expiry.
+Policy files reside in the signer vault and their digest must match the database.
+A database edit cannot enlarge that independently provisioned scope or reset the
+journal's lifetime spending. A compromised API can still attempt calls within an
+existing signer policy, which is why policy scope and deployment trust matter.
 
-## 2. Signer Policy Boundary
+Flutter shows an exact review before explicit arming. The API validates a review
+hash, uses owner-scoped idempotency, stores immutable task snapshots and reserves
+the full task ceiling in a transaction. The signer independently checks active
+ownership, key/address binding, policy scope, task caps/cancellation/expiry,
+RPC chain, contract calldata, recipient, price, stage and proof/signature. Public
+wallet/supply limits and allowed fee recipients are read from the chain. Signing
+requires gas estimation, funds for value plus gas and successful simulation.
+EIP-7702 accounts require an independently pinned direct-owner adapter; ordinary
+contracts and unprovisioned or changed delegations are rejected. No delegation is
+created or removed by the signer. Pins do not audit delegate code or its storage.
 
-### 2.1 Boundary Validation Pipeline
-Located in `backend/app/services/signer/base.py`, every transaction requested by the application or worker must pass `SignerPolicy.validate_transaction()`:
+The API, signer and scheduler share a database transaction lock for cancellation,
+budget and nonce coordination. Durable nonce reservations include pending chain
+state. The signer journal records signed bytes and liabilities before the app DB
+commit. The worker stores broadcast intent before submission, and retries only
+identical bytes/hash/nonce after timeout. Reservations remain held while outcomes
+are uncertain. Confirmed reverts charge gas. Sepolia and Robinhood require canonical receipts,
+configured confirmations and finalized block coverage before releasing liability.
+Signed Ethereum transactions have no Mintly-enforced on-chain expiry; stopping
+rebroadcast at the task deadline cannot retract an already signed transaction.
 
-```
-[ Mint Task / Worker ]
-        │
-        ▼ (Raw Unsigned Tx + MintAuthorization Record)
-┌────────────────────────────────────────────────────────┐
-│               SignerPolicy Boundary                    │
-│                                                        │
-│ 1. Chain ID Validation (1, 8453, 11155111, 84532)      │
-│ 2. Target Address Check (must match SeaDrop singleton) │
-│ 3. Exact Value Check (tx['value'] <= max_total_wei)    │
-│ 4. Gas Limit Check (gas * gasPrice <= max_fee_wei)     │
-│ 5. Calldata Parsing:                                   │
-│    - Method Selector == 0x83e387c2 (mintPublic)        │
-│    - nftContract == drop.contract_address              │
-│    - minter == authorization.wallet_address            │
-│    - quantity == authorization.quantity                │
-└────────────────────────────────────────────────────────┘
-        │ Passes all 5 criteria
-        ▼
-┌────────────────────────────────────────────────────────┐
-│             Cryptographic Signing Engine               │
-│  (LocalServerSigner / MockSigner / Remote KMS Vault)   │
-└────────────────────────────────────────────────────────┘
-```
+## Operational limits
 
-If ANY check fails:
-* An immediate `SignerPolicyError` is raised.
-* No cryptographic signature is generated.
-* An audit event `SIGNER_POLICY_VIOLATION` is recorded in the activity journal with caller and payload details.
+- The same-host Compose overlay is a deployment template with a Sepolia default, not tested live
+  infrastructure. Remote signer hosts need authenticated encrypted transport and
+  firewall rules. Never publish its HTTP port or put its bearer token in a URL.
+- Host root, Docker administrators, the provisioning operator and signer runtime
+  remain trusted. Store backups and decrypting secrets separately; protect the DB
+  because signed raw transactions are independently broadcastable.
+- A software disable stops future signing but does not erase custody or cancel
+  signed transactions. Private key knowledge cannot be revoked on-chain. Removing
+  all copies and/or migrating assets is an operator/user procedure, not a claim
+  made by Mintly's disconnect button.
+- Renewals require explicit provisioning. A new policy grants an additional budget;
+  old uncertain transactions still count against their original policy. Restore
+  policy files, journal and DB consistently and reconcile chain state first.
+- No automatic fee bump, fresh-nonce recovery, replacement transaction or release
+  of uncertain liabilities is implemented. A consumed/conflicting external nonce
+  can require manual investigation. Do not delete records to unblock spending.
+- No first-block inclusion, successful mint, malicious-collection protection,
+  Firebase phone delivery or post-finality catastrophic-reorg guarantee is made.
+- MetaMask permission experiments remain blocked. Native token allowances with
+  empty calldata cannot authorize an NFT mint; local owner-key tests do not prove
+  browser grants or MetaMask mobile support.
 
-### 2.2 Calldata Validation Specification
-Mintly prevents calldata tampering or function call substitution:
-1. **Selector Verification:** Confirms bytes 0..4 match SeaDrop's `mintPublic`:
-   $$\text{selector} = \texttt{0x83e387c2}$$
-2. **Parameter Extraction:** Decodes the 128 bytes following the selector:
-   * Bytes 4..36: `nftContract` (zero-padded 20-byte address). Must equal the drop's approved ERC-721 contract.
-   * Bytes 36..68: `feeRecipient` (zero-padded 20-byte address).
-   * Bytes 68..100: `minterIfNotPayer` (zero-padded 20-byte address). Must equal the user's wallet address.
-   * Bytes 100..132: `quantity` (uint256 big-endian). Must equal the exact integer quantity approved during task arming.
-
----
-
-## 3. Key Storage & Credential Isolation
-
-### 3.1 Key Management Hierarchy
-1. **Mock Signer (`MockSigner`):**
-   * Default mode for development, tests, and demo flows.
-   * Generates deterministic fake signatures (`0x...mock...`) without touching private keys.
-   * Never broadcasts to any network.
-2. **Local Server Signer (`LocalServerSigner`):**
-   * Key material is loaded strictly from environment variable `SIGNER_PRIVATE_KEY` or an encrypted keystore file (`SIGNER_KEYSTORE_PATH`).
-   * Never stored in SQLite or PostgreSQL database tables.
-   * Never transmitted over REST APIs to the Flutter mobile client.
-   * The Flutter app only ever receives and displays the public wallet address and authorization UUIDs.
-3. **Hardware / KMS Vault (Production Target):**
-   * The abstract base `BaseSigner` interface allows zero-code-change drop-in of AWS KMS, Google Cloud KMS, or HashiCorp Vault transit secrets engines where private keys never leave physical HSM modules.
-
----
-
-## 4. Mainnet Safety & Accidental Broadcast Prevention
-
-Mintly enforces a multi-tier defense against accidental mainnet broadcasts:
-
-1. **`ALLOW_LIVE_BROADCAST` Safety Flag:**
-   * In `backend/app/config.py`, `ALLOW_LIVE_BROADCAST: bool = False` by default.
-   * If `False`, `mint_executor.py` intercepts any transaction before broadcast, logs a simulated transaction hash, and transitions the task to `DEMO_MINTED`.
-2. **RPC URL Routing:**
-   * Default configuration routes to Sepolia (`https://rpc.sepolia.org`) or Base Sepolia (`https://sepolia.base.org`).
-   * Mainnet RPC URLs (`ETH_RPC_URL`, `BASE_RPC_URL`) are isolated and disabled unless explicitly configured in `.env`.
-3. **Explicit Mobile Mode Indicators:**
-   * The Flutter mobile app explicitly tags Jenny's active wallet with a **Demo** badge.
-   * The action button clearly reads **"Arm demo mint"** when in simulation/testnet mode.
-   * Live mode and Demo mode are never silently substituted for one another.
+The historical signer classes under `app/services/signer/` are not the live
+custodial signer. In particular, selecting a legacy environment signer no longer
+instantiates `LocalServerSigner` in the discovery worker. Default deployment
+explicitly disables automatic custody. Robinhood additionally requires
+ENABLE_ROBINHOOD_AUTOMATIC=true; all other mainnet chain IDs remain rejected.

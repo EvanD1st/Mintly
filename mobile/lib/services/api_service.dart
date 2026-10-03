@@ -123,8 +123,49 @@ class ApiService extends ChangeNotifier {
   }
 
   Future<MintTaskModel> armTask({required DropModel drop, required MintStageModel stage,
-    required int quantity, required String feeCapEth}) async {
-    throw UnsupportedError('Unattended minting is unavailable for MetaMask. Confirm each transaction in MetaMask.');
+    required int quantity, required String feeCapEth, String? walletId, String? grantId,
+    String? idempotencyKey, String? priceCapEth, String? totalCapEth, String? expiresAt,
+    String mintKind = 'public', bool conditionalEligibility = false}) async {
+    if (walletId == null || grantId == null || idempotencyKey == null) {
+      throw const ApiException('Select a provisioned automatic wallet policy and review exact limits first.');
+    }
+    return armAutomaticTask({'wallet_id': walletId, 'grant_id': grantId,
+      'drop_id': drop.id, 'stage_id': stage.id, 'quantity': quantity,
+      'fee_cap_eth': feeCapEth, 'price_cap_eth': priceCapEth, 'total_cap_eth': totalCapEth,
+      'expires_at': expiresAt, 'mint_kind': mintKind, 'conditional_eligibility': conditionalEligibility,
+      'user_consent_confirmed': true, 'idempotency_key': idempotencyKey});
+  }
+
+  Future<Map<String, dynamic>> previewAutomaticTask(Map<String, dynamic> request) async =>
+    (await _post('/tasks/draft', request)) as Map<String, dynamic>;
+
+  Future<MintTaskModel> armAutomaticTask(Map<String, dynamic> request) async {
+    final task = MintTaskModel.fromJson((await _post('/tasks/arm', request)) as Map<String, dynamic>);
+    if (task.id.isEmpty) throw const ApiException('The server did not confirm a saved task. Retry with the same request.');
+    return task;
+  }
+
+  Future<List<Map<String, dynamic>>> fetchAutomaticPolicies() async =>
+    ((await _get('/automatic/policies')) as List).cast<Map<String, dynamic>>();
+
+  Future<void> disableAutomaticPolicy(String id) async { await _post('/automatic/policies/$id/disable', {}); }
+
+  Future<Map<String, dynamic>> custodyImportConfig() async =>
+    (await _get('/automatic/import/config')) as Map<String, dynamic>;
+
+  Future<void> importCustodyWallet(Map<String, dynamic> payload) async {
+    try {
+      final result = await _post('/automatic/import', payload, timeout: const Duration(seconds: 90));
+      if (result is! Map || result['id'] != payload['request_id'] || result['wallet_id'] != payload['wallet_id']) {
+        throw const ApiException('Import response could not be verified.');
+      }
+    } catch (_) {
+      // Never render a server/proxy response or exception containing a secret.
+      throw const ApiException('Import not confirmed. Check your password, matching wallet key and limits, then retry. Refresh wallet policies first if the connection was interrupted.');
+    } finally {
+      payload.remove('private_key');
+      payload.remove('password');
+    }
   }
 
   Future<void> disarmTask(String taskId) async { await _post('/tasks/$taskId/disarm', {}); }
