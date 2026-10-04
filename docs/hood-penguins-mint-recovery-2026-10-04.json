@@ -1,0 +1,31 @@
+{
+  "checked_at": "2026-10-04T19:27:13.9985960Z",
+  "source_wallet": "0x3118437f487248a8c34885480246344dadaee98a",
+  "receiving_wallet": "0x5f1a65c4c3011eb22c2882c3e9ea8299f42ccf7e",
+  "chain_id": 4663,
+  "collection": "Hood Penguins",
+  "contract": "0xF517D3a2C499CcE82C0F9E37d9e6c79319F3D9A3",
+  "source_transaction": "0x888ccbf45d6a22a712cc2a28c5ea471efbb854a1a7879ebb69d0414a6386cd00",
+  "source_block": 80155967,
+  "source_mint_method": "mintSigned",
+  "reasons_not_copied": [
+    "Copy observation currently accepts direct mintPublic calls only.",
+    "The latest paid copy rule was approved at block 80175191, after the source mint.",
+    "The earlier rule was free-only; the source mint cost 0.0001 ETH."
+  ],
+  "recovery": "One public mint explicitly requested in chat; normal task API and isolated signer used. No rule, source verification or signer check bypassed.",
+  "quantity": 1,
+  "mint_price_wei": "100000000000000",
+  "fee_cap_wei": "100000000000000",
+  "total_cap_wei": "200000000000000",
+  "task_id": "59bff645-3454-4bad-87c4-5dc4f08903ec",
+  "transaction": "0x9c1bedf40a880e3d6bcf79bdc4f5f38b43194c901ea74ac919ecd728bb58a72e",
+  "receipt_status": 1,
+  "receipt_block": 80182362,
+  "token_id": 1033,
+  "receipt_total_cost_wei": "102620506112000",
+  "ownership_verified": true,
+  "database_status_at_check": "submitted",
+  "finality": "Receipt successful and NFT ownership verified. Worker retains reservation until RPC finalized block reaches receipt block.",
+  "automatic_copy_rules_changed": false
+}
