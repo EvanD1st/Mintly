@@ -30,12 +30,13 @@ def check_font(installed_bytes, built_bytes):
     missing = set(new_map) - set(old_map)
     if missing:
         raise ValueError(f"Installed font lacks glyphs: {sorted(missing)}")
-    for tag in ("head", "hhea"):
+    for tag, fields in (("head", ("unitsPerEm",)),
+                        ("hhea", ("ascent", "descent", "lineGap"))):
         # Table checksums and glyph counts change during subsetting; geometry
         # and per-glyph advance widths are the compatibility requirements.
-        field = "unitsPerEm" if tag == "head" else "ascent"
-        if getattr(installed[tag], field) != getattr(built[tag], field):
-            raise ValueError("Font geometry changed")
+        for field in fields:
+            if getattr(installed[tag], field) != getattr(built[tag], field):
+                raise ValueError("Font geometry changed")
     old_glyphs, new_glyphs = installed.getGlyphSet(), built.getGlyphSet()
     for codepoint, new_name in new_map.items():
         old_name = old_map[codepoint]

@@ -116,6 +116,7 @@ jobs:
         run: |
           : "${RELEASE_VERSION:?Dispatch with release_version}"
           python -m pip install fonttools==4.63.0
+          python -m unittest discover -s ../deploy -p test_shorebird_wallet_ota.py
           python ../deploy/shorebird-wallet-ota.py --release-version "$RELEASE_VERSION"
       - name: Upload OTA compatibility audit
         if: always() && inputs.audited_wallet_ota == true
