@@ -16,6 +16,7 @@ from app.services.parser import format_wei_to_eth
 
 CHAINS = {1: 'Ethereum', 8453: 'Base', 4663: 'Robinhood', 31337: 'Local test', 11155111: 'Sepolia'}
 TRANSFER = '0x' + keccak(text='Transfer(address,address,uint256)').hex()
+SEADROP_MINT = '0x' + keccak(text='SeaDropMint(address,address,address,address,uint256,uint256,uint256,uint256)').hex()
 ZERO_TOPIC = '0x' + '0' * 64
 
 
@@ -221,14 +222,17 @@ async def scan_watch(db, watch, chain):
             last = max(0, last - 24)  # A reorg rewinds observation, never creates a second copy.
         end = min(head, last + 300)
         if end > last:
-            logs = await web3.eth.get_logs({'fromBlock': last + 1, 'toBlock': end,
-                'topics': [TRANSFER, ZERO_TOPIC, '0x' + watch.address[2:].rjust(64, '0')]})
+            logs = await web3.eth.get_logs({'address': SEADROP_V1_ADDRESS, 'fromBlock': last + 1, 'toBlock': end,
+                'topics': [SEADROP_MINT, None, '0x' + watch.address[2:].rjust(64, '0')]})
             if len(logs) > 1000:
                 raise ValueError('Mint observation range too dense')
             seen = set()
             for log in logs:
-                tx_hash, contract = hex_value(log.transactionHash), log.address
-                if len(log.topics) != 4 or (tx_hash, contract.lower()) in seen:
+                if len(log.topics) != 4:
+                    continue
+                tx_hash = hex_value(log.transactionHash)
+                contract = to_checksum_address(bytes(log.topics[1])[-20:])
+                if (tx_hash, contract.lower()) in seen:
                     continue
                 seen.add((tx_hash, contract.lower()))
                 key = automatic.digest([watch.id, chain, tx_hash, contract.lower()])
