@@ -1,3 +1,4 @@
+import '../theme/compatible_icons.dart';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -178,7 +179,7 @@ class _AutomaticReviewState extends ConsumerState<AutomaticReviewScreen> {
                 return DropdownButtonFormField<String>(
                   icon: const RotatedBox(
                     quarterTurns: 1,
-                    child: Icon(Icons.chevron_right),
+                    child: Icon(MintlyIcons.chevronRight),
                   ),
                   initialValue: _policy?['id'] as String?,
                   decoration: const InputDecoration(
@@ -209,7 +210,7 @@ class _AutomaticReviewState extends ConsumerState<AutomaticReviewScreen> {
             DropdownButtonFormField<String>(
               icon: const RotatedBox(
                 quarterTurns: 1,
-                child: Icon(Icons.chevron_right),
+                child: Icon(MintlyIcons.chevronRight),
               ),
               initialValue: _stage.id,
               decoration: const InputDecoration(labelText: 'Exact stage'),
@@ -229,7 +230,7 @@ class _AutomaticReviewState extends ConsumerState<AutomaticReviewScreen> {
             DropdownButtonFormField<String>(
               icon: const RotatedBox(
                 quarterTurns: 1,
-                child: Icon(Icons.chevron_right),
+                child: Icon(MintlyIcons.chevronRight),
               ),
               initialValue: _kind,
               decoration: const InputDecoration(labelText: 'Mint method'),

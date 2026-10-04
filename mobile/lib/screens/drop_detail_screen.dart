@@ -1,3 +1,4 @@
+import '../theme/compatible_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
@@ -74,7 +75,7 @@ class DropDetailScreen extends ConsumerWidget {
                 ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$error')));
               }
             }
-          }, icon: const Icon(Icons.open_in_new), label: const Text('View on OpenSea'))
+          }, icon: const Icon(MintlyIcons.openInNew), label: const Text('View on OpenSea'))
         else ...[
           const Text('Unverified external link. Confirm its address independently before visiting:'),
           const SizedBox(height: 8),

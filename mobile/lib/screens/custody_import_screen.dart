@@ -1,3 +1,4 @@
+import '../theme/compatible_icons.dart';
 import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -329,7 +330,7 @@ class _CustodyImportScreenState extends ConsumerState<CustodyImportScreen>
                     initialValue: _days,
                     icon: const RotatedBox(
                       quarterTurns: 1,
-                      child: Icon(Icons.chevron_right),
+                      child: Icon(MintlyIcons.chevronRight),
                     ),
                     decoration: const InputDecoration(
                       labelText: 'Allow automatic minting for',

@@ -1,3 +1,4 @@
+import '../theme/compatible_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../state/app_state.dart';
@@ -88,7 +89,7 @@ class _AdminScreenState extends ConsumerState<AdminScreen> {
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(title: const Text('Accounts')),
     floatingActionButton: FloatingActionButton.extended(onPressed: _create,
-      icon: const Icon(Icons.person_add_alt), label: const Text('Create account')),
+      icon: const Icon(MintlyIcons.personAdd), label: const Text('Create account')),
     body: FutureBuilder<List<Map<String, dynamic>>>(future: _users, builder: (context, snapshot) {
       if (!snapshot.hasData) {
         if (snapshot.hasError) return Center(child: Text('${snapshot.error}'));
@@ -102,6 +103,7 @@ class _AdminScreenState extends ConsumerState<AdminScreen> {
           subtitle: Text(user['role'] == 'admin' ? 'Admin' :
             user['must_change_password'] == true ? 'Temporary password active' : 'Member'),
           trailing: user['role'] == 'admin' ? null : PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert),
             onSelected: (action) => action == 'reset' ? _reset(user) : _delete(user),
             itemBuilder: (_) => const [
               PopupMenuItem(value: 'reset', child: Text('Reset password')),

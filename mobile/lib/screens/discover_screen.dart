@@ -1,3 +1,4 @@
+import '../theme/compatible_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
@@ -31,10 +32,10 @@ class DiscoverScreen extends ConsumerWidget {
           style: TextStyle(color: muted)),
         const SizedBox(height: 18),
         Card(child: ListTile(
-          leading: const Icon(Icons.public),
+          leading: const Icon(MintlyIcons.public),
           title: const Text('@lakzonevn drops'),
           subtitle: Text(state.sourceStatusText),
-          trailing: const Icon(Icons.chevron_right),
+          trailing: const Icon(MintlyIcons.chevronRight),
           onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SourceScreen())),
         )),
         const SizedBox(height: 18),
@@ -46,11 +47,11 @@ class DiscoverScreen extends ConsumerWidget {
         ]),
         const SizedBox(height: 8),
         Wrap(spacing: 8, children: [
-          ChoiceChip(label: const Text('All'), selected: state.filter == 'all',
+          RawChip(deleteIcon: const Icon(Icons.close), label: const Text('All'), selected: state.filter == 'all',
             onSelected: (_) => notifier.setFilter('all')),
-          ChoiceChip(label: const Text('Unverified'), selected: state.filter == 'unknown',
+          RawChip(deleteIcon: const Icon(Icons.close), label: const Text('Unverified'), selected: state.filter == 'unknown',
             onSelected: (_) => notifier.setFilter('unknown')),
-          ChoiceChip(label: const Text('Manual review'), selected: state.filter == 'manual',
+          RawChip(deleteIcon: const Icon(Icons.close), label: const Text('Manual review'), selected: state.filter == 'manual',
             onSelected: (_) => notifier.setFilter('manual')),
         ]),
         const SizedBox(height: 14),
@@ -79,7 +80,7 @@ class DiscoverScreen extends ConsumerWidget {
       title: Text(drop.name),
       subtitle: Text('${drop.chain} · ${drop.siteLabel}\n$schedule · $price\n${drop.statusLabel}'),
       isThreeLine: true,
-      trailing: const Icon(Icons.chevron_right),
+      trailing: const Icon(MintlyIcons.chevronRight),
       onTap: () {
         notifier.selectDrop(drop);
         Navigator.of(context).push(MaterialPageRoute(builder: (_) => DropDetailScreen(drop: drop)));

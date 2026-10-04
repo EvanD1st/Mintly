@@ -76,6 +76,9 @@ def audit(installed_path, built_path):
 def patch_release(version, track, audit_only):
     command = ["shorebird", "--json", "patch", "android", "--release-version",
                version, "--track", track]
+    legacy_icons = version in {"1.0.0+1", "1.0.1+2"}
+    if legacy_icons:
+        command.append("--dart-define=MINTLY_LEGACY_ICONS=true")
     # Isolate Shorebird downloads so the archive audited is the exact release
     # selected by the CLI, rather than a guessed or stale release artifact.
     with tempfile.TemporaryDirectory(prefix="mintly-ota-") as scratch:
@@ -91,7 +94,7 @@ def patch_release(version, track, audit_only):
             raise ValueError(f"Expected one release AAB, found {len(candidates)}")
         built = Path("build/app/outputs/bundle/release/app-release.aab")
         result = audit(candidates[0], built)
-        result.update(release_version=version, track=track,
+        result.update(release_version=version, track=track, legacy_icons=legacy_icons,
                       native_checks="Shorebird enabled; no override")
         evidence = Path(f"build/shorebird/wallet-ota-audit-{version}.json")
         evidence.parent.mkdir(parents=True, exist_ok=True)

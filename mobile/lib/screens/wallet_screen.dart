@@ -1,3 +1,4 @@
+import '../theme/compatible_icons.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -276,7 +277,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
                   await _unlink(wallet);
                   if (pageContext.mounted) Navigator.pop(pageContext);
                 },
-                icon: const Icon(Icons.link_off),
+                icon: const Icon(MintlyIcons.linkOff),
                 label: const Text('Unlink address'),
               ),
             ],
@@ -330,7 +331,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
           const SizedBox(height: 20),
           ListTile(
             contentPadding: EdgeInsets.zero,
-            leading: const Icon(Icons.public),
+            leading: const Icon(MintlyIcons.public),
             title: const Text('Live source'),
             subtitle: Text(ref.read(mintlyProvider).sourceStatusText),
           ),
@@ -340,7 +341,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
                 context,
                 MaterialPageRoute(builder: (_) => const AdminScreen()),
               ),
-              icon: const Icon(Icons.admin_panel_settings_outlined),
+              icon: const Icon(MintlyIcons.adminPanelSettings),
               label: const Text('Manage accounts'),
             ),
           const SizedBox(height: 24),
@@ -359,7 +360,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
               await notifier.loadInitialData();
               if (mounted) Navigator.pop(context);
             },
-            icon: const Icon(Icons.logout),
+            icon: const Icon(MintlyIcons.logout),
             label: const Text('Sign out'),
           ),
         ],
@@ -471,7 +472,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
                             const SizedBox(height: 16),
                             FilledButton.icon(
                               onPressed: () => _import(wallet),
-                              icon: const Icon(Icons.lock_outline),
+                              icon: const Icon(MintlyIcons.lockOutline),
                               label: const Text('Set up automatic minting'),
                             ),
                           ],
@@ -487,7 +488,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
       const SizedBox(height: 20),
       OutlinedButton.icon(
         onPressed: _pair,
-        icon: const Icon(Icons.link),
+        icon: const Icon(MintlyIcons.link),
         label: const Text('Connect MetaMask'),
       ),
       const SizedBox(height: 12),
@@ -496,7 +497,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
           context,
           MaterialPageRoute(builder: (_) => const ImportScreen()),
         ),
-        icon: const Icon(Icons.add_link),
+        icon: const Icon(MintlyIcons.addLink),
         label: const Text('Add an OpenSea mint'),
       ),
       TextButton(onPressed: _refresh, child: const Text('Refresh wallets')),

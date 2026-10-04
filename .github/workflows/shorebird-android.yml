@@ -96,6 +96,10 @@ jobs:
         run: |
           curl --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/shorebirdtech/install/main/install.sh -sSf | bash
           echo "$HOME/.config/shorebird/bin" >> "$GITHUB_PATH"
+      - name: Test compatibility with earliest installed icon fonts
+        if: steps.scope.outputs.skip != 'true' && inputs.audited_wallet_ota == true
+        working-directory: mobile
+        run: flutter test --dart-define=MINTLY_LEGACY_ICONS=true
       - name: Create signed Android release
         if: steps.scope.outputs.skip != 'true' && inputs.operation == 'release'
         working-directory: mobile

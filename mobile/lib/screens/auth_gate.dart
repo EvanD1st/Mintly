@@ -1,3 +1,4 @@
+import '../theme/compatible_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../state/app_state.dart';
@@ -59,7 +60,7 @@ class _LoginScreenState extends ConsumerState<_LoginScreen> {
       child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 420), child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Icon(Icons.lock_outline, size: 48),
+          const Icon(MintlyIcons.lockOutline, size: 48),
           const SizedBox(height: 18),
           Text('Sign in', style: Theme.of(context).textTheme.headlineMedium, textAlign: TextAlign.center),
           const SizedBox(height: 8),

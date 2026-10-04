@@ -54,3 +54,31 @@ must be backed up for future installers.
 
 Live automatic minting remains disabled in production. Imported social posts
 and OpenSea URLs are not treated as eligibility proof or verified integrations.
+
+## Wallet import OTA compatibility
+
+Pure Dart recovery libraries can be included in a patch. Their new license
+notices are embedded in `mobile/lib/services/wallet_licenses.dart`, registered
+at startup, and available through Wallets → Settings → Open source licenses.
+This delivers the notices even when the installed `NOTICES.Z` asset is older.
+
+For the wallet update, manually dispatch **patch** with `audited_wallet_ota`
+enabled and the exact installed release version. This mode also accepts a comma
+separated list of installed versions. `deploy/shorebird-wallet-ota.py` first
+performs a dry run, audits the release AAB downloaded by Shorebird against the
+built AAB, and only then publishes. Asset file additions/removals, other asset
+changes, missing font glyphs, altered glyph outlines/metrics, and native library
+changes stop publication. Shorebird's native checks remain enabled. The asset
+exception covers only the embedded licenses and a font subset already fully
+provided by the installed font. Compatibility audit JSON is saved as a workflow
+artifact for each release.
+
+Versions `1.0.0+1` and `1.0.1+2` contain fewer Material icons. Their builds use
+`MINTLY_LEGACY_ICONS=true` for equivalent installed icons, with the same wallet
+features and limits. The workflow tests both icon modes. Native plugin changes,
+new images, and missing installed glyphs still require an installer update.
+
+Devices check for a patch at launch. Open Mintly with internet access, let the
+download finish, then fully close and reopen it to apply the update. Publishing
+an OTA proves availability, not activation on every installed phone. This update
+does not enable the production automatic spending worker.
