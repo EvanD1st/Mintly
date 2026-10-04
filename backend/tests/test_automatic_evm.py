@@ -716,3 +716,39 @@ async def test_task_remove_is_idempotent_and_history_pagination_is_owner_scoped(
     assert (await lab.client.get('/api/history?section=unknown')).status_code == 422
     records = (await lab.client.get('/api/history?section=activity')).json()['records']
     assert len([r for r in records if r['event_type'] == 'task_removed']) == 1
+
+
+async def test_low_balance_covers_mint_and_authorized_gas_without_block_gas_default(lab, monkeypatch):
+    # Hardhat omits Nitro's eth_call affordability check; emulate that RPC rule using real chain balances.
+    real_provider = automatic.provider
+    async def nitro_provider():
+        web3 = await real_provider()
+        call = web3.eth.call
+        async def affordable_call(tx, *args, **kwargs):
+            if tx.get('gasPrice') and tx.get('from', '').lower() == lab.owner.address.lower():
+                gas = tx.get('gas', (await web3.eth.get_block('latest')).gasLimit)
+                required = gas * tx['gasPrice'] + tx.get('value', 0)
+                if required > await web3.eth.get_balance(lab.owner.address, 'pending'):
+                    raise ValueError('RPC simulation requires sufficient balance for its supplied gas limit')
+            return await call(tx, *args, **kwargs)
+        web3.eth.call = affordable_call
+        return web3
+    monkeypatch.setattr(automatic, 'provider', nitro_provider)
+    # Enough for this bounded mint, far below the default RPC simulation's block-sized gas budget.
+    r = await lab.client.post('/api/tasks/arm', json=lab.request)
+    assert r.status_code == 200, r.text
+    task_id = r.json()['id']
+    lab.w.provider.make_request('hardhat_setBalance', [lab.owner.address, hex(10**15)])
+    lab.w.provider.make_request('evm_setNextBlockTimestamp', [lab.start]); lab.w.provider.make_request('evm_mine', [])
+    await lab.due(); await lab.tick()
+    async with lab.factory() as db:
+        task = await db.get(MintTask, task_id)
+        assert task.status == 'prepared', task.failure_reason
+    await lab.due(); await lab.tick()
+    lab.w.provider.make_request('evm_mine', [])
+    await lab.due(); await lab.tick()
+    async with lab.factory() as db:
+        task = await db.get(MintTask, task_id)
+        assert task.status == 'confirmed', task.failure_reason
+        assert task.actual_total_cost_wei <= 10**15
+    assert lab.nft.functions.ownerOf(1).call() == lab.owner.address

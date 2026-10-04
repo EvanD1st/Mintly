@@ -134,8 +134,10 @@ async def prepare_task(db, task_id, vault=None):
                 raise ValueError('Estimated gas or total debit exceeds task authorization')
             if await web3.eth.get_balance(address, 'pending') < tx['value'] + gas * gas_price:
                 raise ValueError('Insufficient funds for mint value and gas')
-            await web3.eth.call(tx, 'pending')
+            # Nitro checks affordability against eth_call's gas limit. Omitting it
+            # uses a block-sized RPC default, rejecting otherwise funded wallets.
             tx['gas'] = gas
+            await web3.eth.call(tx, 'pending')
             # Recheck wall time after network preparation, immediately before using the key.
             if int(datetime.now(timezone.utc).timestamp()) >= s['expiry']:
                 raise ValueError('Task expired during preparation')
