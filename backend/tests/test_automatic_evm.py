@@ -38,13 +38,29 @@ from app.services.custody import CustodyVault
 from app.services.custody_recovery import recover_task
 
 
+@pytest.fixture
+def recovery_clock(lab, monkeypatch):
+    # EVM time is deliberately advanced by local stage/reorg tests. Snapshot
+    # restoration does not restore Hardhat's wall-clock offset; align the test
+    # consent clock with chain time without relaxing production expiry checks.
+    class ChainClock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime.fromtimestamp(max(int(datetime.now(timezone.utc).timestamp()),
+                lab.w.eth.get_block('latest').timestamp), tz)
+    monkeypatch.setattr('app.services.custody_recovery.datetime', ChainClock)
+
+
 async def unresolved(lab):
-    response = await lab.client.post('/api/tasks/arm', json=lab.request)
+    response = await lab.client.post('/api/tasks/arm', json={**lab.request,
+        'expires_at': datetime.fromtimestamp(lab.start + 30, timezone.utc).isoformat()})
     assert response.status_code == 200, response.text
     task_id = response.json()['id']
     lab.w.provider.make_request('evm_setNextBlockTimestamp', [lab.start])
     lab.w.provider.make_request('evm_mine', [])
     await lab.sign(task_id)
+    lab.w.provider.make_request('evm_setNextBlockTimestamp', [lab.start + 45])
+    lab.w.provider.make_request('evm_mine', [])  # original finite submission authorization is now expired
     async with lab.factory() as db:
         task = await db.get(MintTask, task_id)
         task.status, task.broadcast_attempts = 'uncertain', 4
@@ -53,10 +69,10 @@ async def unresolved(lab):
     return task_id, previous
 
 
-@pytest.mark.parametrize('winner', ['replacement', 'original'])
-async def test_recovery_mints_once_same_nonce_and_reconciles_either_hash(lab, winner):
+@pytest.mark.parametrize('winner', ['replacement', 'original', 'replacement_reverted'])
+async def test_recovery_mints_once_same_nonce_and_reconciles_either_hash(lab, winner, recovery_clock):
     task_id, previous = await unresolved(lab)
-    expiry = min(datetime.fromtimestamp(lab.end, timezone.utc), datetime.now(timezone.utc) + timedelta(minutes=19))
+    expiry = datetime.fromtimestamp(lab.end, timezone.utc)
     async with lab.factory() as db:
         result = await recover_task(db, task_id, lab.user.id, expiry, 'explicit-local-owner-consent')
         retry = await recover_task(db, task_id, lab.user.id, expiry, 'explicit-local-owner-consent')
@@ -78,18 +94,32 @@ async def test_recovery_mints_once_same_nonce_and_reconciles_either_hash(lab, wi
     journal.close()
     if winner == 'original':
         lab.w.eth.send_raw_transaction(previous[1])
+    elif winner == 'replacement_reverted':
+        # Price changes after signing; chain reverts the saved mint without a second attempt.
+        lab.w.provider.make_request('hardhat_impersonateAccount', [lab.nft.address])
+        lab.sea.functions.updatePublicDrop((11, lab.start, lab.end, 20, 500, True)).transact({'from': lab.nft.address})
+        lab.w.provider.make_request('hardhat_stopImpersonatingAccount', [lab.nft.address])
     await lab.due(); await lab.tick()
     lab.w.provider.make_request('evm_mine', [])
     await lab.due(); await lab.tick()
     async with lab.factory() as db:
         task = await db.get(MintTask, task_id)
         recovery = await db.scalar(select(MintRecovery).where(MintRecovery.task_id == task_id))
-        assert task.status == 'confirmed', task.failure_reason
-        assert recovery.status == ('confirmed' if winner == 'replacement' else 'superseded')
-        assert task.transaction_hash == (result['hash'] if winner == 'replacement' else previous[0])
+        expected = 'reverted' if winner == 'replacement_reverted' else 'confirmed'
+        assert task.status == expected, task.failure_reason
+        assert recovery.status == ('superseded' if winner == 'original' else expected)
+        assert task.transaction_hash == (previous[0] if winner == 'original' else result['hash'])
         assert (await db.get(AutomaticGrant, lab.grant.id)).reserved_wei == 0
-    assert lab.nft.functions.totalSupply().call() == 2  # test request quantity=2; exactly one execution
-    assert lab.nft.functions.ownerOf(1).call() == lab.owner.address
+    assert lab.nft.functions.totalSupply().call() == (0 if winner == 'replacement_reverted' else 2)
+    if winner != 'replacement_reverted':
+        assert lab.nft.functions.ownerOf(1).call() == lab.owner.address
+    else:
+        receipt = lab.w.eth.get_transaction_receipt(result['hash'])
+        assert task.actual_total_cost_wei == receipt.gasUsed * receipt.effectiveGasPrice
+        # Restore eligibility for the later distinct task, not a retry of this one.
+        lab.w.provider.make_request('hardhat_impersonateAccount', [lab.nft.address])
+        lab.sea.functions.updatePublicDrop((10, lab.start, lab.end, 20, 500, True)).transact({'from': lab.nft.address})
+        lab.w.provider.make_request('hardhat_stopImpersonatingAccount', [lab.nft.address])
     history = (await lab.client.get('/api/history?section=mints')).json()['records'][0]
     assert history['recoveries'][0]['previous_hash'] == previous[0]
     assert history['recoveries'][0]['replacement_hash'] == result['hash']
@@ -104,9 +134,9 @@ async def test_recovery_mints_once_same_nonce_and_reconciles_either_hash(lab, wi
     journal.close()
 
 
-async def test_recovery_journal_reuses_signature_after_database_commit_loss(lab, monkeypatch):
+async def test_recovery_journal_reuses_signature_after_database_commit_loss(lab, monkeypatch, recovery_clock):
     task_id, previous = await unresolved(lab)
-    expiry = min(datetime.fromtimestamp(lab.end, timezone.utc), datetime.now(timezone.utc) + timedelta(minutes=19))
+    expiry = datetime.fromtimestamp(lab.end, timezone.utc)
     async with lab.factory() as db:
         real_commit = db.commit
         count = 0
@@ -130,9 +160,9 @@ async def test_recovery_journal_reuses_signature_after_database_commit_loss(lab,
 
 
 @pytest.mark.parametrize('invalid', ['owner', 'expired', 'fee_cap', 'consumed_nonce', 'expensive_gas'])
-async def test_recovery_rejects_unapproved_or_unaffordable_scope_without_signing(lab, invalid, monkeypatch):
+async def test_recovery_rejects_unapproved_or_unaffordable_scope_without_signing(lab, invalid, monkeypatch, recovery_clock):
     task_id, _ = await unresolved(lab)
-    expiry = min(datetime.fromtimestamp(lab.end, timezone.utc), datetime.now(timezone.utc) + timedelta(minutes=19))
+    expiry = datetime.fromtimestamp(lab.end, timezone.utc)
     owner = lab.user.id
     if invalid == 'owner': owner = str(uuid.uuid4())
     if invalid == 'expired': expiry = datetime.now(timezone.utc) - timedelta(seconds=1)
@@ -154,9 +184,9 @@ async def test_recovery_rejects_unapproved_or_unaffordable_scope_without_signing
     journal.close()
 
 
-async def test_recovery_retries_are_finite_and_never_extend_original_consent(lab, monkeypatch):
+async def test_recovery_retries_are_finite_and_never_extend_original_consent(lab, monkeypatch, recovery_clock):
     task_id, previous = await unresolved(lab)
-    expiry = min(datetime.fromtimestamp(lab.end, timezone.utc), datetime.now(timezone.utc) + timedelta(minutes=19))
+    expiry = datetime.fromtimestamp(lab.end, timezone.utc)
     async with lab.factory() as db:
         await recover_task(db, task_id, lab.user.id, expiry, 'finite-recovery-owner-consent')
     real_provider = automatic.provider

@@ -85,7 +85,7 @@ async def step(session_factory=AsyncSessionLocal, sign=request_signature, *, now
                         task.transaction_hash, task.signed_tx_raw = tx_hash, signed_raw
                         task.explorer_url = explorer_url(tx_hash)
                         if recovery:
-                            recovery.status = 'confirmed' if tx_hash == recovery.replacement_hash else 'superseded'
+                            recovery.status = ('confirmed' if receipt.status == 1 else 'reverted') if tx_hash == recovery.replacement_hash else 'superseded'
                         break
                 if receipt:
                     auth = await db.get(MintAuthorization, task.authorization_id)

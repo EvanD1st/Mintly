@@ -5,9 +5,11 @@ server. It preserves the imported address and its allowlist identity. It does
 **not** establish a MetaMask permission or an on-chain spending limit. Local EVM
 execution is demonstrated. On 4 October 2026 the owner imported the linked wallet
 through the isolated service and explicitly activated Robinhood automation.
-An authorized one-NFT mainnet test was signed; its initial submission has no
-receipt. A separately approved same-nonce recovery preserves the USD 0.50 cap.
-Current execution evidence is recorded separately when a receipt is available.
+An authorized one-NFT mainnet test minted Robinhood Ape Club token #316 after a
+separately approved same-nonce recovery. Total debit is 0.000039195327232 ETH,
+below the USD 0.50 cap. [Receipt evidence](automatic-mainnet-proof-2026-10-04.json)
+records inclusion, ownership and finality separately. Budget remains reserved
+until the finalized block covers the receipt.
 
 ## What works and what is excluded
 
@@ -17,7 +19,7 @@ Current execution evidence is recorded separately when a receipt is available.
 | Local EVM 31337, Merkle allowlist and signed presale | Real SeaDrop verifies proofs/signatures; test provider supplies wallet-specific calldata |
 | Ethereum Sepolia 11155111, public | Explicit HTTPS RPC configuration supported; needs a verified SeaDrop collection and real testnet run |
 | Ethereum Sepolia presales | Validator exists, but no live testnet presale provider is configured/proven; do not claim operational support |
-| Robinhood 4663 | Explicitly activated; Nitro total fees, finalized receipt checks, pinned EIP-7702 direct signer. One-NFT mainnet proof pending receipt. |
+| Robinhood 4663 | Explicitly activated; one-NFT mainnet mint and owner verified. Nitro total fees, finalized receipt checks, pinned EIP-7702 direct signer. |
 | Ethereum mainnet, Base, Arbitrum, Optimism and other L2s | Automatic execution rejected; their adapters are unimplemented |
 | Arbitrary project contracts, ERC-1155 and arbitrary smart accounts | Unsupported; no generic calldata signing route |
 
