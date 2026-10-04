@@ -92,3 +92,27 @@ Devices check for a patch at launch. Open Mintly with internet access, let the
 download finish, then fully close and reopen it to apply the update. Publishing
 an OTA proves availability, not activation on every installed phone. This update
 does not enable the production automatic spending worker.
+
+### Published wallet update — 4 October 2026
+
+The Shorebird API confirms these stable Android patches for every active
+release, each with arm32, arm64, and x86_64 artifacts:
+
+| Installed release | Stable patch |
+| --- | --- |
+| 1.0.0+1 | 1 |
+| 1.0.1+2 | 1 |
+| 1.1.0+3 | 11 |
+| 1.1.1+4 | 1 |
+
+[Rollout evidence](wallet-ota-2026-10-04.json) records source commits, build runs,
+artifact hashes, asset audits, and production status. Some multi-target runs
+published their compatible targets before rejecting another target; later runs
+resolved those mismatches and published the remaining versions. No native diff
+override was used. The final oldest-release run completed successfully.
+
+The wallet update includes the simpler setup, local recovery phrase derivation,
+and automatic collection selection for reviewed mints. Production mainnet
+execution and the automatic spending worker remain disabled. Activation on
+individual phones has not been observed; users must launch online and restart
+after the download finishes.

@@ -1,0 +1,258 @@
+{
+  "checked_at": "2026-10-04T04:40:57.940402+00:00",
+  "status": "published",
+  "platform": "android",
+  "shorebird_app_id": "73918173-d9da-417d-8abd-407f05661d5c",
+  "source_branch": "codex/custody-import-deploy",
+  "patches": [
+    {
+      "release_version": "1.1.1+4",
+      "patch_number": 1,
+      "patch_id": 692943,
+      "track": "stable",
+      "rolled_back": false,
+      "source_commit": "75cf5bdfb77576677541f31cf27290d5f69455d4",
+      "workflow_url": "https://github.com/EvanD1st/Mintly/actions/runs/37175724681",
+      "workflow_conclusion": "failure",
+      "compatibility_audit": {
+        "changed_assets": [
+          "base/assets/flutter_assets/fonts/MaterialIcons-Regular.otf"
+        ],
+        "font_compatibility": {
+          "installed_glyphs": 34,
+          "required_glyphs": 31
+        },
+        "installed_sha256": "40180a4e181a25c9194ee50e58d3487040bc48c09e079fefb8e74841fa034e9b",
+        "built_sha256": "a16b76c4e69c112e664512beaa38c2b1150684b7b34f2f34952091e67ecf803b",
+        "release_version": "1.1.1+4",
+        "track": "stable",
+        "legacy_icons": false,
+        "native_checks": "Shorebird enabled; no override"
+      },
+      "artifacts": [
+        {
+          "id": 1582003,
+          "patch_id": 692943,
+          "arch": "arm",
+          "platform": "android",
+          "hash": "bbeb6ff9df71381bbd79ff955612d0b59322ba84e1c97bf738c127b9b3d365ce",
+          "size": 1059428,
+          "created_at": "2026-10-04T04:09:29.078542Z"
+        },
+        {
+          "id": 1582004,
+          "patch_id": 692943,
+          "arch": "aarch64",
+          "platform": "android",
+          "hash": "3553534e87899071c5672bb197bbd27e4eb972bbf18a7cd4b6edb02e7041f90c",
+          "size": 1031093,
+          "created_at": "2026-10-04T04:09:29.591690Z"
+        },
+        {
+          "id": 1582005,
+          "patch_id": 692943,
+          "arch": "x86_64",
+          "platform": "android",
+          "hash": "7300a0e91c10af08310f79fa725b8d0d00df594a7e360ebef8e961286018f648",
+          "size": 997189,
+          "created_at": "2026-10-04T04:09:30.062120Z"
+        }
+      ],
+      "target_publication": "verified on stable via Shorebird API",
+      "workflow_conclusion_note": "This run published this target before compatibility checks rejected a different target; the rejected versions were repaired and published in later runs."
+    },
+    {
+      "release_version": "1.1.0+3",
+      "patch_number": 11,
+      "patch_id": 692944,
+      "track": "stable",
+      "rolled_back": false,
+      "source_commit": "75cf5bdfb77576677541f31cf27290d5f69455d4",
+      "workflow_url": "https://github.com/EvanD1st/Mintly/actions/runs/37175724681",
+      "workflow_conclusion": "failure",
+      "compatibility_audit": {
+        "changed_assets": [
+          "base/assets/flutter_assets/NOTICES.Z",
+          "base/assets/flutter_assets/fonts/MaterialIcons-Regular.otf"
+        ],
+        "font_compatibility": {
+          "installed_glyphs": 33,
+          "required_glyphs": 31
+        },
+        "installed_sha256": "a0cb1f84d3a50b55983285ff1ea762d51fc4b5b3d0a048a4d0b718e84970d28c",
+        "built_sha256": "a16b76c4e69c112e664512beaa38c2b1150684b7b34f2f34952091e67ecf803b",
+        "release_version": "1.1.0+3",
+        "track": "stable",
+        "legacy_icons": false,
+        "native_checks": "Shorebird enabled; no override"
+      },
+      "artifacts": [
+        {
+          "id": 1582006,
+          "patch_id": 692944,
+          "arch": "arm",
+          "platform": "android",
+          "hash": "bbeb6ff9df71381bbd79ff955612d0b59322ba84e1c97bf738c127b9b3d365ce",
+          "size": 1708203,
+          "created_at": "2026-10-04T04:10:36.852431Z"
+        },
+        {
+          "id": 1582007,
+          "patch_id": 692944,
+          "arch": "aarch64",
+          "platform": "android",
+          "hash": "3553534e87899071c5672bb197bbd27e4eb972bbf18a7cd4b6edb02e7041f90c",
+          "size": 1553444,
+          "created_at": "2026-10-04T04:10:37.343500Z"
+        },
+        {
+          "id": 1582008,
+          "patch_id": 692944,
+          "arch": "x86_64",
+          "platform": "android",
+          "hash": "7300a0e91c10af08310f79fa725b8d0d00df594a7e360ebef8e961286018f648",
+          "size": 1581981,
+          "created_at": "2026-10-04T04:10:37.826167Z"
+        }
+      ],
+      "target_publication": "verified on stable via Shorebird API",
+      "workflow_conclusion_note": "This run published this target before compatibility checks rejected a different target; the rejected versions were repaired and published in later runs."
+    },
+    {
+      "release_version": "1.0.1+2",
+      "patch_number": 1,
+      "patch_id": 692953,
+      "track": "stable",
+      "rolled_back": false,
+      "source_commit": "a95a14095e7a9b112e4383077cdd93426cff5417",
+      "workflow_url": "https://github.com/EvanD1st/Mintly/actions/runs/37176780124",
+      "workflow_conclusion": "failure",
+      "compatibility_audit": {
+        "changed_assets": [
+          "base/assets/flutter_assets/NOTICES.Z",
+          "base/assets/flutter_assets/fonts/MaterialIcons-Regular.otf"
+        ],
+        "font_compatibility": {
+          "installed_glyphs": 28,
+          "required_glyphs": 22
+        },
+        "installed_sha256": "ce1aa4d6e315d2ac28630c82f3e6c6f74b671558d388008a436528f9fd29cb76",
+        "built_sha256": "7e0d60922d8bcc4bd30502c55c20198a497f677c9455d74cae44baae0525ad92",
+        "release_version": "1.0.1+2",
+        "track": "stable",
+        "legacy_icons": true,
+        "browser_links": "copy and paste",
+        "native_checks": "Shorebird enabled; no override"
+      },
+      "artifacts": [
+        {
+          "id": 1582023,
+          "patch_id": 692953,
+          "arch": "arm",
+          "platform": "android",
+          "hash": "be36d880dd9821cb6c8484f31b33e3a67882674be6393ed7cb17a02cb447bd5d",
+          "size": 1817448,
+          "created_at": "2026-10-04T04:28:13.225541Z"
+        },
+        {
+          "id": 1582024,
+          "patch_id": 692953,
+          "arch": "aarch64",
+          "platform": "android",
+          "hash": "07ed365e9845d6e450091763972dc08abc4ee34f1e5372a686541d2b62f84e62",
+          "size": 1692091,
+          "created_at": "2026-10-04T04:28:13.763053Z"
+        },
+        {
+          "id": 1582025,
+          "patch_id": 692953,
+          "arch": "x86_64",
+          "platform": "android",
+          "hash": "bade6604d4701251238c6845192e5009a653bbe98b68cdba2166aefdba086f62",
+          "size": 1689763,
+          "created_at": "2026-10-04T04:28:14.107559Z"
+        }
+      ],
+      "target_publication": "verified on stable via Shorebird API",
+      "workflow_conclusion_note": "This run published this target before compatibility checks rejected a different target; the rejected versions were repaired and published in later runs."
+    },
+    {
+      "release_version": "1.0.0+1",
+      "patch_number": 1,
+      "patch_id": 692958,
+      "track": "stable",
+      "rolled_back": false,
+      "source_commit": "68d231b63d513aaca03da5220f3df693ed04800d",
+      "workflow_url": "https://github.com/EvanD1st/Mintly/actions/runs/37177077498",
+      "workflow_conclusion": "success",
+      "compatibility_audit": {
+        "changed_assets": [
+          "base/assets/flutter_assets/NOTICES.Z",
+          "base/assets/flutter_assets/fonts/MaterialIcons-Regular.otf"
+        ],
+        "font_compatibility": {
+          "installed_glyphs": 28,
+          "required_glyphs": 22
+        },
+        "installed_sha256": "74b532a2c2eea51fd585a2dd9ab65d366cb722d0613642ddeb2823bccd4efff8",
+        "built_sha256": "a14afd76c2dbfd2854d8e07bbfd015e6b37a12329c869f33fad55f4c1d588d82",
+        "release_version": "1.0.0+1",
+        "track": "stable",
+        "legacy_icons": true,
+        "browser_links": "copy and paste",
+        "preserved_installed_launcher": true,
+        "native_checks": "Shorebird enabled; no override"
+      },
+      "artifacts": [
+        {
+          "id": 1582034,
+          "patch_id": 692958,
+          "arch": "arm",
+          "platform": "android",
+          "hash": "be36d880dd9821cb6c8484f31b33e3a67882674be6393ed7cb17a02cb447bd5d",
+          "size": 1817729,
+          "created_at": "2026-10-04T04:38:33.957086Z"
+        },
+        {
+          "id": 1582035,
+          "patch_id": 692958,
+          "arch": "aarch64",
+          "platform": "android",
+          "hash": "07ed365e9845d6e450091763972dc08abc4ee34f1e5372a686541d2b62f84e62",
+          "size": 1694164,
+          "created_at": "2026-10-04T04:38:34.456912Z"
+        },
+        {
+          "id": 1582036,
+          "patch_id": 692958,
+          "arch": "x86_64",
+          "platform": "android",
+          "hash": "bade6604d4701251238c6845192e5009a653bbe98b68cdba2166aefdba086f62",
+          "size": 1689153,
+          "created_at": "2026-10-04T04:38:34.912445Z"
+        }
+      ],
+      "target_publication": "verified on stable via Shorebird API"
+    }
+  ],
+  "verification": {
+    "flutter_analysis": "passed",
+    "ota_guard_tests": 10,
+    "native_diff_override": false,
+    "availability": "all four active Android release versions; all three architectures",
+    "installed_device_activation": "not observed",
+    "production_backend_running": true,
+    "mainnet_execution_enabled": false,
+    "automatic_spending_worker_running": false,
+    "flutter_tests": {
+      "current_installer_icon_source": 20,
+      "legacy_browser_variant_source": 21,
+      "both_icon_modes": "passed"
+    }
+  },
+  "device_steps": [
+    "Open Mintly with internet access and allow the OTA download to finish.",
+    "Fully close Mintly and reopen it to activate the downloaded patch."
+  ],
+  "legacy_browser_links": "Versions 1.0.0+1 and 1.0.1+2 use Copy link instead of a native launcher."
+}
