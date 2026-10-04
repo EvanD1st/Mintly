@@ -1,9 +1,11 @@
 """Regression checks for the asset exception used by the wallet OTA rollout."""
 import importlib.util
 import io
+import os
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 import zipfile
 
 from fontTools.fontBuilder import FontBuilder
@@ -93,6 +95,32 @@ class AssetGuardTests(unittest.TestCase):
     def test_changed_native_library_blocks_publication(self):
         with self.assertRaisesRegex(ValueError, "Native library"):
             self.check_archives(changes={"base/lib/arm64-v8a/plugin.so": b"changed"})
+
+    def test_failed_legacy_validation_restores_source_and_dependency_graph(self):
+        original_cwd = Path.cwd()
+        with tempfile.TemporaryDirectory() as scratch:
+            os.chdir(scratch)
+            try:
+                Path("lib/services").mkdir(parents=True)
+                Path("pubspec.yaml").write_text("dependencies:\n  url_launcher: ^6.3.2\n", encoding="utf-8")
+                Path("pubspec.lock").write_text("original lock", encoding="utf-8")
+                Path("lib/services/external_url.dart").write_text("native launcher", encoding="utf-8")
+                Path("lib/services/external_url_legacy.dart").write_text("copy link", encoding="utf-8")
+                def validation(command, **kwargs):
+                    if command[1] == "analyze":
+                        raise ota.subprocess.CalledProcessError(1, command)
+                    native = "url_launcher" in Path("pubspec.yaml").read_text(encoding="utf-8")
+                    Path("pubspec.lock").write_text("original lock" if native else "legacy lock", encoding="utf-8")
+                    Path("resolved-plugins.txt").write_text(str(native), encoding="utf-8")
+                with patch.object(ota.subprocess, "run", side_effect=validation):
+                    with self.assertRaises(ota.subprocess.CalledProcessError):
+                        with ota.installed_plugin_graph(True):
+                            self.fail("An invalid build must never publish")
+                self.assertEqual(Path("lib/services/external_url.dart").read_text(encoding="utf-8"), "native launcher")
+                self.assertEqual(Path("pubspec.lock").read_text(encoding="utf-8"), "original lock")
+                self.assertEqual(Path("resolved-plugins.txt").read_text(encoding="utf-8"), "True")
+            finally:
+                os.chdir(original_cwd)
 
 
 if __name__ == "__main__":

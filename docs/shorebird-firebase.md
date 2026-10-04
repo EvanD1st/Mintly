@@ -75,7 +75,13 @@ artifact for each release.
 
 Versions `1.0.0+1` and `1.0.1+2` contain fewer Material icons. Their builds use
 `MINTLY_LEGACY_ICONS=true` for equivalent installed icons, with the same wallet
-features and limits. The workflow tests both icon modes. Native plugin changes,
+features and limits. They also lack the native browser launcher introduced in
+`1.1.0+3`. The audited build temporarily removes `url_launcher` from the CI
+checkout's dependency graph and uses `external_url_legacy.dart`: browser actions
+show a link with a Copy link button. The original source and dependency files
+are restored after each build, including failures. That variant is analyzed and
+tested before Shorebird checks the native code. No native-difference override is
+used. The workflow tests both icon modes. Native plugin changes,
 new images, and missing installed glyphs still require an installer update.
 
 Devices check for a patch at launch. Open Mintly with internet access, let the

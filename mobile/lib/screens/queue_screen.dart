@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
-import 'package:url_launcher/url_launcher.dart';
+import '../services/external_url.dart';
 import '../theme/colors.dart';
 import '../state/app_state.dart';
 import '../models/mint_plan_model.dart';
@@ -205,7 +205,7 @@ class QueueScreen extends ConsumerWidget {
                   if (task.explorerUrl != null) TextButton(onPressed: () async {
                     final uri = Uri.tryParse(task.explorerUrl!);
                     if (uri != null && uri.scheme == 'https' && uri.host == 'sepolia.etherscan.io') {
-                      await launchUrl(uri, mode: LaunchMode.externalApplication);
+                      await openExternalUrl(context, uri);
                     }
                   }, child: const Text('View transaction')),
                   if (['prepared', 'submitted', 'uncertain'].contains(task.status))
@@ -313,7 +313,8 @@ class QueueScreen extends ConsumerWidget {
                   throw StateError('OpenSea no longer reports this wallet ready. Check the plan.');
                 }
                 final uri = Uri.parse(latest.openSeaUrl);
-                if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+                if (!context.mounted) return;
+                if (!await openExternalUrl(context, uri)) {
                   throw StateError('Could not open OpenSea.');
                 }
               } catch (error) {

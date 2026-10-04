@@ -2,7 +2,7 @@ import '../theme/compatible_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
-import 'package:url_launcher/url_launcher.dart';
+import '../services/external_url.dart';
 import '../models/drop_model.dart';
 import '../state/app_state.dart';
 import 'automatic_review_screen.dart';
@@ -67,7 +67,7 @@ class DropDetailScreen extends ConsumerWidget {
         if (trustedOpenSea)
           FilledButton.icon(onPressed: () async {
             try {
-              if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+              if (!await openExternalUrl(context, uri)) {
                 throw Exception('Could not open OpenSea.');
               }
             } catch (error) {

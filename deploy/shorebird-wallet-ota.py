@@ -6,6 +6,7 @@ required glyph has identical outlines and metrics in the installed font.
 Nothing else is exempted, and Shorebird's native checks remain enabled.
 """
 import argparse
+from contextlib import contextmanager
 import hashlib
 import io
 import json
@@ -74,6 +75,35 @@ def audit(installed_path, built_path):
                 "built_sha256": hashlib.sha256(Path(built_path).read_bytes()).hexdigest()}
 
 
+@contextmanager
+def installed_plugin_graph(legacy):
+    if not legacy:
+        yield
+        return
+    # Only the CI checkout changes: remove the plugin absent in 1.0.x and use
+    # its reviewed Dart-only browser-link fallback. Other packages stay locked.
+    manifest = Path("pubspec.yaml")
+    lock = Path("pubspec.lock")
+    launcher = Path("lib/services/external_url.dart")
+    original = {p: p.read_bytes() for p in (manifest, lock, launcher)}
+    try:
+        text = manifest.read_text(encoding="utf-8")
+        text, count = re.subn(r"(?m)^  url_launcher:.*\n", "", text)
+        if count != 1:
+            raise ValueError("Expected one url_launcher dependency")
+        manifest.write_text(text, encoding="utf-8")
+        launcher.write_bytes(Path("lib/services/external_url_legacy.dart").read_bytes())
+        subprocess.run(["flutter", "pub", "get", "--offline"], check=True)
+        subprocess.run(["flutter", "analyze", "--no-pub"], check=True)
+        subprocess.run(["flutter", "test", "--no-pub",
+                        "--dart-define=MINTLY_LEGACY_ICONS=true"], check=True)
+        yield
+    finally:
+        for path, data in original.items():
+            path.write_bytes(data)
+        subprocess.run(["flutter", "pub", "get", "--offline"], check=True)
+
+
 def patch_release(version, track, audit_only):
     command = ["shorebird", "--json", "patch", "android", "--release-version",
                version, "--track", track]
@@ -82,7 +112,7 @@ def patch_release(version, track, audit_only):
         command.append("--dart-define=MINTLY_LEGACY_ICONS=true")
     # Isolate Shorebird downloads so the archive audited is the exact release
     # selected by the CLI, rather than a guessed or stale release artifact.
-    with tempfile.TemporaryDirectory(prefix="mintly-ota-") as scratch:
+    with installed_plugin_graph(legacy_icons), tempfile.TemporaryDirectory(prefix="mintly-ota-") as scratch:
         env = {**os.environ, "TMPDIR": scratch, "TMP": scratch, "TEMP": scratch}
         subprocess.run(command + ["--dry-run", "--allow-asset-diffs"], env=env, check=True)
         candidates = []
@@ -96,6 +126,7 @@ def patch_release(version, track, audit_only):
         built = Path("build/app/outputs/bundle/release/app-release.aab")
         result = audit(candidates[0], built)
         result.update(release_version=version, track=track, legacy_icons=legacy_icons,
+                      browser_links="copy and paste" if legacy_icons else "native launcher",
                       native_checks="Shorebird enabled; no override")
         evidence = Path(f"build/shorebird/wallet-ota-audit-{version}.json")
         evidence.parent.mkdir(parents=True, exist_ok=True)
