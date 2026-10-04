@@ -344,6 +344,11 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
               label: const Text('Manage accounts'),
             ),
           const SizedBox(height: 24),
+          TextButton(
+            onPressed: () =>
+                showLicensePage(context: context, applicationName: 'Mintly'),
+            child: const Text('Open source licenses'),
+          ),
           OutlinedButton.icon(
             onPressed: () async {
               final notifier = ref.read(mintlyProvider.notifier);

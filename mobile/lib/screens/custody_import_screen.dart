@@ -38,6 +38,7 @@ class _CustodyImportScreenState extends ConsumerState<CustodyImportScreen>
   int _days = 7, _generation = 0;
   bool _phrase = true,
       _limits = false,
+      _moreLimits = false,
       _consent = false,
       _busy = false,
       _attempted = false;
@@ -393,44 +394,42 @@ class _CustodyImportScreenState extends ConsumerState<CustodyImportScreen>
                           }),
                     child: const Text('Change wallet secret'),
                   ),
-                  ExpansionTile(
-                    title: const Text('More about access and limits'),
-                    trailing: const RotatedBox(
-                      quarterTurns: 1,
-                      child: Icon(Icons.chevron_right),
+                  TextButton(
+                    onPressed: () => setState(() => _moreLimits = !_moreLimits),
+                    child: Text(
+                      _moreLimits
+                          ? 'Hide access and limits'
+                          : 'More about access and limits',
                     ),
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Column(
-                          children: [
-                            TextFormField(
-                              controller: _maximum,
-                              enabled: !_busy && !_attempted,
-                              decoration: const InputDecoration(
-                                labelText: 'Maximum per mint (ETH, optional)',
-                                helperText: 'Blank uses your total budget',
-                              ),
-                              validator: (v) => (v ?? '').trim().isEmpty
-                                  ? null
-                                  : _amount(v) ??
-                                        ((double.tryParse(v ?? '') ?? 0) >
-                                                (double.tryParse(
-                                                      _budget.text,
-                                                    ) ??
-                                                    0)
-                                            ? 'Must fit the total budget'
-                                            : null),
-                            ),
-                            const SizedBox(height: 12),
-                            const Text(
-                              'Importing does not submit a mint. Review each automatic mint in Mintly. Disabling stops future signing; it cannot erase the key or cancel signed transactions. ETH limits are not a guaranteed USD limit.',
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
                   ),
+                  if (_moreLimits)
+                    Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        children: [
+                          TextFormField(
+                            controller: _maximum,
+                            enabled: !_busy && !_attempted,
+                            decoration: const InputDecoration(
+                              labelText: 'Maximum per mint (ETH, optional)',
+                              helperText: 'Blank uses your total budget',
+                            ),
+                            validator: (v) => (v ?? '').trim().isEmpty
+                                ? null
+                                : _amount(v) ??
+                                      ((double.tryParse(v ?? '') ?? 0) >
+                                              (double.tryParse(_budget.text) ??
+                                                  0)
+                                          ? 'Must fit the total budget'
+                                          : null),
+                          ),
+                          const SizedBox(height: 12),
+                          const Text(
+                            'Importing does not submit a mint. Review each automatic mint in Mintly. Disabling stops future signing; it cannot erase the key or cancel signed transactions. ETH limits are not a guaranteed USD limit.',
+                          ),
+                        ],
+                      ),
+                    ),
                 ],
                 if (_error != null)
                   Padding(
