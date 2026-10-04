@@ -949,11 +949,15 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
         DropdownButtonFormField<String>(
           key: ValueKey(_filter),
           initialValue: _filter,
+          isExpanded: true,
           decoration: const InputDecoration(labelText: 'Activity for'),
           items: [
             const DropdownMenuItem<String>(
               value: null,
-              child: Text('All followed wallets'),
+              child: Text(
+                'All followed wallets',
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
             for (final w in _watches)
               DropdownMenuItem(

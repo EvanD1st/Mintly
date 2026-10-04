@@ -211,7 +211,10 @@ void main() {
         addTearDown(tester.view.resetPhysicalSize);
         addTearDown(tester.view.resetDevicePixelRatio);
         final font = File('C:/Windows/Fonts/arial.ttf');
-        if (font.existsSync()) {
+        final usePreviewFont =
+            font.existsSync() &&
+            Platform.environment['MINTLY_TEST_NO_PREVIEW_FONT'] != 'true';
+        if (usePreviewFont) {
           final loader = FontLoader('Roboto')
             ..addFont(
               Future.value(ByteData.sublistView(font.readAsBytesSync())),
@@ -265,7 +268,7 @@ void main() {
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);
         Future<void> capture(String screen) async {
-          if (!font.existsSync()) return;
+          if (!usePreviewFont) return;
           await tester.runAsync(() async {
             final image =
                 await (captureKey.currentContext!.findRenderObject()
