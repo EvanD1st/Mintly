@@ -9,7 +9,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
-from app.models import MintPlan, MintPermission, User, Wallet
+from app.models import MintPlan, MintPlanRecord, MintPermission, MintTask, Drop, MintStage, User, Wallet
+from fastapi.encoders import jsonable_encoder
+from app.schemas.drop import DropSchema
+from app.services import automatic
+from app.services.opensea import stage_schedule
 from app.services.mint_plans import aware, refresh_mint_plan
 from app.services.opensea import CHAINS, OpenSeaClient, OpenSeaUnavailable, collection_slug
 
@@ -37,6 +41,7 @@ def response(plan: MintPlan, wallet: Wallet) -> dict:
     rate_fresh = plan.rate_checked_at and aware(plan.rate_checked_at) > datetime.now(timezone.utc) - timedelta(minutes=5)
     total_usdt = format(Decimal(eth_amount(total)) * Decimal(plan.eth_usdt_rate), '.4f') if total is not None and plan.eth_usdt_rate and rate_fresh else None
     return {
+        "created_at": plan.created_at, "archived_at": plan.archived_at,
         "quantity": plan.quantity, "estimated_total_eth": eth_amount(total),
         "estimated_total_usdt": total_usdt, "eth_usdt_rate": plan.eth_usdt_rate if rate_fresh else None,
         "rate_checked_at": plan.rate_checked_at, "rate_source": "Coinbase ETH-USDT",
@@ -67,6 +72,7 @@ async def import_open_sea_plan(req: ImportMintPlanRequest,
         slug = collection_slug(req.url)
     except OpenSeaUnavailable as error:
         raise api_error(error) from error
+    await automatic.lock_execution(db)
     wallet_stmt = select(Wallet).where(Wallet.user_id == user.id, Wallet.is_demo.is_(False))
     if req.wallet_id:
         wallet_stmt = wallet_stmt.where(Wallet.id == req.wallet_id)
@@ -97,9 +103,12 @@ async def import_open_sea_plan(req: ImportMintPlanRequest,
         if plan.id and plan.quantity != req.quantity:
             pending=(await db.execute(select(MintPermission.id).where(MintPermission.plan_id==plan.id,MintPermission.status.in_(['awaiting_signature','armed','prepared','submitted'])))).first()
             if pending: raise OpenSeaUnavailable('Cancel the pending mint permission before changing quantity.',409)
+        plan.archived_at = None
         plan.quantity = req.quantity
         plan.notified_stage_uuid = None
         await refresh_mint_plan(plan, wallet, client, detail=detail)
+        await db.flush()
+        record_plan(db, plan, wallet, "saved")
         await db.commit()
         await db.refresh(plan)
         return response(plan, wallet)
@@ -112,7 +121,7 @@ async def import_open_sea_plan(req: ImportMintPlanRequest,
 async def list_mint_plans(user: User = Depends(get_current_user),
                           db: AsyncSession = Depends(get_db)):
     plans = (await db.execute(select(MintPlan, Wallet).join(Wallet, Wallet.id == MintPlan.wallet_id).where(
-        MintPlan.user_id == user.id, Wallet.user_id == user.id,
+        MintPlan.user_id == user.id, Wallet.user_id == user.id, MintPlan.archived_at.is_(None),
     ).order_by(MintPlan.created_at.desc()))).all()
     return [response(plan, wallet) for plan, wallet in plans]
 
@@ -120,8 +129,9 @@ async def list_mint_plans(user: User = Depends(get_current_user),
 @router.post("/{plan_id}/refresh")
 async def refresh_open_sea_plan(plan_id: str, user: User = Depends(get_current_user),
                                 db: AsyncSession = Depends(get_db)):
+    await automatic.lock_execution(db)
     plan = (await db.execute(select(MintPlan).where(
-        MintPlan.id == plan_id, MintPlan.user_id == user.id,
+        MintPlan.id == plan_id, MintPlan.user_id == user.id, MintPlan.archived_at.is_(None),
     ))).scalar_one_or_none()
     if plan is None:
         raise HTTPException(status_code=404, detail="Mint plan not found.")
@@ -133,9 +143,76 @@ async def refresh_open_sea_plan(plan_id: str, user: User = Depends(get_current_u
     if plan.last_checked_at and aware(plan.last_checked_at) > datetime.now(timezone.utc) - timedelta(seconds=15):
         return response(plan, wallet)
     try:
+        before = jsonable_encoder(response(plan, wallet))
         await refresh_mint_plan(plan, wallet)
+        after = jsonable_encoder(response(plan, wallet))
+        keys = ("stage_name", "starts_at", "ends_at", "price_eth", "status", "quantity")
+        if any(before[k] != after[k] for k in keys):
+            record_plan(db, plan, wallet, "updated")
         await db.commit()
         return response(plan, wallet)
+    except OpenSeaUnavailable as error:
+        await db.rollback()
+        raise api_error(error) from error
+
+
+def record_plan(db, plan, wallet, event):
+    db.add(MintPlanRecord(user_id=plan.user_id, plan_id=plan.id, event=event,
+                         snapshot=jsonable_encoder(response(plan, wallet))))
+
+
+@router.post("/{plan_id}/automatic-context")
+async def automatic_context(plan_id: str, user: User = Depends(get_current_user),
+                            db: AsyncSession = Depends(get_db)):
+    """Materialize the exact selected OpenSea stage; this never arms or signs."""
+    automatic.enabled()
+    await automatic.lock_execution(db)
+    plan = (await db.execute(select(MintPlan).where(
+        MintPlan.id == plan_id, MintPlan.user_id == user.id, MintPlan.archived_at.is_(None),
+    ))).scalar_one_or_none()
+    if plan is None:
+        raise HTTPException(404, 'Mint plan not found.')
+    wallet = await db.get(Wallet, plan.wallet_id)
+    client = OpenSeaClient()
+    try:
+        detail = await client.get_drop(plan.collection_slug)
+        before = jsonable_encoder(response(plan, wallet))
+        transaction = {}
+        await refresh_mint_plan(plan, wallet, client, detail=detail, transaction_out=transaction)
+        selected = next((s for s in stage_schedule(detail) if s['uuid'] == plan.stage_uuid), None)
+        kinds = {'public_sale': 'public', 'allowlist': 'allowlist', 'signed': 'signed',
+                 'allowlist_sale': 'allowlist', 'signed_sale': 'signed'}
+        if not selected or selected['price_wei'] is None or selected['max_per_wallet'] < plan.quantity:
+            raise HTTPException(409, 'No mint stage with sufficient quantity is available.')
+        # OpenSea stage types vary; unknown methods require explicit review rather than guessing.
+        kind = kinds.get(selected['type'])
+        if transaction:
+            from app.services.seadrop_mint import decode_mint
+            kind = decode_mint(transaction, plan.contract_address, wallet.address, plan.quantity)['kind']
+        if kind is None:
+            raise HTTPException(409, 'This stage type is not supported for automatic minting.')
+        if plan.chain_id != automatic.settings.AUTOMATIC_CHAIN_ID:
+            raise HTTPException(409, 'Automatic minting is not enabled for this network.')
+        drop_id = automatic.digest(['plan', plan.id, plan.chain_id, plan.contract_address.lower(),
+                                    plan.collection_name, jsonable_encoder(selected)])
+        stage_id = automatic.digest(['stage', drop_id])
+        drop = await db.get(Drop, drop_id)
+        if drop is None:
+            drop = Drop(id=drop_id, name=plan.collection_name, chain=plan.chain, chain_id=plan.chain_id,
+                contract_address=plan.contract_address, mint_page_url=plan.opensea_url,
+                site_label='OpenSea', icon_name='gem', status_label='Review automatic mint',
+                status_kind='unknown', is_supported_integration=True, is_demo=False)
+            drop.stages = [MintStage(id=stage_id, drop_id=drop_id, stage_name=selected['name'][:50],
+                start_time_utc=selected['starts_at'], end_time_utc=selected['ends_at'],
+                price_wei=selected['price_wei'], price_eth_str=eth_amount(selected['price_wei']),
+                limit_per_wallet=selected['max_per_wallet'], eligibility_status='unknown')]
+            db.add(drop)
+        plan.automatic_drop_id, plan.automatic_stage_id = drop_id, stage_id
+        if any(before[k] != jsonable_encoder(response(plan, wallet))[k]
+               for k in ('stage_name', 'starts_at', 'ends_at', 'price_eth', 'status')):
+            record_plan(db, plan, wallet, 'updated')
+        await db.commit()
+        return {'drop': DropSchema.model_validate(drop), 'plan': response(plan, wallet), 'mint_kind': kind}
     except OpenSeaUnavailable as error:
         await db.rollback()
         raise api_error(error) from error
@@ -144,13 +221,29 @@ async def refresh_open_sea_plan(plan_id: str, user: User = Depends(get_current_u
 @router.delete("/{plan_id}")
 async def remove_mint_plan(plan_id: str, user: User = Depends(get_current_user),
                            db: AsyncSession = Depends(get_db)):
+    # Same cross-process lock as the signer: cancellation wins before signing or observes in-flight bytes.
+    await automatic.lock_execution(db)
     plan = (await db.execute(select(MintPlan).where(
         MintPlan.id == plan_id, MintPlan.user_id == user.id,
     ))).scalar_one_or_none()
     if plan is None:
-        raise HTTPException(status_code=404, detail="Mint plan not found.")
-    if (await db.execute(select(MintPermission.id).where(MintPermission.plan_id==plan.id).limit(1))).first():
-        raise HTTPException(409,'This plan has permission history and must be retained for transaction tracking.')
-    await db.delete(plan)
+        raise HTTPException(404, 'Mint plan not found.')
+    if plan.archived_at:
+        pending = await db.scalar(select(MintTask.id).where(MintTask.plan_id == plan.id,
+            MintTask.status.not_in(automatic.TERMINAL)).limit(1))
+        return {'status': 'removed', 'in_flight': pending is not None, 'history_retained': True}
+    now = datetime.now(timezone.utc)
+    tasks = (await db.execute(select(MintTask).where(MintTask.plan_id == plan.id))).scalars().all()
+    from app.api.tasks import archive_task
+    in_flight = False
+    for task in tasks:
+        in_flight = await archive_task(db, task, user.id, now) or in_flight
+    permissions = (await db.execute(select(MintPermission).where(MintPermission.plan_id == plan.id).with_for_update())).scalars().all()
+    for permission in permissions:
+        if permission.status in ('awaiting_signature', 'armed'):
+            permission.status = 'cancelled'
+            permission.note = 'Plan removed; permission canceled before execution.'
+    plan.archived_at, plan.next_check_at = now, None
+    record_plan(db, plan, await db.get(Wallet, plan.wallet_id), 'removed')
     await db.commit()
-    return {"status": "removed"}
+    return {'status': 'removed', 'in_flight': in_flight, 'history_retained': True}

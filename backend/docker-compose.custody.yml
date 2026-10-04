@@ -1,4 +1,4 @@
-# Explicit custody overlay; never included by the production deploy workflow.
+# Explicit custody overlay; spending worker requires separately recorded operator activation.
 # Defaults to Sepolia. Robinhood requires CUSTODY_CHAIN_ID=4663, CUSTODY_RPC and the separate opt-in.
 # docker compose -f docker-compose.yml -f docker-compose.custody.yml --profile custody up -d
 x-custody: &custody

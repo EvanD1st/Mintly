@@ -1,3 +1,4 @@
+import 'history_screen.dart';
 import '../theme/compatible_icons.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
@@ -299,6 +300,18 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
             style: Theme.of(context).textTheme.titleMedium,
           ),
           const SizedBox(height: 20),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('History'),
+            subtitle: const Text(
+              'All plans, removed items and mint transactions',
+            ),
+            trailing: const Icon(MintlyIcons.chevronRight),
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const HistoryScreen()),
+            ),
+          ),
           for (final daily in [true, false])
             ValueListenableBuilder<PushPreferences>(
               valueListenable: PushService.instance.preferences,

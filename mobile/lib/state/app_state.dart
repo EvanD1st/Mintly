@@ -193,6 +193,12 @@ class MintlyNotifier extends StateNotifier<MintlyState> {
     return task;
   }
 
+  Future<bool> removeTask(String id) async {
+    final result = await _api.removeTask(id);
+    await loadInitialData();
+    return result['in_flight'] == true;
+  }
+
   Future<void> disarmTask(String taskId) async {
     await _api.disarmTask(taskId);
     final queue = await _api.fetchQueue();
@@ -226,10 +232,11 @@ class MintlyNotifier extends StateNotifier<MintlyState> {
     return plan;
   }
 
-  Future<void> removeMintPlan(String id) async {
-    await _api.removeMintPlan(id);
+  Future<bool> removeMintPlan(String id) async {
+    final result = await _api.removeMintPlan(id);
     state = state.copyWith(mintPlans: state.mintPlans.where((plan) => plan.id != id).toList());
     await loadInitialData();
+    return result['in_flight'] == true;
   }
 
   Future<Map<String, dynamic>> requestMintPermission(MintPlanModel plan) async {

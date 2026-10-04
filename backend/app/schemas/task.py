@@ -7,6 +7,7 @@ from app.schemas.drop import DropSchema, MintStageSchema
 
 
 class DraftTaskRequest(BaseModel):
+    plan_id: str | None = None
     wallet_id: str
     drop_id: str
     stage_id: str

@@ -588,3 +588,131 @@ async def test_notification_failures_and_concurrent_status_change_preserve_outbo
     async with lab.factory() as db:
         assert not (await db.get(MintTask,task_id)).notification_pending
     assert calls==[lab.user.id,lab.user.id]
+
+
+async def plan_context(lab, monkeypatch):
+    async with lab.factory() as db:
+        wallet = await db.get(Wallet, lab.wallet.id)
+        wallet.supported_chains = ['Local EVM']
+        await db.commit()
+    from app.models import MintPlan
+    from app.services.opensea import OpenSeaClient
+    detail = {'collection_slug': 'example', 'collection_name': 'Plan collection',
+        'opensea_url': 'https://opensea.io/collection/example', 'chain': 'local-test',
+        'contract_address': lab.nft.address, 'drop_type': 'seadrop_v1_erc721',
+        'stages': [{'uuid': 'exact-public', 'stage_type': 'public_sale', 'label': 'Selected plan stage',
+            'start_time': datetime.fromtimestamp(lab.start, timezone.utc).isoformat(),
+            'end_time': datetime.fromtimestamp(lab.end, timezone.utc).isoformat(),
+            'price': '10', 'max_per_wallet': '20', 'price_currency_address': '0x' + '0' * 40}]}
+    async def get_drop(self, slug):
+        assert slug == 'example'
+        return detail
+    async def quote():
+        return '2500', datetime.now(timezone.utc)
+    monkeypatch.setattr(OpenSeaClient, 'get_drop', get_drop)
+    monkeypatch.setattr('app.services.mint_plans.eth_usdt_quote', quote)
+    r = await lab.client.post('/api/mint-plans', json={'url': detail['opensea_url'],
+        'wallet_id': lab.wallet.id, 'quantity': 2})
+    assert r.status_code == 200, r.text
+    plan = r.json()
+    assert plan['status'] == 'scheduled'
+    r = await lab.client.post('/api/mint-plans/' + plan['id'] + '/automatic-context')
+    assert r.status_code == 200, r.text
+    context = r.json()
+    assert context['plan']['quantity'] == 2
+    assert context['drop']['contract_address'] == lab.nft.address
+    request = {**lab.request, 'plan_id': plan['id'], 'drop_id': context['drop']['id'],
+        'stage_id': context['drop']['stages'][0]['id']}
+    r = await lab.client.post('/api/tasks/draft', json=request)
+    assert r.status_code == 200, r.text
+    request['review_hash'] = r.json()['review_hash']
+    return plan, request
+
+
+async def test_remove_plan_cancels_before_signing_preserves_owner_history_and_reimport(lab, monkeypatch):
+    from app.models import MintPlan, MintPlanRecord
+    plan, request = await plan_context(lab, monkeypatch)
+    r = await lab.client.post('/api/tasks/arm', json=request)
+    assert r.status_code == 200, r.text
+    task_id = r.json()['id']
+    duplicate = await lab.client.post('/api/tasks/arm', json={**request, 'idempotency_key': 'another-intent-key'})
+    assert duplicate.status_code == 409
+    assert (await lab.client.post('/api/tasks/arm', json=request)).json()['id'] == task_id
+    # Another account cannot see, arm, remove or read this plan's records.
+    other = await lab.client.post('/api/auth/login', json={'username': 'admin', 'password': 'Admin test password 123'})
+    headers = {'Authorization': 'Bearer ' + other.json()['token']}
+    assert (await lab.client.delete('/api/mint-plans/' + plan['id'], headers=headers)).status_code == 404
+    assert (await lab.client.get('/api/history?section=plans', headers=headers)).json()['records'] == []
+    removed = await lab.client.delete('/api/mint-plans/' + plan['id'])
+    assert removed.status_code == 200 and removed.json()['in_flight'] is False
+    assert (await lab.client.delete('/api/mint-plans/' + plan['id'])).status_code == 200
+    assert (await lab.client.get('/api/mint-plans')).json() == []
+    assert (await lab.client.get('/api/tasks/queue')).json()['tasks'] == []
+    history = (await lab.client.get('/api/history?section=mints')).json()['records']
+    assert history[0]['id'] == task_id and history[0]['status'] == 'disarmed'
+    assert history[0]['archived_at'] and 'signed_tx_raw' not in history[0]
+    page = (await lab.client.get('/api/history?section=plans&limit=1')).json()
+    assert page['records'][0]['event'] == 'removed' and page['next_offset'] == 1
+    earlier = (await lab.client.get('/api/history?section=plans&limit=1&offset=1')).json()
+    assert earlier['records'][0]['snapshot']['quantity'] == 2
+    async with lab.factory() as db:
+        assert (await db.get(AutomaticGrant, lab.grant.id)).reserved_wei == 0
+        assert (await db.get(MintTask, task_id)).signed_tx_raw is None
+        assert await db.get(MintPlan, plan['id']) is not None
+    lab.w.provider.make_request('evm_setNextBlockTimestamp', [lab.start]); lab.w.provider.make_request('evm_mine', [])
+    assert await lab.tick() is False
+    assert lab.nft.functions.totalSupply().call() == 0
+    # Reimport retains earlier quantity/removal records instead of overwriting history.
+    # Keep stage future relative to wall time; do not request live calldata here.
+    r = await lab.client.post('/api/mint-plans', json={'url': plan['opensea_url'], 'quantity': 1})
+    assert r.status_code == 200, r.text
+    records = (await lab.client.get('/api/history?section=plans')).json()['records']
+    assert any(x['event'] == 'removed' and x['snapshot']['quantity'] == 2 for x in records)
+    assert records[0]['event'] == 'saved' and records[0]['snapshot']['quantity'] == 1
+
+
+async def test_remove_prepared_plan_keeps_same_nonce_receipt_and_accounting_in_history(lab, monkeypatch):
+    plan, request = await plan_context(lab, monkeypatch)
+    r = await lab.client.post('/api/tasks/arm', json=request)
+    assert r.status_code == 200, r.text
+    task_id = r.json()['id']
+    lab.w.provider.make_request('evm_setNextBlockTimestamp', [lab.start]); lab.w.provider.make_request('evm_mine', [])
+    await lab.due(); await lab.tick()
+    async with lab.factory() as db:
+        task = await db.get(MintTask, task_id)
+        assert task.status == 'prepared'
+        original = task.transaction_hash, task.assigned_nonce, task.signed_tx_raw
+    r = await lab.client.delete('/api/mint-plans/' + plan['id'])
+    assert r.json()['in_flight'] is True
+    assert (await lab.client.get('/api/tasks/queue')).json()['tasks'] == []
+    async with lab.factory() as db:
+        assert (await db.get(AutomaticGrant, lab.grant.id)).reserved_wei > 0
+    await lab.due(); await lab.tick()
+    lab.w.provider.make_request('evm_mine', [])
+    await lab.due(); await lab.tick()
+    history = (await lab.client.get('/api/history?section=mints')).json()['records'][0]
+    assert history['id'] == task_id and history['status'] == 'confirmed'
+    assert history['transaction_hash'] == original[0] and history['actual_total_cost_wei'] > 0
+    assert lab.nft.functions.ownerOf(1).call() == lab.owner.address
+    assert lab.nft.functions.totalSupply().call() == 2
+    async with lab.factory() as db:
+        task = await db.get(MintTask, task_id)
+        assert (task.transaction_hash, task.assigned_nonce, task.signed_tx_raw) == original
+        assert (await db.get(AutomaticGrant, lab.grant.id)).reserved_wei == 0
+    assert await lab.tick() is False
+
+
+async def test_task_remove_is_idempotent_and_history_pagination_is_owner_scoped(lab):
+    r = await lab.client.post('/api/tasks/arm', json=lab.request)
+    assert r.status_code == 200, r.text
+    task_id = r.json()['id']
+    for _ in range(2):
+        assert (await lab.client.delete('/api/tasks/' + task_id)).json()['history_retained']
+    assert (await lab.client.get('/api/tasks/queue')).json()['tasks'] == []
+    async with lab.factory() as db:
+        assert (await db.get(AutomaticGrant, lab.grant.id)).reserved_wei == 0
+    assert (await lab.client.get('/api/history?section=activity&limit=0')).status_code == 422
+    assert (await lab.client.get('/api/history?section=activity&offset=-1')).status_code == 422
+    assert (await lab.client.get('/api/history?section=unknown')).status_code == 422
+    records = (await lab.client.get('/api/history?section=activity')).json()['records']
+    assert len([r for r in records if r['event_type'] == 'task_removed']) == 1

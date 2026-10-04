@@ -3,11 +3,19 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/drop_model.dart';
+import '../models/mint_plan_model.dart';
 import '../state/app_state.dart';
 
 class AutomaticReviewScreen extends ConsumerStatefulWidget {
   final DropModel drop;
-  const AutomaticReviewScreen({super.key, required this.drop});
+  final MintPlanModel? plan;
+  final String initialMintKind;
+  const AutomaticReviewScreen({
+    super.key,
+    required this.drop,
+    this.plan,
+    this.initialMintKind = 'public',
+  });
   @override
   ConsumerState<AutomaticReviewScreen> createState() => _AutomaticReviewState();
 }
@@ -31,8 +39,34 @@ class _AutomaticReviewState extends ConsumerState<AutomaticReviewScreen> {
   void initState() {
     super.initState();
     _stage = widget.drop.stages.first;
+    _kind = widget.initialMintKind;
+    _quantity.text = '${widget.plan?.quantity ?? 1}';
     _setStage();
-    _policies = ref.read(apiServiceProvider).fetchAutomaticPolicies();
+    if (widget.plan?.estimatedNetworkFeeEth != null) {
+      _gas.text = widget.plan!.estimatedNetworkFeeEth!;
+    }
+    _policies = _loadPolicies();
+  }
+
+  Future<List<Map<String, dynamic>>> _loadPolicies() async {
+    final all = await ref.read(apiServiceProvider).fetchAutomaticPolicies();
+    final policies = all
+        .where(
+          (p) =>
+              p['status'] == 'enabled' &&
+              p['chain_id'] == widget.drop.chainId &&
+              (widget.plan == null || p['wallet_id'] == widget.plan!.walletId),
+        )
+        .toList();
+    if (mounted && widget.plan != null && policies.length == 1) {
+      setState(() => _policy = policies.single);
+      final expiry = DateTime.tryParse('${_policy!['expires_at']}');
+      final stageEnd = _stage.endTimeUtc;
+      if (expiry != null && stageEnd != null && expiry.isBefore(stageEnd)) {
+        _expiry.text = expiry.toUtc().toIso8601String();
+      }
+    }
+    return policies;
   }
 
   void _setStage() {
@@ -65,6 +99,7 @@ class _AutomaticReviewState extends ConsumerState<AutomaticReviewScreen> {
     try {
       final expiry = DateTime.parse(_expiry.text).toUtc();
       final request = <String, dynamic>{
+        if (widget.plan != null) 'plan_id': widget.plan!.id,
         'wallet_id': _policy!['wallet_id'],
         'grant_id': _policy!['id'],
         'drop_id': widget.drop.id,

@@ -168,6 +168,15 @@ class ApiService extends ChangeNotifier {
     }
   }
 
+  Future<Map<String, dynamic>> fetchHistory(String section, {int offset = 0}) async =>
+    (await _get('/history?section=$section&offset=$offset')) as Map<String, dynamic>;
+
+  Future<Map<String, dynamic>> automaticPlanContext(String id) async =>
+    (await _post('/mint-plans/$id/automatic-context', {}, timeout: const Duration(seconds: 60))) as Map<String, dynamic>;
+
+  Future<Map<String, dynamic>> removeTask(String id) async =>
+    (await _delete('/tasks/$id')) as Map<String, dynamic>;
+
   Future<void> disarmTask(String taskId) async { await _post('/tasks/$taskId/disarm', {}); }
 
   Future<List<ActivityModel>> fetchActivity() async {
@@ -194,7 +203,7 @@ class ApiService extends ChangeNotifier {
     MintPlanModel.fromJson((await _post('/mint-plans/$id/refresh', {},
       timeout: const Duration(seconds: 60))) as Map<String, dynamic>);
 
-  Future<void> removeMintPlan(String id) async { await _delete('/mint-plans/$id'); }
+  Future<Map<String, dynamic>> removeMintPlan(String id) async => (await _delete('/mint-plans/$id')) as Map<String, dynamic>;
 
   Future<List<Map<String, dynamic>>> fetchMintPermissions() async => ((await _get('/mint-permissions')) as List).cast<Map<String, dynamic>>();
 

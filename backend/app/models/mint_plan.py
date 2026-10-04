@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, JSON
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -41,6 +41,20 @@ class MintPlan(Base):
     next_check_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     notified_stage_uuid: Mapped[str | None] = mapped_column(String(100))
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    automatic_drop_id: Mapped[str | None] = mapped_column(String(64))
+    automatic_stage_id: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc),
                                                   onupdate=lambda: datetime.now(timezone.utc))
+
+
+class MintPlanRecord(Base):
+    """Append-only snapshots: editing or reimporting a plan cannot erase its record."""
+    __tablename__ = 'mint_plan_records'
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey('users.id'), index=True)
+    plan_id: Mapped[str] = mapped_column(String(36), ForeignKey('mint_plans.id'), index=True)
+    event: Mapped[str] = mapped_column(String(30))
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
+    snapshot: Mapped[dict] = mapped_column(JSON)

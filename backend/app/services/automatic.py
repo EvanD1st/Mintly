@@ -18,7 +18,7 @@ from sqlalchemy import select, update
 from web3 import AsyncWeb3
 
 from app.config import settings
-from app.models import AutomaticGrant, AutomaticLock, Drop, MintStage, Wallet, MintTask, MintAuthorization
+from app.models import AutomaticGrant, AutomaticLock, Drop, MintStage, Wallet, MintTask, MintAuthorization, MintPlan
 from app.services.mint_plans import aware
 from app.services.opensea import OpenSeaClient, OpenSeaUnavailable, collection_slug, CHAINS
 from app.services.seadrop_mint import decode_mint, verify_presale
@@ -109,6 +109,12 @@ async def make_snapshot(db, req, user_id):
     if not req.grant_id:
         raise HTTPException(409, 'MetaMask connection is not automatic signing authority. Configure a custodial signer policy first.')
     grant = await grant_for(db, req.grant_id, user_id)
+    if req.plan_id:
+        plan = await db.get(MintPlan, req.plan_id)
+        if (not plan or plan.user_id != user_id or plan.archived_at
+                or plan.wallet_id != req.wallet_id or plan.automatic_drop_id != req.drop_id
+                or plan.automatic_stage_id != req.stage_id):
+            raise HTTPException(409, 'Mint plan changed or was removed. Reopen its automatic review.')
     wallet = await db.get(Wallet, req.wallet_id)
     drop = await db.get(Drop, req.drop_id)
     stage = await db.get(MintStage, req.stage_id)
@@ -136,7 +142,7 @@ async def make_snapshot(db, req, user_id):
     if total > int(grant.scope['max_task_wei']) or total > grant.budget_wei - grant.spent_wei - grant.reserved_wei:
         raise HTTPException(409, 'Automatic policy budget is insufficient, including pending reservations.')
     return grant, {
-        'user_id': user_id, 'wallet_id': wallet.id, 'account': to_checksum_address(wallet.address),
+        'plan_id': req.plan_id, 'user_id': user_id, 'wallet_id': wallet.id, 'account': to_checksum_address(wallet.address),
         'chain_id': drop.chain_id, 'chain': drop.chain, 'contract': to_checksum_address(drop.contract_address),
         'drop_id': drop.id, 'drop_name': drop.name, 'stage_id': stage.id, 'stage_name': stage.stage_name,
         'mint_kind': req.mint_kind, 'start': int(start.timestamp()), 'end': int(end.timestamp()),

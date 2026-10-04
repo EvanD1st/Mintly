@@ -271,7 +271,7 @@ class MintlyWorker:
         """Check at most one wallet/stage per call to respect the free API limit."""
         now = datetime.now(timezone.utc)
         plan = (await session.execute(select(MintPlan).join(User, User.id == MintPlan.user_id).where(
-            MintPlan.next_check_at.is_not(None), MintPlan.next_check_at <= now,
+            MintPlan.archived_at.is_(None), MintPlan.next_check_at.is_not(None), MintPlan.next_check_at <= now,
             User.is_active.is_(True), User.deleted_at.is_(None),
         ).order_by(MintPlan.next_check_at.asc()).limit(1)
           .with_for_update(skip_locked=True))).scalar_one_or_none()

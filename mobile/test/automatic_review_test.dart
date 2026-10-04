@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:mintly/models/drop_model.dart';
+import 'package:mintly/models/mint_plan_model.dart';
 import 'package:mintly/screens/automatic_review_screen.dart';
 import 'package:mintly/services/api_service.dart';
 import 'package:mintly/state/app_state.dart';
@@ -46,6 +47,19 @@ void main() {
         isDemo: false,
         stages: [stage],
       );
+      final plan = MintPlanModel.fromJson({
+        'id': 'plan-id',
+        'collection_name': 'Test collection',
+        'opensea_url': 'https://opensea.io/collection/test',
+        'chain': 'Sepolia',
+        'contract_address': address,
+        'wallet_address': address,
+        'wallet_id': 'w',
+        'quantity': 2,
+        'status': 'scheduled',
+        'status_note': 'Upcoming',
+        'estimated_network_fee_eth': '0.0004',
+      });
       final pending = Completer<http.Response>();
       final armedRequests = <Map<String, dynamic>>[];
       final api = ApiService(
@@ -69,6 +83,9 @@ void main() {
                   'account': address,
                   'chain_id': 11155111,
                   'status': 'enabled',
+                  'expires_at': start
+                      .add(const Duration(minutes: 30))
+                      .toIso8601String(),
                 },
               ]),
               200,
@@ -78,6 +95,13 @@ void main() {
             final body = jsonDecode(request.body) as Map<String, dynamic>;
             expect(body['stage_id'], 's');
             expect(body['wallet_id'], 'w');
+            expect(body['plan_id'], 'plan-id');
+            expect(body['quantity'], 2);
+            expect(body['fee_cap_eth'], '0.0004');
+            expect(
+              DateTime.parse(body['expires_at']),
+              start.add(const Duration(minutes: 30)),
+            );
             return http.Response(
               jsonEncode({
                 'eligibility': 'verified',
@@ -90,7 +114,7 @@ void main() {
                   'account': address,
                   'stage_name': stage.stageName,
                   'mint_kind': 'public',
-                  'quantity': 1,
+                  'quantity': 2,
                   'price_cap_wei': 10,
                   'fee_cap_wei': 1000000000000000,
                   'total_cap_wei': 1000000000000010,
@@ -116,14 +140,14 @@ void main() {
       await tester.pumpWidget(
         ProviderScope(
           overrides: [apiServiceProvider.overrideWith((ref) => api)],
-          child: MaterialApp(home: AutomaticReviewScreen(drop: drop)),
+          child: MaterialApp(
+            home: AutomaticReviewScreen(drop: drop, plan: plan),
+          ),
         ),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.byType(DropdownButtonFormField<String>).first);
-      await tester.pumpAndSettle();
-      await tester.tap(find.text(address).last);
-      await tester.pumpAndSettle();
+      // A plan selects its exact wallet automatically; no dropdown interaction required.
+      expect(find.text(address), findsOneWidget);
       await tester.tap(find.text('Review limits'));
       await tester.pumpAndSettle();
       expect(

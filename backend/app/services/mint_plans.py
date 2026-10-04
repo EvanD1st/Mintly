@@ -25,6 +25,11 @@ async def refresh_mint_plan(plan: MintPlan, wallet: Wallet, client: OpenSeaClien
     if (chain_id != plan.chain_id or detail["contract_address"].lower() != plan.contract_address.lower()
             or wallet.user_id != plan.user_id or wallet.id != plan.wallet_id):
         raise OpenSeaUnavailable("Drop contract, chain, or wallet changed; review this plan again.", 409)
+    previous_stage = tuple(getattr(plan, key, None) for key in ('stage_uuid', 'starts_at', 'ends_at', 'price_wei'))
+    def invalidate_context():
+        if (plan.stage_uuid, aware(plan.starts_at), aware(plan.ends_at), plan.price_wei) != (
+                previous_stage[0], aware(previous_stage[1]), aware(previous_stage[2]), previous_stage[3]):
+            plan.automatic_drop_id, plan.automatic_stage_id = None, None
     stages = stage_schedule(detail)
     active = [stage for stage in stages if stage["starts_at"] <= now < stage["ends_at"]]
     future = [stage for stage in stages if stage["starts_at"] > now]
@@ -56,6 +61,7 @@ async def refresh_mint_plan(plan: MintPlan, wallet: Wallet, client: OpenSeaClien
             plan.status = "ended"
             plan.status_note = "OpenSea reports no active or upcoming mint stage."
             plan.next_check_at = None
+        invalidate_context()
         return plan
 
     try:
@@ -66,6 +72,7 @@ async def refresh_mint_plan(plan: MintPlan, wallet: Wallet, client: OpenSeaClien
         plan.status = "unverified"
         plan.status_note = str(error)
         plan.next_check_at = now + timedelta(minutes=5)
+        invalidate_context()
         return plan
     if status == 200 and transaction is not None:
         if transaction.get("chain") != detail["chain"]:
@@ -95,6 +102,7 @@ async def refresh_mint_plan(plan: MintPlan, wallet: Wallet, client: OpenSeaClien
         if transaction_out is not None:
             transaction_out.update(transaction)
         plan.next_check_at = plan.ends_at
+        invalidate_context()
         return plan
 
     if status == 422:
@@ -108,4 +116,5 @@ async def refresh_mint_plan(plan: MintPlan, wallet: Wallet, client: OpenSeaClien
                              future[0]["starts_at"] if future else active[-1]["ends_at"])
     if plan.next_check_at <= now:
         plan.next_check_at = now + timedelta(minutes=5)
+    invalidate_context()
     return plan
