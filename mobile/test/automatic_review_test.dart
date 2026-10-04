@@ -97,7 +97,7 @@ void main() {
             expect(body['wallet_id'], 'w');
             expect(body['plan_id'], 'plan-id');
             expect(body['quantity'], 2);
-            expect(body['fee_cap_eth'], '0.0004');
+            expect(body['fee_cap_eth'], '0.000500000000000000');
             expect(
               DateTime.parse(body['expires_at']),
               start.add(const Duration(minutes: 30)),

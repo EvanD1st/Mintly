@@ -43,7 +43,14 @@ class _AutomaticReviewState extends ConsumerState<AutomaticReviewScreen> {
     _quantity.text = '${widget.plan?.quantity ?? 1}';
     _setStage();
     if (widget.plan?.estimatedNetworkFeeEth != null) {
-      _gas.text = widget.plan!.estimatedNetworkFeeEth!;
+      final amount = widget.plan!.estimatedNetworkFeeEth!.split('.');
+      final wei =
+          BigInt.parse(amount.first) * BigInt.from(10).pow(18) +
+          BigInt.parse((amount.length > 1 ? amount[1] : '').padRight(18, '0'));
+      // Review a finite gas ceiling with room for changes after the displayed estimate.
+      _gas.text = _eth(
+        (wei * BigInt.from(125) + BigInt.from(99)) ~/ BigInt.from(100),
+      );
     }
     _policies = _loadPolicies();
   }

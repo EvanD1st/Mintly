@@ -52,8 +52,11 @@ delivery should each be checked. The release key and its signing
 metadata are stored outside this repository under `C:\Users\USER\.ssh` and
 must be backed up for future installers.
 
-Live automatic minting remains disabled in production. Imported social posts
-and OpenSea URLs are not treated as eligibility proof or verified integrations.
+Live Robinhood automatic minting was explicitly activated on 4 October 2026.
+Users arm each exact stage through Mint plans after reviewing its finite limits.
+Imported social posts and OpenSea URLs require independent stage and eligibility
+verification before execution. The automatic notification service has a separate
+protected Firebase credential copy and has no wallet-key mount.
 
 ## Wallet import OTA compatibility
 

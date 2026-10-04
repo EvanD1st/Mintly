@@ -18,6 +18,9 @@ async def quote_gas(web3, tx, chain_id):
         if not 0 <= l1_gas <= nitro_total or nitro_total <= 0 or base_fee <= 0:
             raise ValueError('Invalid Nitro fee quote')
         total, price = max(standard, nitro_total), max(price, base_fee)
+        # Base fees can move between RPC responses and sequencer acceptance.
+        # Reserve modest price headroom before signing, inside the reviewed fee cap.
+        price = (price * 120 + 99) // 100
     if standard <= 0 or price <= 0:
         raise ValueError('Invalid gas quote')
     return (total * 120 + 99) // 100, price

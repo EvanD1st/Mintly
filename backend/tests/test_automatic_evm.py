@@ -33,6 +33,150 @@ from app.services import automatic
 from app.services.custody import private_write
 from app.services.seadrop_mint import PARAM_TYPE, ALLOW_SELECTOR, SIGNED_SELECTOR, signed_mint_typed_data
 from app.services.signer.base import SEADROP_V1_ADDRESS
+from app.models import MintRecovery
+from app.services.custody import CustodyVault
+from app.services.custody_recovery import recover_task
+
+
+async def unresolved(lab):
+    response = await lab.client.post('/api/tasks/arm', json=lab.request)
+    assert response.status_code == 200, response.text
+    task_id = response.json()['id']
+    lab.w.provider.make_request('evm_setNextBlockTimestamp', [lab.start])
+    lab.w.provider.make_request('evm_mine', [])
+    await lab.sign(task_id)
+    async with lab.factory() as db:
+        task = await db.get(MintTask, task_id)
+        task.status, task.broadcast_attempts = 'uncertain', 4
+        previous = (task.transaction_hash, task.signed_tx_raw, task.assigned_nonce, task.expires_at_utc)
+        await db.commit()
+    return task_id, previous
+
+
+@pytest.mark.parametrize('winner', ['replacement', 'original'])
+async def test_recovery_mints_once_same_nonce_and_reconciles_either_hash(lab, winner):
+    task_id, previous = await unresolved(lab)
+    expiry = min(datetime.fromtimestamp(lab.end, timezone.utc), datetime.now(timezone.utc) + timedelta(minutes=19))
+    async with lab.factory() as db:
+        result = await recover_task(db, task_id, lab.user.id, expiry, 'explicit-local-owner-consent')
+        retry = await recover_task(db, task_id, lab.user.id, expiry, 'explicit-local-owner-consent')
+        assert retry['hash'] == result['hash'] and result['hash'] != previous[0]
+        task = await db.get(MintTask, task_id)
+        assert task.assigned_nonce == previous[2] and task.broadcast_attempts == 4
+        assert task.expires_at_utc == previous[3]
+        assert Account.recover_transaction(task.signed_tx_raw) == lab.owner.address
+        from eth_account._utils.legacy_transactions import Transaction
+        replacement = Transaction.from_bytes(bytes.fromhex(task.signed_tx_raw[2:]))
+        old = Transaction.from_bytes(bytes.fromhex(previous[1][2:]))
+        assert (replacement.nonce, replacement.to, replacement.data, replacement.value) == (old.nonce, old.to, old.data, old.value)
+        assert replacement.gasPrice > old.gasPrice
+        assert replacement.gas * replacement.gasPrice <= (await db.get(MintAuthorization, task.authorization_id)).max_fee_wei
+        assert (await db.get(AutomaticGrant, lab.grant.id)).reserved_wei == 500000000000020
+    journal = CustodyVault().journal()
+    assert journal.execute('SELECT count(*) FROM signed').fetchone()[0] == 1
+    assert journal.execute('SELECT count(*) FROM recoveries').fetchone()[0] == 1
+    journal.close()
+    if winner == 'original':
+        lab.w.eth.send_raw_transaction(previous[1])
+    await lab.due(); await lab.tick()
+    lab.w.provider.make_request('evm_mine', [])
+    await lab.due(); await lab.tick()
+    async with lab.factory() as db:
+        task = await db.get(MintTask, task_id)
+        recovery = await db.scalar(select(MintRecovery).where(MintRecovery.task_id == task_id))
+        assert task.status == 'confirmed', task.failure_reason
+        assert recovery.status == ('confirmed' if winner == 'replacement' else 'superseded')
+        assert task.transaction_hash == (result['hash'] if winner == 'replacement' else previous[0])
+        assert (await db.get(AutomaticGrant, lab.grant.id)).reserved_wei == 0
+    assert lab.nft.functions.totalSupply().call() == 2  # test request quantity=2; exactly one execution
+    assert lab.nft.functions.ownerOf(1).call() == lab.owner.address
+    history = (await lab.client.get('/api/history?section=mints')).json()['records'][0]
+    assert history['recoveries'][0]['previous_hash'] == previous[0]
+    assert history['recoveries'][0]['replacement_hash'] == result['hash']
+    assert 'signed_tx_raw' not in json.dumps(history) and previous[1] not in json.dumps(history)
+    # A later task settles the single independent liability against either winner.
+    other = await lab.client.post('/api/tasks/arm', json={**lab.request, 'idempotency_key': 'later-fresh-task'})
+    assert other.status_code == 200, other.text
+    await lab.sign(other.json()['id'])
+    journal = CustodyVault().journal()
+    actual = journal.execute('SELECT actual FROM signed WHERE task=?', (task_id,)).fetchone()[0]
+    assert actual == history['actual_total_cost_wei']
+    journal.close()
+
+
+async def test_recovery_journal_reuses_signature_after_database_commit_loss(lab, monkeypatch):
+    task_id, previous = await unresolved(lab)
+    expiry = min(datetime.fromtimestamp(lab.end, timezone.utc), datetime.now(timezone.utc) + timedelta(minutes=19))
+    async with lab.factory() as db:
+        real_commit = db.commit
+        count = 0
+        async def fail_activation():
+            nonlocal count
+            count += 1
+            if count == 2:
+                raise RuntimeError('simulated crash after journal fsync')
+            await real_commit()
+        monkeypatch.setattr(db, 'commit', fail_activation)
+        with pytest.raises(RuntimeError):
+            await recover_task(db, task_id, lab.user.id, expiry, 'crash-proof-owner-consent')
+        await db.rollback()
+    journal = CustodyVault().journal()
+    saved = dict(journal.execute('SELECT * FROM recoveries').fetchone())
+    journal.close()
+    async with lab.factory() as db:
+        result = await recover_task(db, task_id, lab.user.id, expiry, 'crash-proof-owner-consent')
+        assert result['hash'] == saved['hash'] and result['nonce'] == previous[2]
+        assert (await db.get(MintTask, task_id)).signed_tx_raw == saved['raw']
+
+
+@pytest.mark.parametrize('invalid', ['owner', 'expired', 'fee_cap', 'consumed_nonce', 'expensive_gas'])
+async def test_recovery_rejects_unapproved_or_unaffordable_scope_without_signing(lab, invalid, monkeypatch):
+    task_id, _ = await unresolved(lab)
+    expiry = min(datetime.fromtimestamp(lab.end, timezone.utc), datetime.now(timezone.utc) + timedelta(minutes=19))
+    owner = lab.user.id
+    if invalid == 'owner': owner = str(uuid.uuid4())
+    if invalid == 'expired': expiry = datetime.now(timezone.utc) - timedelta(seconds=1)
+    if invalid == 'fee_cap':
+        async with lab.factory() as db:
+            task = await db.get(MintTask, task_id)
+            (await db.get(MintAuthorization, task.authorization_id)).max_fee_wei = 1
+            await db.commit()
+    if invalid == 'consumed_nonce':
+        lab.w.provider.make_request('hardhat_setNonce', [lab.owner.address, '0x1'])
+    if invalid == 'expensive_gas':
+        async def expensive(*args): return 1000000, 10**12
+        monkeypatch.setattr('app.services.custody_recovery.quote_gas', expensive)
+    async with lab.factory() as db:
+        with pytest.raises(ValueError):
+            await recover_task(db, task_id, owner, expiry, 'rejected-consent')
+    journal = CustodyVault().journal()
+    assert journal.execute('SELECT count(*) FROM recoveries').fetchone()[0] == 0
+    journal.close()
+
+
+async def test_recovery_retries_are_finite_and_never_extend_original_consent(lab, monkeypatch):
+    task_id, previous = await unresolved(lab)
+    expiry = min(datetime.fromtimestamp(lab.end, timezone.utc), datetime.now(timezone.utc) + timedelta(minutes=19))
+    async with lab.factory() as db:
+        await recover_task(db, task_id, lab.user.id, expiry, 'finite-recovery-owner-consent')
+    real_provider = automatic.provider
+    attempted = []
+    async def rejecting_provider():
+        web3 = await real_provider()
+        async def reject(raw):
+            attempted.append(bytes(raw))
+            raise RuntimeError('simulated RPC rejection')
+        web3.eth.send_raw_transaction = reject
+        return web3
+    monkeypatch.setattr(automatic, 'provider', rejecting_provider)
+    for _ in range(4):
+        await lab.due(); await lab.tick()
+    assert len(attempted) == 2 and attempted[0] == attempted[1]
+    async with lab.factory() as db:
+        task = await db.get(MintTask, task_id)
+        assert task.status == 'uncertain' and task.broadcast_attempts == 6
+        assert task.expires_at_utc == previous[3] and task.assigned_nonce == previous[2]
+        assert (await db.get(AutomaticGrant, lab.grant.id)).reserved_wei == 500000000000020
 
 
 @pytest.fixture

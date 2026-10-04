@@ -9,7 +9,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
-from app.models import ActivityEvent, Drop, MintAuthorization, MintStage, MintTask, User, Wallet
+from app.models import ActivityEvent, Drop, MintAuthorization, MintStage, MintTask, User, Wallet, MintRecovery
 from app.schemas.task import DraftTaskRequest, ArmTaskRequest, TaskSchema, QueueResponse
 from app.services.parser import format_wei_to_eth
 from app.services import automatic
@@ -95,9 +95,11 @@ async def arm_mint_task(req: ArmTaskRequest, user: User = Depends(get_current_us
 async def task_response(db, task):
     auth = await db.get(MintAuthorization, task.authorization_id)
     s = auth.snapshot
+    recovery = await db.scalar(select(MintRecovery).where(MintRecovery.task_id == task.id))
     return TaskSchema(id=task.id, wallet_id=task.wallet_id, drop_id=task.drop_id,
         stage_id=task.stage_id, status=task.status, is_demo=task.is_demo,
-        scheduled_for_utc=task.scheduled_for_utc, expires_at_utc=task.expires_at_utc,
+        scheduled_for_utc=task.scheduled_for_utc,
+        expires_at_utc=recovery.expires_at if recovery and recovery.activated_at else task.expires_at_utc,
         quantity=auth.quantity, unit_price_eth=format_wei_to_eth(s['price_wei']),
         fee_cap_eth=format_wei_to_eth(auth.max_fee_wei), total_cap_eth=format_wei_to_eth(auth.total_spend_cap_wei),
         drop_name=s['drop_name'], chain=s['chain'], stage_name=s['stage_name'], icon_name='gem',

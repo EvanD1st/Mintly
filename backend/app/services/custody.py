@@ -91,5 +91,8 @@ class CustodyVault:
             address TEXT NOT NULL, chain INTEGER NOT NULL, nonce INTEGER NOT NULL,
             liability INTEGER NOT NULL, raw TEXT NOT NULL, hash TEXT NOT NULL,
             actual INTEGER, UNIQUE(chain,address,nonce))''')
+        conn.execute('''CREATE TABLE IF NOT EXISTS recoveries (
+            id TEXT PRIMARY KEY, task TEXT NOT NULL UNIQUE, intent TEXT NOT NULL,
+            nonce INTEGER NOT NULL, raw TEXT NOT NULL, hash TEXT NOT NULL)''')
         conn.commit()
         return conn

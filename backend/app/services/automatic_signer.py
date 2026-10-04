@@ -102,11 +102,15 @@ async def prepare_task(db, task_id, vault=None):
         else:
             # Independently reconcile the signer's lifetime budget; API DB edits cannot reset it.
             for entry in journal.execute('SELECT * FROM signed WHERE policy=? AND actual IS NULL', (grant.id,)).fetchall():
-                receipt = await final_receipt(web3, entry['hash'])
-                if receipt:
-                    tx = await web3.eth.get_transaction(entry['hash'])
-                    actual = receipt.gasUsed * receipt.effectiveGasPrice + (tx.value if receipt.status == 1 else 0)
-                    journal.execute('UPDATE signed SET actual=? WHERE task=?', (actual, entry['task']))
+                hashes = [entry['hash']] + [row['hash'] for row in journal.execute(
+                    'SELECT hash FROM recoveries WHERE task=?', (entry['task'],)).fetchall()]
+                for tx_hash in hashes:
+                    receipt = await final_receipt(web3, tx_hash)
+                    if receipt:
+                        tx = await web3.eth.get_transaction(tx_hash)
+                        actual = receipt.gasUsed * receipt.effectiveGasPrice + (tx.value if receipt.status == 1 else 0)
+                        journal.execute('UPDATE signed SET actual=? WHERE task=?', (actual, entry['task']))
+                        break  # same account/nonce can settle only once
             journal.commit()
             charged = journal.execute('SELECT COALESCE(SUM(COALESCE(actual,liability)),0) FROM signed WHERE policy=?', (grant.id,)).fetchone()[0]
             if charged + s['total_cap_wei'] > policy['budget_wei']:

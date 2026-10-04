@@ -225,6 +225,10 @@ async def estimate_network_fee(transaction: dict, wallet_address: str, chain: st
         tx = {"from": to_checksum_address(wallet_address),
               "to": to_checksum_address(transaction["to"]),
               "data": transaction["data"], "value": transaction_value_wei(transaction["value"])}
+        if CHAINS[chain][0] == 4663:
+            from app.services.automatic_fees import quote_gas
+            gas_units, gas_price = await quote_gas(web3, tx, 4663)
+            return gas_units * gas_price
         gas_units = await web3.eth.estimate_gas(tx)
         gas_price = await web3.eth.gas_price
         return int(gas_units) * int(gas_price)

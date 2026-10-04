@@ -3,8 +3,11 @@
 This route follows the user's October 2026 decision to store a wallet key on the
 server. It preserves the imported address and its allowlist identity. It does
 **not** establish a MetaMask permission or an on-chain spending limit. Local EVM
-execution is demonstrated; no real user key has been imported and no testnet or
-mainnet transaction has been sent during this implementation.
+execution is demonstrated. On 4 October 2026 the owner imported the linked wallet
+through the isolated service and explicitly activated Robinhood automation.
+An authorized one-NFT mainnet test was signed; its initial submission has no
+receipt. A separately approved same-nonce recovery preserves the USD 0.50 cap.
+Current execution evidence is recorded separately when a receipt is available.
 
 ## What works and what is excluded
 
@@ -14,7 +17,7 @@ mainnet transaction has been sent during this implementation.
 | Local EVM 31337, Merkle allowlist and signed presale | Real SeaDrop verifies proofs/signatures; test provider supplies wallet-specific calldata |
 | Ethereum Sepolia 11155111, public | Explicit HTTPS RPC configuration supported; needs a verified SeaDrop collection and real testnet run |
 | Ethereum Sepolia presales | Validator exists, but no live testnet presale provider is configured/proven; do not claim operational support |
-| Robinhood 4663 | Explicit opt-in; Nitro total fees, finalized receipt checks, pinned EIP-7702 direct signer. Mainnet execution not demonstrated. |
+| Robinhood 4663 | Explicitly activated; Nitro total fees, finalized receipt checks, pinned EIP-7702 direct signer. One-NFT mainnet proof pending receipt. |
 | Ethereum mainnet, Base, Arbitrum, Optimism and other L2s | Automatic execution rejected; their adapters are unimplemented |
 | Arbitrary project contracts, ERC-1155 and arbitrary smart accounts | Unsupported; no generic calldata signing route |
 
@@ -206,8 +209,10 @@ EIP-7702 accounts require explicit `--account-mode eip7702-direct` provisioning,
 which pins the delegation and implementation hash. See [Robinhood adapter](robinhood-signer-adapter.md).
 The signer checks the active user, cancellation, policy expiry and chain state,
 estimates gas with 20% padding, checks balance including gas, simulates and
-rechecks expiry. Free mints still need ETH for gas. Only L1 fee accounting is used;
-legacy `gasPrice` fixes the signed maximum. No fee replacement is implemented.
+rechecks expiry. Free mints still need ETH for gas. Robinhood uses Nitro's total
+gas estimate including parent-data fees once, and 20% gas-price headroom within
+the approved fee ceiling. Legacy `gasPrice` fixes the signed maximum. Automatic
+fee replacement remains disabled.
 
 The PostgreSQL lock serializes arming, signing and cancellation, including across
 processes. Durable nonce records and the signer journal are combined with the
@@ -223,8 +228,18 @@ provider retries wait at least 15 seconds. Broadcast retries stop at four sends
 or expiry and retain an `uncertain` reservation. No fresh nonce is used to retry
 an uncertain mint. There is no automatic cancellation transaction or gas bump.
 
+After fresh explicit owner consent, `python -m app.recover_custody` inside the
+isolated signer can prepare one same-nonce replacement with exactly the original
+mint calldata and value. The CLI requires task, owner, a consent reference, a
+submission expiry of at most 20 minutes, and `--confirm-exact-recovery`. Original
+price, quantity, fee and total caps remain binding. Migration 009 and the
+independent signer journal preserve both signatures and approvals. No counters
+are reset and no extra lifetime liability is charged; at most two additional
+broadcasts reuse the replacement bytes. Both hashes remain tracked and either
+finalized winner settles the single reservation. See [approved recovery scope](automatic-recovery-proposal.md).
+
 Receipts must match the canonical block and meet at least two confirmations.
-The Sepolia overlay additionally requires 12 confirmations **and** the RPC's
+The Sepolia and Robinhood overlays additionally require 12 confirmations **and** the RPC's
 `finalized` block to cover the receipt. An unconfirmed reorg keeps funds reserved
 and reconciles/rebroadcasts the same payload. A finalized receipt releases the
 maximum reservation and charges actual value plus gas (gas only for reverts).

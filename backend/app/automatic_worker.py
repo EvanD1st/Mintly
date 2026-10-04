@@ -16,7 +16,7 @@ from web3.exceptions import TransactionNotFound
 
 from app.config import settings
 from app.database import AsyncSessionLocal
-from app.models import MintTask, MintAuthorization, ActivityEvent
+from app.models import MintTask, MintAuthorization, ActivityEvent, MintRecovery
 from app.services import automatic
 from app.services.automatic_signer import final_receipt
 from app.services.mint_plans import aware
@@ -68,9 +68,25 @@ async def step(session_factory=AsyncSessionLocal, sign=request_signature, *, now
             task.next_attempt_at = now + timedelta(seconds=1)
             await db.commit()  # signer independently acquires the same lock
         else:
+            recovery = await db.scalar(select(MintRecovery).where(MintRecovery.task_id == task.id))
+            active_recovery = recovery if recovery and recovery.activated_at else None
+            candidates = [(task.transaction_hash, task.signed_tx_raw)]
+            if recovery:
+                candidates += [(recovery.previous_hash, recovery.previous_signed_tx_raw)]
+                if active_recovery:
+                    candidates += [(recovery.replacement_hash, recovery.replacement_signed_tx_raw)]
+            candidates = list(dict(candidates).items())
             web3 = await automatic.provider()
             try:
-                receipt = await final_receipt(web3, task.transaction_hash)
+                receipt = None
+                for tx_hash, signed_raw in candidates:
+                    receipt = await final_receipt(web3, tx_hash)
+                    if receipt:
+                        task.transaction_hash, task.signed_tx_raw = tx_hash, signed_raw
+                        task.explorer_url = explorer_url(tx_hash)
+                        if recovery:
+                            recovery.status = 'confirmed' if tx_hash == recovery.replacement_hash else 'superseded'
+                        break
                 if receipt:
                     auth = await db.get(MintAuthorization, task.authorization_id)
                     actual = receipt.gasUsed * receipt.effectiveGasPrice
@@ -85,23 +101,36 @@ async def step(session_factory=AsyncSessionLocal, sign=request_signature, *, now
                         None if receipt.status == 1 else 'Mint reverted; receipt gas is charged. No automatic second mint.', actual)
                     await db.commit()
                     return True
-                try:
-                    seen_receipt = await web3.eth.get_transaction_receipt(task.transaction_hash)
-                except TransactionNotFound:
-                    seen_receipt = None
+                seen_receipt = None
+                for tx_hash, _ in candidates:
+                    try:
+                        seen_receipt = await web3.eth.get_transaction_receipt(tx_hash)
+                    except TransactionNotFound:
+                        continue
+                    if seen_receipt:
+                        break
                 task.next_attempt_at = now + timedelta(seconds=2)
                 if seen_receipt:
                     task.status = 'submitted'
+                    if active_recovery:
+                        recovery.status = 'submitted'
                     task.failure_reason = 'Receipt observed; waiting for canonical confirmations.'
                     await db.commit()
                     return True
-                if (aware(task.expires_at_utc) <= now or task.broadcast_attempts >= 4):
+                expiry = active_recovery.expires_at if active_recovery else task.expires_at_utc
+                attempt_ceiling = active_recovery.attempt_ceiling if active_recovery else 4
+                if (aware(expiry) <= now or task.broadcast_attempts >= attempt_ceiling):
                     task.status = 'uncertain'
+                    if active_recovery:
+                        recovery.status = 'uncertain'
                     task.failure_reason = 'No confirmed receipt. Reservation retained; no new nonce or further broadcast.'
                     task.next_attempt_at = now + timedelta(seconds=15)
                     await db.commit()
                     return True
                 # Verify durable integrity and publish intent before the network call.
+                if active_recovery:
+                    task.transaction_hash = recovery.replacement_hash
+                    task.signed_tx_raw = recovery.replacement_signed_tx_raw
                 raw = bytes.fromhex(task.signed_tx_raw.removeprefix('0x'))
                 if '0x' + keccak(raw).hex() != task.transaction_hash:
                     raise ValueError('Signed transaction integrity mismatch')
@@ -109,8 +138,9 @@ async def step(session_factory=AsyncSessionLocal, sign=request_signature, *, now
                 task.broadcast_attempts += 1
                 task.submitted_at = task.submitted_at or now
                 task.failure_reason = 'Broadcast may be in flight; cancellation cannot undo a signed transaction.'
-                task.explorer_url = ('https://sepolia.etherscan.io/tx/' + task.transaction_hash
-                                     if settings.AUTOMATIC_CHAIN_ID == 11155111 else None)
+                task.explorer_url = explorer_url(task.transaction_hash)
+                if active_recovery:
+                    recovery.status = 'uncertain'
                 await db.commit()
                 try:
                     returned = await web3.eth.send_raw_transaction(raw)
@@ -122,6 +152,8 @@ async def step(session_factory=AsyncSessionLocal, sign=request_signature, *, now
                         await db.commit()
                         return True
                     task.status = 'submitted'
+                    if active_recovery:
+                        recovery.status = 'submitted'
                     task.failure_reason = None
                     task.notification_pending = True
                 except Exception:
@@ -160,6 +192,12 @@ async def step(session_factory=AsyncSessionLocal, sign=request_signature, *, now
                 task.failure_reason = 'Preparation temporarily unavailable; bounded retry scheduled.'
             await db.commit()
     return True
+
+
+def explorer_url(tx_hash):
+    base = {11155111: 'https://sepolia.etherscan.io/tx/',
+            4663: 'https://robinhoodchain.blockscout.com/tx/'}.get(settings.AUTOMATIC_CHAIN_ID)
+    return base + tx_hash if base else None
 
 
 async def run():

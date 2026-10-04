@@ -37,6 +37,16 @@ void main() {
                     'drop_name': 'Removed automatic mint',
                     'status': mintReads == 1 ? 'submitted' : 'confirmed',
                     'transaction_hash': '0xabc',
+                    'recoveries': [
+                      {
+                        'status': 'submitted',
+                        'nonce': 7,
+                        'previous_hash': '0xoriginal',
+                        'replacement_hash': '0xreplacement',
+                        'authorized_at': '2026-10-04T09:00:00Z',
+                        'expires_at': '2026-10-04T09:20:00Z',
+                      },
+                    ],
                     'quantity': 1,
                     'chain': 'Robinhood Chain',
                     'archived_at': '2026-10-04T10:00:00Z',
@@ -79,6 +89,9 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Status: submitted'), findsOneWidget);
       expect(find.textContaining('Transaction: 0xabc'), findsOneWidget);
+      expect(find.text('Same-nonce recovery: submitted'), findsOneWidget);
+      expect(find.text('Original transaction: 0xoriginal'), findsOneWidget);
+      expect(find.text('Replacement transaction: 0xreplacement'), findsOneWidget);
       await tester.drag(find.byType(ListView), const Offset(0, 350));
       await tester.pumpAndSettle();
       expect(find.text('Status: confirmed'), findsOneWidget);

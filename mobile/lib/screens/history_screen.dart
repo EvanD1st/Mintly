@@ -124,6 +124,20 @@ class _HistoryState extends ConsumerState<HistoryScreen> {
               SelectableText('Collection: ${data['contract_address']}'),
             if (data['transaction_hash'] != null)
               SelectableText('Transaction: ${data['transaction_hash']}'),
+            for (final recovery in (data['recoveries'] as List? ?? [])) ...[
+              Text('Same-nonce recovery: ${recovery['status']}'),
+              Text(
+                'Authorized: ${_time(recovery['authorized_at'])} · nonce ${recovery['nonce']}',
+              ),
+              Text('Recovery expiry: ${_time(recovery['expires_at'])}'),
+              SelectableText(
+                'Original transaction: ${recovery['previous_hash']}',
+              ),
+              if (recovery['replacement_hash'] != null)
+                SelectableText(
+                  'Replacement transaction: ${recovery['replacement_hash']}',
+                ),
+            ],
             if (data['confirmed_at'] != null)
               Text('Receipt confirmed: ${_time(data['confirmed_at'])}'),
             for (final key in [

@@ -9,6 +9,7 @@ from app.models.user import User, AuthSession, LoginAttempt, WalletPairing
 from app.models.mint_plan import MintPlan, MintPlanRecord
 from app.models.mint_permission import MintPermission
 from app.models.automatic import AutomaticGrant, AutomaticNonce, AutomaticLock
+from app.models.recovery import MintRecovery
 
 __all__ = [
     "Wallet",

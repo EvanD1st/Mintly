@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user, get_db
 from app.api.tasks import task_response
 from app.services.parser import format_wei_to_eth
-from app.models import ActivityEvent, MintPlanRecord, MintTask, Wallet, User, MintPermission
+from app.models import ActivityEvent, MintPlanRecord, MintTask, Wallet, User, MintPermission, MintRecovery
 
 router = APIRouter(prefix='/history', tags=['history'])
 
@@ -45,6 +45,14 @@ async def history(section: Literal['plans', 'mints', 'activity', 'permissions'] 
                 details['actual_effective_gas_price'] = row.actual_effective_gas_price
                 details['block_number'] = row.block_number
                 details['receipt_block_hash'] = row.receipt_block_hash
+                details['original_expires_at_utc'] = row.expires_at_utc
+                recoveries = (await db.scalars(select(MintRecovery).where(
+                    MintRecovery.task_id == row.id, MintRecovery.user_id == user.id))).all()
+                details['recoveries'] = [{'id': r.id, 'authorized_at': r.authorized_at,
+                    'expires_at': r.expires_at, 'status': r.status, 'previous_hash': r.previous_hash,
+                    'replacement_hash': r.replacement_hash, 'nonce': r.snapshot['recovery_nonce'],
+                    'authorization_reference': r.authorization_reference,
+                    'authorization': {k: v for k, v in r.snapshot.items() if k != 'execution'}} for r in recoveries]
             else:
                 from app.models import MintAuthorization, Drop, MintStage
                 auth = await db.get(MintAuthorization, row.authorization_id)

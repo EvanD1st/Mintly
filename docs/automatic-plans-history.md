@@ -19,6 +19,14 @@ private keys, raw signed bytes and proof calldata are never returned. Reimportin
 a collection restores the plan while retaining earlier quantity/removal snapshots.
 Migration 008 retains all existing plans as initial history snapshots.
 
+Migration 009 retains separately approved same-nonce recoveries. Their original
+and replacement hashes, submission windows and immutable limits are visible in
+mint History. A manual signer-only recovery may renew a finite submission window
+and adjust gas within the original caps after fresh owner consent. It cannot
+change the mint calldata, recipient, quantity, value or nonce, create a second
+reservation, or enable automatic fee bumps. Both hashes are tracked until
+canonical finalized settlement, even after the plan is removed.
+
 The production spending service is activated explicitly using
 `MINTLY_RELEASE=<verified revision> bash deploy/activate-automatic.sh`.
 It verifies signer/keystore readiness and refuses a first activation with old
