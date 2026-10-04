@@ -2,7 +2,7 @@
 
 from app.models.wallet import Wallet
 from app.models.source import SourceConnection, SourcePost
-from app.models.drop import Drop, MintStage
+from app.models.drop import Drop, MintStage, DismissedDrop
 from app.models.task import MintAuthorization, MintTask
 from app.models.activity import ActivityEvent, NotificationDevice
 from app.models.user import User, AuthSession, LoginAttempt, WalletPairing

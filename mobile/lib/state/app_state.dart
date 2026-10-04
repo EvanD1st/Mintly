@@ -45,6 +45,7 @@ class MintlyState {
   });
 
   MintlyState copyWith({
+    bool clearSelection = false,
     List<DropModel>? drops,
     String? filter,
     DropModel? selectedDrop,
@@ -66,8 +67,8 @@ class MintlyState {
     return MintlyState(
       drops: drops ?? this.drops,
       filter: filter ?? this.filter,
-      selectedDrop: selectedDrop ?? this.selectedDrop,
-      selectedStage: selectedStage ?? this.selectedStage,
+      selectedDrop: clearSelection ? null : selectedDrop ?? this.selectedDrop,
+      selectedStage: clearSelection ? null : selectedStage ?? this.selectedStage,
       selectedQty: selectedQty ?? this.selectedQty,
       feeCap: feeCap ?? this.feeCap,
       queue: queue ?? this.queue,
@@ -120,6 +121,7 @@ class MintlyNotifier extends StateNotifier<MintlyState> {
     await Future.wait([
       loadSection('Drops', () => _api.fetchDrops(state.filter), (drops) => state.copyWith(
         drops: drops,
+        clearSelection: drops.isEmpty,
         selectedDrop: drops.isNotEmpty ? drops.first : null,
         selectedStage: drops.isNotEmpty && drops.first.stages.isNotEmpty ? drops.first.stages.first : null,
         sourceStatusText: _api.sourceStatusText,
@@ -139,6 +141,13 @@ class MintlyNotifier extends StateNotifier<MintlyState> {
 
   Future<void> setFilter(String filter) async {
     state = state.copyWith(filter: filter);
+    await loadInitialData();
+  }
+
+  Future<void> removeDrop(String id) async {
+    await _api.removeDrop(id);
+    state = state.copyWith(drops: state.drops.where((drop) => drop.id != id).toList(),
+      clearSelection: state.selectedDrop?.id == id);
     await loadInitialData();
   }
 

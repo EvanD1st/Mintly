@@ -35,62 +35,6 @@ class QueueScreen extends ConsumerWidget {
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
         children: [
-          ...state.mintPermissions.map(
-            (permission) => Card(
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Automatic mint: ${permission['status']}'),
-                    Text('${permission['note'] ?? ''}'),
-                    if (permission['tx_hash'] != null)
-                      SelectableText('${permission['tx_hash']}'),
-                    if ([
-                      'awaiting_signature',
-                      'armed',
-                    ].contains(permission['status']))
-                      TextButton(
-                        onPressed: () async {
-                          try {
-                            await notifier.cancelMintPermission(
-                              permission['id'] as String,
-                            );
-                          } catch (error) {
-                            if (context.mounted) {
-                              ScaffoldMessenger.of(
-                                context,
-                              ).showSnackBar(SnackBar(content: Text('$error')));
-                            }
-                          }
-                        },
-                        child: const Text('Cancel permission'),
-                      ),
-                    if (permission['can_revoke'] == true)
-                      TextButton(
-                        onPressed: () async {
-                          try {
-                            final result = await notifier.requestMintRevocation(
-                              permission['id'] as String,
-                            );
-                            if (context.mounted) {
-                              await _revocationDialog(context, result);
-                            }
-                          } catch (error) {
-                            if (context.mounted) {
-                              ScaffoldMessenger.of(
-                                context,
-                              ).showSnackBar(SnackBar(content: Text('$error')));
-                            }
-                          }
-                        },
-                        child: const Text('Revoke on-chain'),
-                      ),
-                  ],
-                ),
-              ),
-            ),
-          ),
           Text(
             'ACTIVITY',
             style: TextStyle(
@@ -124,6 +68,78 @@ class QueueScreen extends ConsumerWidget {
             ),
             child: const Text('View mint history'),
           ),
+
+          ...state.mintPermissions
+              .where(
+                (permission) =>
+                    [
+                      'awaiting_signature',
+                      'armed',
+                      'prepared',
+                      'submitted',
+                      'uncertain',
+                    ].contains(permission['status']) ||
+                    permission['can_revoke'] == true,
+              )
+              .map(
+                (permission) => Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (permission['status'] != 'cancelled') ...[
+                          Text('Automatic mint: ${permission['status']}'),
+                          Text('${permission['note'] ?? ''}'),
+                        ],
+                        if (permission['tx_hash'] != null)
+                          SelectableText('${permission['tx_hash']}'),
+                        if ([
+                          'awaiting_signature',
+                          'armed',
+                        ].contains(permission['status']))
+                          TextButton(
+                            onPressed: () async {
+                              try {
+                                await notifier.cancelMintPermission(
+                                  permission['id'] as String,
+                                );
+                              } catch (error) {
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(content: Text('$error')),
+                                  );
+                                }
+                              }
+                            },
+                            child: const Text('Cancel permission'),
+                          ),
+                        if (permission['can_revoke'] == true)
+                          TextButton(
+                            onPressed: () async {
+                              try {
+                                final result = await notifier
+                                    .requestMintRevocation(
+                                      permission['id'] as String,
+                                    );
+                                if (context.mounted) {
+                                  await _revocationDialog(context, result);
+                                }
+                              } catch (error) {
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(content: Text('$error')),
+                                  );
+                                }
+                              }
+                            },
+                            child: const Text('Revoke on-chain'),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
 
           if (state.isLoading) const LinearProgressIndicator(),
           if (state.error != null)
@@ -632,9 +648,15 @@ class QueueScreen extends ConsumerWidget {
                     try {
                       final inFlight = await notifier.removeMintPlan(plan.id);
                       if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(
-                          inFlight ? 'Removed. Transaction tracking continues in Settings → History.' : 'Removed. Any unsent mint was canceled; record saved in Settings → History.',
-                        )));
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              inFlight
+                                  ? 'Removed. Transaction tracking continues in Settings → History.'
+                                  : 'Removed. Any unsent mint was canceled; record saved in Settings → History.',
+                            ),
+                          ),
+                        );
                       }
                     } catch (error) {
                       if (context.mounted) {

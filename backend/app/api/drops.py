@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import get_current_user, get_db
-from app.models import Drop, SourceConnection, SourcePost, User, Wallet
+from app.models import Drop, DismissedDrop, SourceConnection, SourcePost, User, Wallet
 from app.schemas.drop import DropListResponse, DropSchema
 
 router = APIRouter(prefix="/drops", tags=["drops"])
@@ -26,6 +26,8 @@ async def list_drops(
     stmt = select(Drop).join(SourcePost, Drop.source_post_id == SourcePost.id).options(selectinload(Drop.stages)).where(
         Drop.is_demo.is_(False),
         approved,
+        ~select(DismissedDrop.drop_id).where(DismissedDrop.user_id == user.id,
+            DismissedDrop.drop_id == Drop.id).exists(),
     ).order_by(Drop.updated_at.desc()).limit(100)
     drops = (await db.execute(stmt)).scalars().all()
     if filter_kind and filter_kind != "all":
@@ -33,7 +35,9 @@ async def list_drops(
     source = (await db.execute(select(SourceConnection).where(
         SourceConnection.source_name == "lakzonevn",
     ))).scalar_one_or_none()
-    if source and source.last_sync_at:
+    if user.role != 'admin':
+        source_text = ''
+    elif source and source.last_sync_at:
         synced = source.last_sync_at.replace(tzinfo=timezone.utc).astimezone(ZoneInfo("Africa/Lagos"))
         source_text = f"@lakzonevn checked {synced:%d %b %H:%M} WAT"
     else:
@@ -61,6 +65,19 @@ async def get_drop_detail(drop_id: str, db: AsyncSession = Depends(get_db)):
     if drop is None:
         raise HTTPException(status_code=404, detail="Drop not found.")
     return drop
+
+
+@router.delete('/{drop_id}')
+async def remove_drop(drop_id: str, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    await get_drop_detail(drop_id, db)
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+    from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+    insert = pg_insert if db.bind.dialect.name == 'postgresql' else sqlite_insert
+    now = datetime.now(timezone.utc)
+    await db.execute(insert(DismissedDrop).values(user_id=user.id, drop_id=drop_id,
+        created_at=now, updated_at=now).on_conflict_do_nothing(index_elements=['user_id', 'drop_id']))
+    await db.commit()
+    return {'removed': True, 'plans_and_history_retained': True}
 
 
 @router.post("/{drop_id}/recheck")

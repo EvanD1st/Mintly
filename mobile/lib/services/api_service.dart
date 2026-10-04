@@ -117,6 +117,8 @@ class ApiService extends ChangeNotifier {
   Future<Map<String, dynamic>> fetchSourceStatus() async =>
     (await _get('/source/status')) as Map<String, dynamic>;
 
+  Future<void> removeDrop(String id) async { await _delete('/drops/${Uri.encodeComponent(id)}'); }
+
   Future<List<MintTaskModel>> fetchQueue() async {
     final data = await _get('/tasks/queue') as Map<String, dynamic>;
     return (data['tasks'] as List).map((t) => MintTaskModel.fromJson(t)).toList();
