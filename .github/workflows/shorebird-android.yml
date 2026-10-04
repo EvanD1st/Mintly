@@ -13,7 +13,7 @@ on:
         options: [release, patch]
         required: true
       release_version:
-        description: Existing Shorebird version to patch (for example 1.0.0+1)
+        description: Existing version to patch (audited wallet OTA also accepts comma separated versions)
         type: string
         required: false
       audited_wallet_ota:
@@ -117,8 +117,8 @@ jobs:
         if: always() && inputs.audited_wallet_ota == true
         uses: actions/upload-artifact@v4
         with:
-          name: mintly-wallet-ota-audit-${{ inputs.release_version }}
-          path: mobile/build/shorebird/wallet-ota-audit.json
+          name: mintly-wallet-ota-audit
+          path: mobile/build/shorebird/wallet-ota-audit-*.json
           if-no-files-found: warn
           retention-days: 30
       - name: Upload signed installer

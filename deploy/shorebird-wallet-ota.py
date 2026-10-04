@@ -10,6 +10,7 @@ import hashlib
 import io
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import tempfile
@@ -72,14 +73,9 @@ def audit(installed_path, built_path):
                 "built_sha256": hashlib.sha256(Path(built_path).read_bytes()).hexdigest()}
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--release-version", required=True)
-    parser.add_argument("--track", default="stable", choices=("stable", "staging"))
-    parser.add_argument("--audit-only", action="store_true")
-    args = parser.parse_args()
+def patch_release(version, track, audit_only):
     command = ["shorebird", "--json", "patch", "android", "--release-version",
-               args.release_version, "--track", args.track]
+               version, "--track", track]
     # Isolate Shorebird downloads so the archive audited is the exact release
     # selected by the CLI, rather than a guessed or stale release artifact.
     with tempfile.TemporaryDirectory(prefix="mintly-ota-") as scratch:
@@ -95,14 +91,30 @@ def main():
             raise ValueError(f"Expected one release AAB, found {len(candidates)}")
         built = Path("build/app/outputs/bundle/release/app-release.aab")
         result = audit(candidates[0], built)
-        result.update(release_version=args.release_version, track=args.track,
+        result.update(release_version=version, track=track,
                       native_checks="Shorebird enabled; no override")
-        evidence = Path("build/shorebird/wallet-ota-audit.json")
+        evidence = Path(f"build/shorebird/wallet-ota-audit-{version}.json")
         evidence.parent.mkdir(parents=True, exist_ok=True)
         evidence.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
         print("Wallet OTA compatibility audit: " + json.dumps(result), flush=True)
-        if not args.audit_only:
+        if not audit_only:
             subprocess.run(command + ["--allow-asset-diffs"], env=env, check=True)
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--release-version", required=True,
+                        help="One version or a comma separated list of installed versions")
+    parser.add_argument("--track", default="stable", choices=("stable", "staging"))
+    parser.add_argument("--audit-only", action="store_true")
+    args = parser.parse_args()
+    versions = args.release_version.split(",")
+    if len(versions) != len(set(versions)) or any(
+        not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+\+[0-9]+", v) for v in versions
+    ):
+        parser.error("Provide unique exact installed versions, for example 1.1.0+3")
+    for version in versions:
+        patch_release(version, args.track, args.audit_only)
 
 
 if __name__ == "__main__":
