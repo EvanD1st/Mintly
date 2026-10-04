@@ -191,6 +191,7 @@ async def approve(watch_id: str, req: RuleRequest, user=Depends(get_current_user
             await copying.pause_rule(db, prior)
             prior.status = 'revoked'
         request['approved_at'] = int(datetime.now(timezone.utc).timestamp())
+        request['after_block'] = head
         rule = CopyRule(id=key, watch_id=watch.id, user_id=user.id, grant_id=grant.id, chain_id=grant.chain_id,
             snapshot=request, context_hash=automatic.digest(request), status='registering', expires_at=expiry,
             resume_after_block=head, budget_wei=budget, reserved_wei=0, spent_wei=0)

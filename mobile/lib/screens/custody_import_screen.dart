@@ -230,6 +230,10 @@ class _CustodyImportScreenState extends ConsumerState<CustodyImportScreen>
                 if (networks.length > 1)
                   DropdownButtonFormField<int>(
                     initialValue: _chainId ?? snapshot.data!['chain_id'] as int,
+                    icon: const RotatedBox(
+                      quarterTurns: 1,
+                      child: Icon(MintlyIcons.chevronRight),
+                    ),
                     decoration: const InputDecoration(
                       labelText: 'Network for this wallet policy',
                     ),

@@ -114,6 +114,39 @@ async def test_monitoring_never_spends_before_approval_and_recent_copy_requires_
     assert (await lab.client.get('/api/copy-mints/activity')).json()['events'][0]['status'] == 'prepared'
 
 
+async def test_signer_rejects_historical_auto_copy_even_if_database_cursor_is_changed(copying):
+    c = copying; lab = c['lab']
+    await c['mint'](); await c['scan']()
+    await c['approve']()
+    async with lab.factory() as db:
+        rule = await db.get(CopyRule, c['request']['request_id'])
+        rule.resume_after_block = -1
+        await db.commit()
+    await c['scan']()
+    event = (await lab.client.get('/api/copy-mints/activity')).json()['events'][0]
+    assert event['task_id'] is not None
+    response = await lab.signer_client.post(f'/tasks/{event["task_id"]}/prepare')
+    assert response.status_code == 409, response.text
+    journal = CustodyVault().journal()
+    assert journal.execute('SELECT COUNT(*) FROM signed').fetchone()[0] == 0
+    journal.close()
+
+
+async def test_failed_network_discovery_preserves_other_network_monitoring(copying, monkeypatch):
+    from unittest.mock import AsyncMock
+    c = copying; lab = c['lab']
+    async with lab.factory() as db:
+        watch = await db.get(CopyWatch, c['watch_id'])
+        with monkeypatch.context() as patch:
+            patch.setattr(automatic, 'provider_for', AsyncMock(side_effect=ValueError('RPC unavailable')))
+            await copy_mints.scan_watch(db, watch, 1)
+            await db.commit()
+        assert watch.cursors['1']['status'] == 'unavailable'
+    await c['mint'](); await c['scan']()
+    activity = (await lab.client.get('/api/copy-mints/activity')).json()
+    assert len(activity['events']) == 1 and activity['events'][0]['task_id'] is None
+
+
 @pytest.mark.parametrize('signed', [False, True])
 async def test_pause_releases_only_unsigned_copies_and_remove_retains_records(copying, signed):
     c = copying; lab = c['lab']

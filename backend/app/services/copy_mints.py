@@ -59,6 +59,7 @@ async def verify_source(web3, observation):
     if (receipt.status != 1 or tx['from'].lower() != source
             or hex_value(receipt.blockHash) != observation['block_hash'] or block.hash != receipt.blockHash
             or receipt.blockNumber != observation['block_number']
+            or block.timestamp != observation['timestamp']
             or await web3.eth.block_number - receipt.blockNumber + 1 < 2):
         raise ValueError('Source mint is not canonical or does not belong to the followed wallet')
     data = tx.get('input', tx.get('data'))
@@ -209,10 +210,11 @@ async def arm_event(db, event, rule, web3):
 
 
 async def scan_watch(db, watch, chain):
-    web3 = await automatic.provider_for(chain)
+    web3 = None
     cursors = dict(watch.cursors)
     previous = dict(cursors.get(str(chain), {}))
     try:
+        web3 = await automatic.provider_for(chain)
         head = max(0, await web3.eth.block_number - 12)
         last = previous.get('block', max(0, head - 2000))
         if previous.get('hash') and hex_value((await web3.eth.get_block(last)).hash) != previous['hash']:
@@ -281,4 +283,5 @@ async def scan_watch(db, watch, chain):
         cursors[str(chain)] = previous
         watch.cursors = cursors
         watch.updated_at = datetime.now(timezone.utc)
-        await web3.provider.disconnect()
+        if web3 is not None:
+            await web3.provider.disconnect()

@@ -37,6 +37,15 @@ class _GlyphPainter extends CustomPainter {
       ..strokeWidth = 1.8
       ..strokeCap = StrokeCap.round;
     switch (kind) {
+      case 'down':
+        canvas.drawPath(
+          Path()
+            ..moveTo(6, 9)
+            ..lineTo(12, 15)
+            ..lineTo(18, 9),
+          p,
+        );
+        break;
       case 'pause':
         canvas.drawLine(const Offset(8, 5), const Offset(8, 19), p);
         canvas.drawLine(const Offset(16, 5), const Offset(16, 19), p);
@@ -398,6 +407,7 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
                   children: networks
                       .map(
                         (n) => FilterChip(
+                          deleteIcon: const SizedBox.shrink(),
                           label: Text('${n['name']}'),
                           selected: chains.contains(n['chain_id']),
                           onSelected: saving
@@ -947,6 +957,7 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
           ],
         ),
         DropdownButtonFormField<String>(
+          icon: const CopyGlyph('down'),
           key: ValueKey(_filter),
           initialValue: _filter,
           isExpanded: true,
@@ -1317,6 +1328,7 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
                   ),
                 if (policies.isNotEmpty) ...[
                   DropdownButtonFormField<String>(
+                    icon: const CopyGlyph('down'),
                     decoration: const InputDecoration(
                       labelText: 'Receiving wallet / network',
                     ),
@@ -1468,6 +1480,7 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
                           trailing: Text('Always on'),
                         ),
                         DropdownButtonFormField<int>(
+                          icon: const CopyGlyph('down'),
                           initialValue: _days,
                           decoration: const InputDecoration(
                             labelText: 'Copy permission duration',

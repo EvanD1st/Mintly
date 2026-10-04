@@ -107,6 +107,7 @@ async def prepare_task(db, task_id, vault=None):
                         or r['grant_id'] != grant.id or r['user_id'] != grant.user_id
                         or r['chain_id'] != s['chain_id'] or r['wallet_id'] != wallet.id
                         or r['source_address'].lower() != source['source_address'].lower()
+                        or source['block_number'] <= r['after_block']
                         or r['quantity'] != s['quantity'] or s['expiry'] > r['expiry']
                         or s['price_cap_wei'] != r['price_cap_wei'] or s['fee_cap_wei'] != r['fee_cap_wei']
                         or s['total_cap_wei'] != r['total_cap_wei'] or (r['free_only'] and s['price_wei'] != 0)):
