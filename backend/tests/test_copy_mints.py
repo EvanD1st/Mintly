@@ -147,6 +147,23 @@ async def test_failed_network_discovery_preserves_other_network_monitoring(copyi
     assert len(activity['events']) == 1 and activity['events'][0]['task_id'] is None
 
 
+async def test_pruned_source_history_does_not_block_later_verified_mints(copying, monkeypatch):
+    from unittest.mock import AsyncMock
+    from web3.exceptions import Web3RPCError
+    c = copying; lab = c['lab']
+    await c['approve'](); await c['mint']()
+    with monkeypatch.context() as patch:
+        patch.setattr(copy_mints, 'observe', AsyncMock(side_effect=Web3RPCError('historical state abc is not available')))
+        await c['scan']()
+    async with lab.factory() as db:
+        watch = await db.get(CopyWatch, c['watch_id'])
+        assert watch.cursors['31337']['status'] == 'monitoring'
+        assert watch.cursors['31337']['history_note']
+    await c['mint'](1); await c['scan']()
+    activity = (await lab.client.get('/api/copy-mints/activity')).json()
+    assert len(activity['events']) == 1 and activity['events'][0]['task_id'] is not None
+
+
 @pytest.mark.parametrize('signed', [False, True])
 async def test_pause_releases_only_unsigned_copies_and_remove_retains_records(copying, signed):
     c = copying; lab = c['lab']

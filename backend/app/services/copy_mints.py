@@ -6,6 +6,7 @@ from eth_abi import decode, encode
 from eth_utils import keccak, to_checksum_address
 from fastapi import HTTPException
 from sqlalchemy import select
+from web3.exceptions import Web3RPCError
 from app.config import settings
 from app.models import CopyWatch, CopyRule, CopyEvent, MintTask, MintAuthorization, Drop, MintStage, ActivityEvent
 from app.services import automatic
@@ -243,6 +244,12 @@ async def scan_watch(db, watch, chain):
                 except (ValueError, KeyError):
                     continue
                 except Exception as error:
+                    message = str(error).lower()
+                    if isinstance(error, Web3RPCError) and (
+                            ('historical state' in message and 'not available' in message)
+                            or 'missing trie node' in message):
+                        previous['history_note'] = 'Older source stages are outside this RPC’s retained state. Only verified source mints are counted or copied.'
+                        continue  # Pruned history must not block monitoring newer, verifiable mints.
                     from app.services.opensea import OpenSeaUnavailable
                     if isinstance(error, OpenSeaUnavailable):
                         continue
@@ -252,6 +259,7 @@ async def scan_watch(db, watch, chain):
             previous = {'block': end, 'hash': hex_value((await web3.eth.get_block(end)).hash),
                 'since_block': previous.get('since_block', last + 1),
                 'since': previous.get('since', datetime.now(timezone.utc).isoformat()),
+                'history_note': previous.get('history_note'),
                 'checked_at': datetime.now(timezone.utc).isoformat(), 'status': 'catching_up' if end < head else 'monitoring'}
         else:
             previous.update(checked_at=datetime.now(timezone.utc).isoformat(), status='monitoring')
