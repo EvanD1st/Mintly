@@ -83,6 +83,10 @@ are restored after each build, including failures. That variant is analyzed and
 tested before Shorebird checks the native code. No native-difference override is
 used. The workflow tests both icon modes. Native plugin changes,
 new images, and missing installed glyphs still require an installer update.
+For `1.0.0+1`, the builder also copies that release's five exact installed
+launcher PNGs from the downloaded AAB before rebuilding and auditing. The wallet
+patch preserves its original launcher icon. The CI source PNGs are restored
+afterwards, including on failures.
 
 Devices check for a patch at launch. Open Mintly with internet access, let the
 download finish, then fully close and reopen it to apply the update. Publishing

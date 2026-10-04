@@ -122,6 +122,30 @@ class AssetGuardTests(unittest.TestCase):
             finally:
                 os.chdir(original_cwd)
 
+    def test_first_installer_keeps_its_icons_and_restores_checkout_after_failure(self):
+        original_cwd = Path.cwd()
+        with tempfile.TemporaryDirectory() as scratch:
+            os.chdir(scratch)
+            try:
+                densities = ("mdpi", "hdpi", "xhdpi", "xxhdpi", "xxxhdpi")
+                for density in densities:
+                    path = Path(f"android/app/src/main/res/mipmap-{density}/ic_launcher.png")
+                    path.parent.mkdir(parents=True)
+                    path.write_bytes(b"current icon")
+                with zipfile.ZipFile("release.aab", "w") as archive:
+                    for density in densities:
+                        archive.writestr(f"base/res/mipmap-{density}-v4/ic_launcher.png", b"installed icon")
+                with self.assertRaisesRegex(ValueError, "build failed"):
+                    with ota.installed_launcher_icons("1.0.0+1", "release.aab") as preserved:
+                        self.assertTrue(preserved)
+                        for density in densities:
+                            self.assertEqual(Path(f"android/app/src/main/res/mipmap-{density}/ic_launcher.png").read_bytes(), b"installed icon")
+                        raise ValueError("build failed")
+                for density in densities:
+                    self.assertEqual(Path(f"android/app/src/main/res/mipmap-{density}/ic_launcher.png").read_bytes(), b"current icon")
+            finally:
+                os.chdir(original_cwd)
+
 
 if __name__ == "__main__":
     unittest.main()

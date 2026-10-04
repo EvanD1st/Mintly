@@ -104,6 +104,27 @@ def installed_plugin_graph(legacy):
         subprocess.run(["flutter", "pub", "get", "--offline"], check=True)
 
 
+@contextmanager
+def installed_launcher_icons(version, release_archive):
+    if version != "1.0.0+1":
+        yield False
+        return
+    # The first installer predates Mintly's launcher icon. Keep its five exact
+    # installed PNGs in this build; a wallet OTA does not need a launcher change.
+    densities = ("mdpi", "hdpi", "xhdpi", "xxhdpi", "xxxhdpi")
+    paths = {density: Path(f"android/app/src/main/res/mipmap-{density}/ic_launcher.png")
+             for density in densities}
+    original = {path: path.read_bytes() for path in paths.values()}
+    try:
+        with zipfile.ZipFile(release_archive) as archive:
+            for density, path in paths.items():
+                path.write_bytes(archive.read(f"base/res/mipmap-{density}-v4/ic_launcher.png"))
+        yield True
+    finally:
+        for path, data in original.items():
+            path.write_bytes(data)
+
+
 def patch_release(version, track, audit_only):
     command = ["shorebird", "--json", "patch", "android", "--release-version",
                version, "--track", track]
@@ -124,16 +145,20 @@ def patch_release(version, track, audit_only):
         if len(candidates) != 1:
             raise ValueError(f"Expected one release AAB, found {len(candidates)}")
         built = Path("build/app/outputs/bundle/release/app-release.aab")
-        result = audit(candidates[0], built)
-        result.update(release_version=version, track=track, legacy_icons=legacy_icons,
-                      browser_links="copy and paste" if legacy_icons else "native launcher",
-                      native_checks="Shorebird enabled; no override")
-        evidence = Path(f"build/shorebird/wallet-ota-audit-{version}.json")
-        evidence.parent.mkdir(parents=True, exist_ok=True)
-        evidence.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
-        print("Wallet OTA compatibility audit: " + json.dumps(result), flush=True)
-        if not audit_only:
-            subprocess.run(command + ["--allow-asset-diffs"], env=env, check=True)
+        with installed_launcher_icons(version, candidates[0]) as preserved_launcher:
+            if preserved_launcher:
+                subprocess.run(command + ["--dry-run", "--allow-asset-diffs"], env=env, check=True)
+            result = audit(candidates[0], built)
+            result.update(release_version=version, track=track, legacy_icons=legacy_icons,
+                          browser_links="copy and paste" if legacy_icons else "native launcher",
+                          preserved_installed_launcher=preserved_launcher,
+                          native_checks="Shorebird enabled; no override")
+            evidence = Path(f"build/shorebird/wallet-ota-audit-{version}.json")
+            evidence.parent.mkdir(parents=True, exist_ok=True)
+            evidence.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+            print("Wallet OTA compatibility audit: " + json.dumps(result), flush=True)
+            if not audit_only:
+                subprocess.run(command + ["--allow-asset-diffs"], env=env, check=True)
 
 
 def main():
