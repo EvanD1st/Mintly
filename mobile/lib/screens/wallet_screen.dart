@@ -1,5 +1,6 @@
 import 'history_screen.dart';
 import '../theme/compatible_icons.dart';
+import 'copy_mints_screen.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -220,6 +221,9 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         Text('Automatic minting: ${policy['status']}'),
+                        Text(
+                          'Network: ${{1: 'Ethereum', 8453: 'Base', 4663: 'Robinhood'}[policy['chain_id']] ?? 'Chain ${policy['chain_id']}'}',
+                        ),
                         const SizedBox(height: 8),
                         Text(
                           'Remaining budget: ${_eth(policy['remaining_wei'])} ETH',
@@ -234,7 +238,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
                         Text(
                           (policy['scope'] as Map?)?['collection_scope'] ==
                                   'reviewed_mints'
-                              ? 'Collections are selected from the mints you review.'
+                              ? 'Collections are selected from your reviewed mints or approved copy rules.'
                               : 'This setup is limited to the collection chosen during import.',
                         ),
                         if (policy['status'] == 'enabled')
@@ -271,6 +275,11 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
               const SizedBox(height: 20),
               const Text(
                 'Mintly stores this account’s encrypted key after import. Disabling stops future signing; it cannot erase the key or cancel signed transactions.',
+              ),
+              const SizedBox(height: 16),
+              OutlinedButton(
+                onPressed: () => _import(wallet),
+                child: const Text('Add or renew a network policy'),
               ),
               const SizedBox(height: 20),
               OutlinedButton.icon(
@@ -310,6 +319,19 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
             onTap: () => Navigator.push(
               context,
               MaterialPageRoute(builder: (_) => const HistoryScreen()),
+            ),
+          ),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const CopyGlyph('copy'),
+            title: const Text('Copy mints'),
+            subtitle: const Text(
+              'Follow wallets. Copy public mints on your terms.',
+            ),
+            trailing: const Icon(MintlyIcons.chevronRight),
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const CopyMintsScreen()),
             ),
           ),
           for (final daily in [true, false])

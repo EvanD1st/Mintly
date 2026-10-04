@@ -12,11 +12,11 @@ from eth_utils import to_checksum_address
 
 from app.api.deps import get_db
 from app.config import settings
-from app.models import MintTask, MintAuthorization, AutomaticGrant, AutomaticNonce, Wallet, User
+from app.models import MintTask, MintAuthorization, AutomaticGrant, AutomaticNonce, Wallet, User, CopyRule, CopyWatch
 from app.services import automatic
 from app.services.custody import CustodyVault, private_read
 from app.services.custody_accounts import verify_account
-from app.services.automatic_fees import quote_gas
+from app.services.automatic_fees import quote_gas, maximum_fee, receipt_cost
 from app.services.mint_plans import aware
 from app.services.opensea import OpenSeaUnavailable
 
@@ -32,7 +32,7 @@ def authenticate(authorization: str | None = Header(default=None)):
         raise HTTPException(401, 'Signer authentication required.') from None
 
 
-async def final_receipt(web3, tx_hash):
+async def final_receipt(web3, tx_hash, chain_id=None):
     from web3.exceptions import TransactionNotFound
     try:
         receipt = await web3.eth.get_transaction_receipt(tx_hash)
@@ -41,7 +41,7 @@ async def final_receipt(web3, tx_hash):
     block = await web3.eth.get_block(receipt.blockNumber)
     if block.hash != receipt.blockHash or await web3.eth.block_number - receipt.blockNumber + 1 < max(2, settings.AUTOMATIC_CONFIRMATIONS):
         return None
-    if settings.AUTOMATIC_CHAIN_ID in (11155111, 4663):
+    if (settings.AUTOMATIC_CHAIN_ID if chain_id is None else chain_id) in (1, 8453, 11155111, 4663):
         finalized = await web3.eth.get_block('finalized')
         if finalized.number < receipt.blockNumber:
             return None
@@ -83,9 +83,39 @@ async def prepare_task(db, task_id, vault=None):
             or not 0 < s['fee_cap_wei'] <= s['total_cap_wei']
             or not 1 <= s['quantity'] <= 100 or not 0 <= s['price_wei'] <= s['price_cap_wei']):
         raise ValueError('Independent signer policy limits exceeded')
-    web3 = await automatic.provider()
+    web3 = await automatic.provider_for(grant.chain_id)
     journal = vault.journal()
     try:
+        copy_key = None
+        if s.get('copy_source'):
+            from app.services import copy_mints
+            copy_mints.enabled()
+            copy_key = copy_mints.stage_key(s)
+            source = s['copy_source']
+            if (task.copy_stage_key != copy_key or s['mint_kind'] != 'public'
+                    or source['chain_id'] != s['chain_id'] or source['contract'].lower() != s['contract'].lower()
+                    or any(source[k] != s[k] for k in ('price_wei','start','end'))):
+                raise ValueError('Copy source differs from the authorized public stage')
+            await copy_mints.verify_source(web3, source)
+            if task.copy_rule_id:
+                rule = await db.get(CopyRule, task.copy_rule_id)
+                pin = journal.execute('SELECT * FROM copy_rules WHERE id=?', (task.copy_rule_id,)).fetchone()
+                if not rule or rule.status != 'active' or not pin or pin['intent'] != rule.context_hash:
+                    raise ValueError('Copy approval is paused or not independently registered')
+                r = json.loads(pin['snapshot'])
+                if (automatic.digest(rule.snapshot) != pin['intent'] or s.get('copy_rule_id') != rule.id
+                        or r['grant_id'] != grant.id or r['user_id'] != grant.user_id
+                        or r['chain_id'] != s['chain_id'] or r['wallet_id'] != wallet.id
+                        or r['source_address'].lower() != source['source_address'].lower()
+                        or r['quantity'] != s['quantity'] or s['expiry'] > r['expiry']
+                        or s['price_cap_wei'] != r['price_cap_wei'] or s['fee_cap_wei'] != r['fee_cap_wei']
+                        or s['total_cap_wei'] != r['total_cap_wei'] or (r['free_only'] and s['price_wei'] != 0)):
+                    raise ValueError('Copy mint differs from the independently approved limits')
+            duplicate = journal.execute('SELECT task FROM copy_signed WHERE stage=?', (copy_key,)).fetchone()
+            if duplicate and duplicate['task'] != task.id:
+                raise ValueError('This public stage already has a signed copy for this wallet')
+        elif task.copy_rule_id or task.copy_stage_key:
+            raise ValueError('Copy task lacks a verified source')
         block = await web3.eth.get_block('latest')
         now = max(int(datetime.now(timezone.utc).timestamp()), block.timestamp)
         if now >= min(s['expiry'], policy['expires_at']):
@@ -105,16 +135,21 @@ async def prepare_task(db, task_id, vault=None):
                 hashes = [entry['hash']] + [row['hash'] for row in journal.execute(
                     'SELECT hash FROM recoveries WHERE task=?', (entry['task'],)).fetchall()]
                 for tx_hash in hashes:
-                    receipt = await final_receipt(web3, tx_hash)
+                    receipt = await final_receipt(web3, tx_hash, grant.chain_id)
                     if receipt:
                         tx = await web3.eth.get_transaction(tx_hash)
-                        actual = receipt.gasUsed * receipt.effectiveGasPrice + (tx.value if receipt.status == 1 else 0)
+                        actual = await receipt_cost(web3, receipt, grant.chain_id, tx.value)
                         journal.execute('UPDATE signed SET actual=? WHERE task=?', (actual, entry['task']))
                         break  # same account/nonce can settle only once
             journal.commit()
             charged = journal.execute('SELECT COALESCE(SUM(COALESCE(actual,liability)),0) FROM signed WHERE policy=?', (grant.id,)).fetchone()[0]
             if charged + s['total_cap_wei'] > policy['budget_wei']:
                 raise ValueError('Independent signer budget exhausted or reserved by uncertain submissions')
+            if task.copy_rule_id:
+                charged_copy = journal.execute('SELECT COALESCE(SUM(COALESCE(s.actual,s.liability)),0) FROM signed s '
+                    'JOIN copy_signed c ON c.task=s.task WHERE c.rule=?', (task.copy_rule_id,)).fetchone()[0]
+                if charged_copy + s['total_cap_wei'] > r['budget_wei']:
+                    raise ValueError('Independent copy budget exhausted or reserved')
             execution = s.get('execution')
             if execution:
                 await automatic.validate_mint(web3, s, {'to': execution['target'], 'value': execution['value'], 'data': execution['data']})
@@ -134,9 +169,10 @@ async def prepare_task(db, task_id, vault=None):
                 'value': int(execution['value']), 'chainId': s['chain_id'], 'nonce': nonce}
             gas, gas_price = await quote_gas(web3, tx, s['chain_id'])
             tx['gasPrice'] = gas_price
-            if gas * gas_price > s['fee_cap_wei'] or tx['value'] + gas * gas_price > s['total_cap_wei']:
+            fee = await maximum_fee(web3, tx, s['chain_id'], gas, gas_price)
+            if fee > s['fee_cap_wei'] or tx['value'] + fee > s['total_cap_wei']:
                 raise ValueError('Estimated gas or total debit exceeds task authorization')
-            if await web3.eth.get_balance(address, 'pending') < tx['value'] + gas * gas_price:
+            if await web3.eth.get_balance(address, 'pending') < tx['value'] + fee:
                 raise ValueError('Insufficient funds for mint value and gas')
             # Nitro checks affordability against eth_call's gas limit. Omitting it
             # uses a block-sized RPC default, rejecting otherwise funded wallets.
@@ -152,6 +188,8 @@ async def prepare_task(db, task_id, vault=None):
             raw, tx_hash = '0x' + bytes(signed.raw_transaction).hex(), '0x' + bytes(signed.hash).hex()
             journal.execute('INSERT INTO signed(task,policy,intent,address,chain,nonce,liability,raw,hash) VALUES(?,?,?,?,?,?,?,?,?)',
                 (task.id, grant.id, intent, address.lower(), s['chain_id'], nonce, s['total_cap_wei'], raw, tx_hash))
+            if copy_key:
+                journal.execute('INSERT INTO copy_signed(task,rule,stage) VALUES(?,?,?)', (task.id, task.copy_rule_id, copy_key))
             journal.commit()  # fsync BEFORE returning or persisting anything broadcastable to the worker
         reservation = await db.get(AutomaticNonce, task.id)
         if not reservation:
@@ -187,6 +225,46 @@ async def prepare(task_id: str, db=Depends(get_db)):
         raise HTTPException(503, 'Signer or RPC temporarily unavailable; no fresh-nonce retry is permitted.') from None
 
 
+@app.post('/copy-rules/{rule_id}/register', dependencies=[Depends(authenticate)])
+async def register_copy_rule(rule_id: str, db=Depends(get_db)):
+    from app.services import copy_mints
+    copy_mints.enabled()
+    rule = await db.get(CopyRule, rule_id)
+    if not rule or rule.status not in ('registering','active','paused'):
+        raise HTTPException(409, 'Copy approval is unavailable.')
+    grant = await automatic.grant_for(db, rule.grant_id, rule.user_id)
+    watch = await db.get(CopyWatch, rule.watch_id)
+    vault = CustodyVault()
+    policy = vault.policy(grant)
+    r = rule.snapshot
+    user = await db.get(User, rule.user_id)
+    if (not watch or watch.archived_at or watch.user_id != grant.user_id or not user or not user.is_active or user.deleted_at
+            or automatic.digest(r) != rule.context_hash or r['user_id'] != grant.user_id
+            or r['grant_id'] != grant.id or r['wallet_id'] != grant.wallet_id or r['account'].lower() != grant.account.lower()
+            or r['chain_id'] != grant.chain_id or r['source_address'].lower() != watch.address.lower()
+            or watch.address.lower() == grant.account.lower() or r['watch_id'] != watch.id
+            or r['expiry'] != int(aware(rule.expires_at).timestamp()) or r['expiry'] > policy['expires_at']
+            or r['expiry'] <= int(datetime.now(timezone.utc).timestamp())
+            or 'public' not in policy['mint_kinds'] or not 1 <= r['quantity'] <= 100
+            or not 0 <= r['price_cap_wei'] or not 0 < r['fee_cap_wei']
+            or r['total_cap_wei'] != r['price_cap_wei'] * r['quantity'] + r['fee_cap_wei']
+            or not r['total_cap_wei'] <= min(r['budget_wei'], policy['max_task_wei'])
+            or r['budget_wei'] != rule.budget_wei or r['budget_wei'] > policy['budget_wei']
+            or (r['free_only'] and r['price_cap_wei'] != 0)):
+        raise HTTPException(409, 'Copy limits differ from the wallet policy or approval.')
+    journal = vault.journal()
+    try:
+        prior = journal.execute('SELECT intent FROM copy_rules WHERE id=?', (rule.id,)).fetchone()
+        if prior and prior['intent'] != rule.context_hash:
+            raise HTTPException(409, 'A pinned copy approval cannot be changed.')
+        journal.execute('INSERT OR IGNORE INTO copy_rules(id,intent,snapshot) VALUES(?,?,?)',
+            (rule.id, rule.context_hash, json.dumps(r, sort_keys=True)))
+        journal.commit()
+    finally:
+        journal.close()
+    return {'status': 'registered', 'rule_id': rule.id}
+
+
 @app.get('/readyz', dependencies=[Depends(authenticate)])
 async def ready():
     automatic.enabled()
@@ -208,7 +286,7 @@ async def policy_ready(grant_id: str, db=Depends(get_db)):
             raise ValueError()
         vault = CustodyVault()
         policy = vault.policy(grant)
-        web3 = await automatic.provider()
+        web3 = await automatic.provider_for(grant.chain_id)
         try:
             await verify_account(web3, policy)
         finally:

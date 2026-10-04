@@ -32,30 +32,45 @@ def digest(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
 
 
-def enabled():
+def rpc_for(chain_id):
+    if chain_id == settings.AUTOMATIC_CHAIN_ID:
+        return settings.AUTOMATIC_RPC
+    return {1: settings.RPC_ETHEREUM, 8453: settings.RPC_BASE, 4663: settings.RPC_ROBINHOOD,
+            11155111: settings.RPC_SEPOLIA}.get(chain_id, '')
+
+
+def enabled(chain_id=None):
+    chain_id = settings.AUTOMATIC_CHAIN_ID if chain_id is None else chain_id
     if not settings.ENABLE_CUSTODIAL_AUTOMATIC:
         raise HTTPException(409, 'Automatic custody is not enabled. A linked MetaMask address alone cannot sign automatically.')
-    if settings.AUTOMATIC_CHAIN_ID not in (31337, 11155111) and not (
-            settings.AUTOMATIC_CHAIN_ID == 4663 and settings.ENABLE_ROBINHOOD_AUTOMATIC):
-        raise HTTPException(409, 'Chain is unsupported or Robinhood mainnet opt-in is disabled.')
-    parsed = urlparse(settings.AUTOMATIC_RPC)
-    if settings.AUTOMATIC_CHAIN_ID == 31337:
+    permitted = {4663: settings.ENABLE_ROBINHOOD_AUTOMATIC, 1: settings.ENABLE_ETHEREUM_AUTOMATIC,
+                 8453: settings.ENABLE_BASE_AUTOMATIC}
+    if chain_id not in (31337, 11155111) and not permitted.get(chain_id, False):
+        raise HTTPException(409, 'Automatic execution is disabled for this network.')
+    parsed = urlparse(rpc_for(chain_id))
+    if chain_id == 31337:
         if parsed.hostname not in ('127.0.0.1', 'localhost', 'evm') or parsed.scheme != 'http':
             raise HTTPException(409, 'Local automatic execution requires an isolated local RPC.')
     elif parsed.scheme != 'https':
         raise HTTPException(409, 'Remote automatic execution requires HTTPS RPC.')
 
 
-async def provider():
-    enabled()
-    web3 = AsyncWeb3(AsyncWeb3.AsyncHTTPProvider(settings.AUTOMATIC_RPC, request_kwargs={'timeout': 8}))
+async def provider(chain_id=None):
+    chain_id = settings.AUTOMATIC_CHAIN_ID if chain_id is None else chain_id
+    enabled(chain_id)
+    web3 = AsyncWeb3(AsyncWeb3.AsyncHTTPProvider(rpc_for(chain_id), request_kwargs={'timeout': 8}))
     try:
-        if await web3.eth.chain_id != settings.AUTOMATIC_CHAIN_ID:
+        if await web3.eth.chain_id != chain_id:
             raise ValueError('RPC chain mismatch')
         return web3
     except Exception:
         await web3.provider.disconnect()
         raise
+
+
+async def provider_for(chain_id):
+    # Preserve the default provider boundary used by local integration fixtures.
+    return await provider() if chain_id == settings.AUTOMATIC_CHAIN_ID else await provider(chain_id)
 
 
 async def signer_ready(grant_id):
@@ -97,8 +112,9 @@ async def grant_for(db, grant_id, user_id):
     ).execution_options(populate_existing=True))).scalar_one_or_none()
     if grant is None:
         raise HTTPException(404, 'Automatic policy not found.')
-    if grant.adapter != MODE or grant.chain_id != settings.AUTOMATIC_CHAIN_ID:
+    if grant.adapter != MODE:
         raise HTTPException(409, 'Unsupported automatic policy adapter or chain.')
+    enabled(grant.chain_id)
     if grant.status != 'enabled' or aware(grant.expires_at) <= datetime.now(timezone.utc):
         raise HTTPException(409, 'Automatic policy is disabled or expired. Renew it in the signer before arming.')
     return grant
@@ -141,7 +157,7 @@ async def make_snapshot(db, req, user_id):
         raise HTTPException(409, 'Mint price, gas budget or total ceiling is insufficient.')
     if total > int(grant.scope['max_task_wei']) or total > grant.budget_wei - grant.spent_wei - grant.reserved_wei:
         raise HTTPException(409, 'Automatic policy budget is insufficient, including pending reservations.')
-    return grant, {
+    snapshot = {
         'plan_id': req.plan_id, 'user_id': user_id, 'wallet_id': wallet.id, 'account': to_checksum_address(wallet.address),
         'chain_id': drop.chain_id, 'chain': drop.chain, 'contract': to_checksum_address(drop.contract_address),
         'drop_id': drop.id, 'drop_name': drop.name, 'stage_id': stage.id, 'stage_name': stage.stage_name,
@@ -152,6 +168,20 @@ async def make_snapshot(db, req, user_id):
         'conditional_eligibility': req.conditional_eligibility,
         'onchain_stage_index': req.onchain_stage_index,
     }
+    if getattr(req, 'copy_event_id', None):
+        from app.models import CopyEvent
+        from app.services.copy_mints import enabled as copy_enabled
+        copy_enabled()
+        event = await db.get(CopyEvent, req.copy_event_id)
+        if not event or event.user_id != user_id or event.task_id:
+            raise HTTPException(409, 'Copy observation is unavailable or already has a task.')
+        o = event.observation
+        if (snapshot['mint_kind'] != 'public' or o['chain_id'] != snapshot['chain_id']
+                or o['contract'].lower() != snapshot['contract'].lower()
+                or any(o[k] != snapshot[k] for k in ('price_wei','start','end'))):
+            raise HTTPException(409, 'Copy review differs from the observed public stage.')
+        snapshot['copy_source'] = o
+    return grant, snapshot
 
 
 def allows_collection(scope, contract):
@@ -225,7 +255,25 @@ async def release_reservation(db, task, actual=0):
     grant = await db.get(AutomaticGrant, auth.grant_id)
     grant.reserved_wei -= auth.total_spend_cap_wei
     grant.spent_wei += actual
-    if grant.reserved_wei < 0 or grant.spent_wei > grant.budget_wei:
+    if task.copy_rule_id:
+        from app.models import CopyRule
+        rule = await db.get(CopyRule, task.copy_rule_id)
+        rule.reserved_wei -= auth.total_spend_cap_wei
+        rule.spent_wei += actual
+        if rule.reserved_wei < 0:
+            raise ValueError('Copy budget reservation invariant violated')
+        if rule.spent_wei > rule.budget_wei or actual > auth.total_spend_cap_wei:
+            rule.status = 'paused'
+    if grant.chain_id == 8453 and (grant.spent_wei > grant.budget_wei or actual > auth.total_spend_cap_wei):
+        # Inclusion-time parent fees can change after a bounded submission.
+        # Preserve the real charge and stop future signing rather than lose a receipt.
+        grant.status = 'disabled'
+        from app.models import CopyRule
+        await db.execute(update(CopyRule).where(CopyRule.grant_id == grant.id,
+            CopyRule.status.in_(['active','registering'])).values(status='paused'))
+    elif grant.spent_wei > grant.budget_wei:
+        raise ValueError('Budget accounting invariant violated')
+    if grant.reserved_wei < 0:
         raise ValueError('Budget accounting invariant violated')
 
 

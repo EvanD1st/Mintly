@@ -191,8 +191,7 @@ async def automatic_context(plan_id: str, user: User = Depends(get_current_user)
             kind = decode_mint(transaction, plan.contract_address, wallet.address, plan.quantity)['kind']
         if kind is None:
             raise HTTPException(409, 'This stage type is not supported for automatic minting.')
-        if plan.chain_id != automatic.settings.AUTOMATIC_CHAIN_ID:
-            raise HTTPException(409, 'Automatic minting is not enabled for this network.')
+        automatic.enabled(plan.chain_id)
         drop_id = automatic.digest(['plan', plan.id, plan.chain_id, plan.contract_address.lower(),
                                     plan.collection_name, jsonable_encoder(selected)])
         stage_id = automatic.digest(['stage', drop_id])

@@ -94,5 +94,7 @@ class CustodyVault:
         conn.execute('''CREATE TABLE IF NOT EXISTS recoveries (
             id TEXT PRIMARY KEY, task TEXT NOT NULL UNIQUE, intent TEXT NOT NULL,
             nonce INTEGER NOT NULL, raw TEXT NOT NULL, hash TEXT NOT NULL)''')
+        conn.execute('CREATE TABLE IF NOT EXISTS copy_rules (id TEXT PRIMARY KEY, intent TEXT NOT NULL, snapshot TEXT NOT NULL)')
+        conn.execute('CREATE TABLE IF NOT EXISTS copy_signed (task TEXT PRIMARY KEY, rule TEXT, stage TEXT NOT NULL UNIQUE)')
         conn.commit()
         return conn

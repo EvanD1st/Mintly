@@ -85,7 +85,7 @@ async def recover_task(db, task_id, owner_id, expires_at, reference, vault=None)
         raise ValueError('Recovery is outside independently provisioned policy')
     if int(aware(recovery.expires_at).timestamp()) > policy['expires_at']:
         raise ValueError('Recovery outlives signer policy')
-    web3 = await automatic.provider()
+    web3 = await automatic.provider_for(s['chain_id'])
     journal = vault.journal()
     try:
         from web3.exceptions import TransactionNotFound
@@ -135,9 +135,11 @@ async def recover_task(db, task_id, owner_id, expires_at, reference, vault=None)
                   'value': original.value, 'chainId': s['chain_id'], 'nonce': original.nonce}
             gas, price = await quote_gas(web3, tx, s['chain_id'])
             price = max(price, (original.gasPrice * 1125 + 999) // 1000)
-            if gas * price > s['fee_cap_wei'] or original.value + gas * price > s['total_cap_wei']:
+            from app.services.automatic_fees import maximum_fee
+            fee = await maximum_fee(web3, tx, s['chain_id'], gas, price)
+            if fee > s['fee_cap_wei'] or original.value + fee > s['total_cap_wei']:
                 raise ValueError('Recovery fee exceeds the original owner-approved debit ceiling')
-            if await web3.eth.get_balance(s['account'], 'pending') < original.value + gas * price:
+            if await web3.eth.get_balance(s['account'], 'pending') < original.value + fee:
                 raise ValueError('Insufficient funds for bounded recovery')
             tx.update(gas=gas, gasPrice=price)
             await web3.eth.call(tx, 'pending')

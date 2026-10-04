@@ -150,6 +150,46 @@ class ApiService extends ChangeNotifier {
 
   Future<void> disableAutomaticPolicy(String id) async { await _post('/automatic/policies/$id/disable', {}); }
 
+  Future<Map<String, dynamic>> fetchCopyMints() async =>
+      (await _get('/copy-mints')) as Map<String, dynamic>;
+  Future<Map<String, dynamic>> fetchCopyActivity({
+    String? watchId,
+    int offset = 0,
+  }) async =>
+      (await _get(
+            '/copy-mints/activity?offset=$offset${watchId == null ? '' : '&watch_id=${Uri.encodeComponent(watchId)}'}',
+          ))
+          as Map<String, dynamic>;
+  Future<void> followCopyWallet(Map<String, dynamic> request) async {
+    await _post('/copy-mints/watches', request);
+  }
+
+  Future<void> removeCopyWallet(String id) async {
+    await _delete('/copy-mints/watches/$id');
+  }
+
+  Future<void> pauseCopying(bool paused, {String? watchId}) async {
+    await _post(
+      '/copy-mints${watchId == null ? '' : '/watches/$watchId'}/pause',
+      {'paused': paused},
+      timeout: const Duration(seconds: 60),
+    );
+  }
+
+  Future<Map<String, dynamic>> approveCopyRule(
+    String watchId,
+    Map<String, dynamic> request,
+  ) async =>
+      (await _post(
+            '/copy-mints/watches/$watchId/rules',
+            request,
+            timeout: const Duration(seconds: 60),
+          ))
+          as Map<String, dynamic>;
+  Future<Map<String, dynamic>> copyMintContext(String eventId) async =>
+      (await _get('/copy-mints/events/$eventId/context'))
+          as Map<String, dynamic>;
+
   Future<Map<String, dynamic>> custodyImportConfig() async =>
     (await _get('/automatic/import/config')) as Map<String, dynamic>;
 

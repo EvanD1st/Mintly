@@ -68,6 +68,9 @@ if [[ -f "$APP_DIR/shared/custody.env" ]]; then
     "${COMPOSE[@]}" up -d --wait --wait-timeout 180 automatic-signer custody-import
     if grep -qx 'CUSTODY_AUTOMATIC_WORKER=true' "$APP_DIR/shared/custody.env"; then
         "${COMPOSE[@]}" up -d --wait --wait-timeout 180 automatic-worker automatic-notifications
+        if grep -qx 'ENABLE_COPY_MINTS=true' "$APP_DIR/shared/custody.env"; then
+            "${COMPOSE[@]}" up -d --wait --wait-timeout 180 copy-worker
+        fi
     fi
 fi
 curl --fail --silent --show-error "http://127.0.0.1:$(sed -n 's/^MINTLY_PORT=//p' "$MINTLY_ENV_FILE")/healthz"

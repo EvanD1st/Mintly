@@ -96,6 +96,14 @@ class _HistoryState extends ConsumerState<HistoryScreen> {
               Text('${data['quantity']} NFTs · ${data['chain'] ?? ''}'),
             if (authorization?['contract'] != null)
               SelectableText('Collection: ${authorization!['contract']}'),
+            if (authorization?['copy_source'] != null) ...[
+              SelectableText(
+                'Copied from: ${authorization!['copy_source']['source_address']}',
+              ),
+              SelectableText(
+                'Source mint: ${authorization['copy_source']['source_hash']}',
+              ),
+            ],
             if (authorization?['price_cap_wei'] != null)
               Text(
                 'Price ceiling per NFT: ${_eth(authorization!['price_cap_wei'])} ETH',
@@ -120,6 +128,20 @@ class _HistoryState extends ConsumerState<HistoryScreen> {
               Text('Actual spend: ${_eth(data['actual_total_cost_wei'])} ETH'),
             if (data['wallet_address'] != null)
               SelectableText('Wallet: ${data['wallet_address']}'),
+            if (data['source_address'] != null)
+              SelectableText('Following: ${data['source_address']}'),
+            if (data['budget_wei'] != null)
+              Text('Copy budget: ${_eth(data['budget_wei'])} ETH'),
+            if (data['spent_wei'] != null)
+              Text('Copy spend: ${_eth(data['spent_wei'])} ETH'),
+            if (data['reserved_wei'] != null)
+              Text('Pending reservations: ${_eth(data['reserved_wei'])} ETH'),
+            if (authorization?['fee_cap_wei'] != null)
+              Text(
+                'Network fee ceiling: ${_eth(authorization!['fee_cap_wei'])} ETH',
+              ),
+            if (data['expires_at'] != null)
+              Text('Permission ends: ${_time(data['expires_at'])}'),
             if (data['contract_address'] != null)
               SelectableText('Collection: ${data['contract_address']}'),
             if (data['transaction_hash'] != null)
@@ -184,6 +206,7 @@ class _HistoryState extends ConsumerState<HistoryScreen> {
                 value: 'permissions',
                 child: Text('Wallet permissions'),
               ),
+              DropdownMenuItem(value: 'copies', child: Text('Copy approvals')),
             ],
             onChanged: (value) {
               if (value == null) return;

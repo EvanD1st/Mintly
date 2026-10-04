@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from app.api.deps import get_current_user, get_db
-from app.models import AutomaticGrant, MintTask, MintAuthorization
+from app.models import AutomaticGrant, MintTask, MintAuthorization, CopyRule
 from app.services import automatic
 
 router = APIRouter(prefix='/automatic', tags=['automatic'])
@@ -26,5 +26,8 @@ async def disable(grant_id: str, user=Depends(get_current_user), db=Depends(get_
     for task in tasks:
         task.status = 'disarmed'
         await automatic.release_reservation(db, task)
+    for rule in (await db.execute(select(CopyRule).where(CopyRule.grant_id == grant.id,
+            CopyRule.status.in_(['active','registering'])))).scalars().all():
+        rule.status = 'paused'
     await db.commit()
     return {'status': 'disabled', 'note': 'Future signing disabled in Mintly. Signed transactions remain in flight. This does not erase server custody or revoke a wallet grant.'}

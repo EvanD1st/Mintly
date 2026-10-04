@@ -35,6 +35,7 @@ class ImportRequest(BaseModel):
     model_config = ConfigDict(extra='forbid', hide_input_in_errors=True)
     request_id: uuid.UUID
     wallet_id: uuid.UUID
+    chain_id: int | None = None
     private_key: SecretStr
     password: SecretStr
     contract: str | None = Field(default=None, min_length=42, max_length=42)
@@ -80,7 +81,12 @@ async def config(user=Depends(get_current_user)):
     web3 = await automatic.provider()
     await web3.provider.disconnect()
     return {'chain_id':settings.AUTOMATIC_CHAIN_ID, 'max_expiry_days':30,
-        'automatic_collection_selection': True}
+        'automatic_collection_selection': True,
+        'networks': [{'chain_id': c, 'name': n} for c, n, flag in (
+            (1, 'Ethereum', settings.ENABLE_ETHEREUM_AUTOMATIC),
+            (8453, 'Base', settings.ENABLE_BASE_AUTOMATIC),
+            (4663, 'Robinhood', settings.ENABLE_ROBINHOOD_AUTOMATIC),
+            (settings.AUTOMATIC_CHAIN_ID, 'Test network', settings.AUTOMATIC_CHAIN_ID in (31337,11155111))) if flag]}
 
 
 @app.post('/api/automatic/import')
@@ -124,6 +130,8 @@ async def import_wallet(request: Request, user=Depends(get_current_user), db=Dep
 
 
 async def store_import(req, user, db):
+    chain_id = req.chain_id if req.chain_id is not None else settings.AUTOMATIC_CHAIN_ID
+    automatic.enabled(chain_id)
     await automatic.lock_execution(db)
     wallet = await db.get(Wallet, str(req.wallet_id))
     if not wallet or wallet.user_id != user.id or wallet.is_demo:
@@ -146,11 +154,11 @@ async def store_import(req, user, db):
         if old.user_id != user.id or old.wallet_id != wallet.id:
             raise ValueError('Request owner mismatch')
         policy = vault.policy(old)
-        if (policy['contracts'] != contracts or policy.get('collection_scope') != req.collection_scope or policy['budget_wei'] != budget or
+        if (policy['chain_id'] != chain_id or policy['contracts'] != contracts or policy.get('collection_scope') != req.collection_scope or policy['budget_wei'] != budget or
                 policy['max_task_wei'] != maximum or policy['expires_at'] != int(req.expires_at.timestamp())):
             raise ValueError('Request changed')
         return automatic.public_grant(old)  # Never renew/reactivate or reset a budget on retry.
-    web3 = await automatic.provider()
+    web3 = await automatic.provider_for(chain_id)
     try:
         code = await web3.eth.get_code(account.address, 'pending')
         adapter = await inspect_account(web3, account.address, 'eip7702-direct' if code else 'eoa')
@@ -159,7 +167,7 @@ async def store_import(req, user, db):
     finally:
         await web3.provider.disconnect()
     policy = dict(grant_id=grant_id,key_id=grant_id,user_id=user.id,wallet_id=wallet.id,
-        account=account.address,chain_id=settings.AUTOMATIC_CHAIN_ID,contracts=contracts,
+        account=account.address,chain_id=chain_id,contracts=contracts,
         mint_kinds=['public','allowlist','signed'],account_adapter=adapter,budget_wei=budget,
         max_task_wei=maximum,expires_at=int(req.expires_at.timestamp()))
     if req.collection_scope:
@@ -185,7 +193,7 @@ async def store_import(req, user, db):
     else:
         private_write(policy_path, json.dumps(policy, sort_keys=True))
     grant = AutomaticGrant(id=grant_id,user_id=user.id,wallet_id=wallet.id,
-        chain_id=settings.AUTOMATIC_CHAIN_ID,account=wallet.address,context_hash=automatic.digest(policy),
+        chain_id=chain_id,account=wallet.address,context_hash=automatic.digest(policy),
         expires_at=req.expires_at,scope={k:policy[k] for k in ('contracts','mint_kinds','max_task_wei','collection_scope') if k in policy},
         budget_wei=budget,reserved_wei=0,spent_wei=0,status='enabled')
     db.add(grant)

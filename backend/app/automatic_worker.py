@@ -19,6 +19,7 @@ from app.database import AsyncSessionLocal
 from app.models import MintTask, MintAuthorization, ActivityEvent, MintRecovery
 from app.services import automatic
 from app.services.automatic_signer import final_receipt
+from app.services.automatic_fees import receipt_cost, additional_fee
 from app.services.mint_plans import aware
 
 log = logging.getLogger('mintly.automatic')
@@ -76,22 +77,22 @@ async def step(session_factory=AsyncSessionLocal, sign=request_signature, *, now
                 if active_recovery:
                     candidates += [(recovery.replacement_hash, recovery.replacement_signed_tx_raw)]
             candidates = list(dict(candidates).items())
-            web3 = await automatic.provider()
+            auth = await db.get(MintAuthorization, task.authorization_id)
+            chain_id = auth.snapshot['chain_id']
+            web3 = await automatic.provider_for(chain_id)
             try:
                 receipt = None
                 for tx_hash, signed_raw in candidates:
-                    receipt = await final_receipt(web3, tx_hash)
+                    receipt = await final_receipt(web3, tx_hash, chain_id)
                     if receipt:
                         task.transaction_hash, task.signed_tx_raw = tx_hash, signed_raw
-                        task.explorer_url = explorer_url(tx_hash)
+                        task.explorer_url = explorer_url(tx_hash, chain_id)
                         if recovery:
                             recovery.status = ('confirmed' if receipt.status == 1 else 'reverted') if tx_hash == recovery.replacement_hash else 'superseded'
                         break
                 if receipt:
                     auth = await db.get(MintAuthorization, task.authorization_id)
-                    actual = receipt.gasUsed * receipt.effectiveGasPrice
-                    if receipt.status == 1:
-                        actual += auth.snapshot['price_wei'] * auth.quantity
+                    actual = await receipt_cost(web3, receipt, chain_id, auth.snapshot['price_wei'] * auth.quantity)
                     task.actual_gas_used, task.actual_effective_gas_price = receipt.gasUsed, receipt.effectiveGasPrice
                     task.actual_total_cost_wei = actual
                     task.block_number = receipt.blockNumber
@@ -134,11 +135,21 @@ async def step(session_factory=AsyncSessionLocal, sign=request_signature, *, now
                 raw = bytes.fromhex(task.signed_tx_raw.removeprefix('0x'))
                 if '0x' + keccak(raw).hex() != task.transaction_hash:
                     raise ValueError('Signed transaction integrity mismatch')
+                if chain_id == 8453:
+                    from eth_account._utils.legacy_transactions import Transaction
+                    decoded = Transaction.from_bytes(raw)
+                    fee = decoded.gas * decoded.gasPrice + await additional_fee(web3, chain_id, decoded.gas, len(raw))
+                    if fee > auth.max_fee_wei or decoded.value + fee > auth.total_spend_cap_wei:
+                        task.status = 'uncertain'
+                        task.failure_reason = 'Base parent or operator fees exceed the approved cap; saved transaction held without broadcasting.'
+                        task.next_attempt_at = now + timedelta(seconds=15)
+                        await db.commit()
+                        return True
                 task.status = 'uncertain'
                 task.broadcast_attempts += 1
                 task.submitted_at = task.submitted_at or now
                 task.failure_reason = 'Broadcast may be in flight; cancellation cannot undo a signed transaction.'
-                task.explorer_url = explorer_url(task.transaction_hash)
+                task.explorer_url = explorer_url(task.transaction_hash, chain_id)
                 if active_recovery:
                     recovery.status = 'uncertain'
                 await db.commit()
@@ -194,9 +205,10 @@ async def step(session_factory=AsyncSessionLocal, sign=request_signature, *, now
     return True
 
 
-def explorer_url(tx_hash):
+def explorer_url(tx_hash, chain_id=None):
     base = {11155111: 'https://sepolia.etherscan.io/tx/',
-            4663: 'https://robinhoodchain.blockscout.com/tx/'}.get(settings.AUTOMATIC_CHAIN_ID)
+            4663: 'https://robinhoodchain.blockscout.com/tx/', 1: 'https://etherscan.io/tx/',
+            8453: 'https://basescan.org/tx/'}.get(settings.AUTOMATIC_CHAIN_ID if chain_id is None else chain_id)
     return base + tx_hash if base else None
 
 

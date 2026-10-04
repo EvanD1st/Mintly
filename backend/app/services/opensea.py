@@ -231,6 +231,9 @@ async def estimate_network_fee(transaction: dict, wallet_address: str, chain: st
             return gas_units * gas_price
         gas_units = await web3.eth.estimate_gas(tx)
         gas_price = await web3.eth.gas_price
+        if CHAINS[chain][0] == 8453:
+            from app.services.automatic_fees import maximum_fee
+            return await maximum_fee(web3, tx, 8453, gas_units, gas_price)
         return int(gas_units) * int(gas_price)
     except Exception:
         return None

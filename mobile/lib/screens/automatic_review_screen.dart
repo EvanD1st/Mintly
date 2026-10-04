@@ -9,11 +9,13 @@ import '../state/app_state.dart';
 class AutomaticReviewScreen extends ConsumerStatefulWidget {
   final DropModel drop;
   final MintPlanModel? plan;
+  final String? copyEventId;
   final String initialMintKind;
   const AutomaticReviewScreen({
     super.key,
     required this.drop,
     this.plan,
+    this.copyEventId,
     this.initialMintKind = 'public',
   });
   @override
@@ -107,6 +109,7 @@ class _AutomaticReviewState extends ConsumerState<AutomaticReviewScreen> {
       final expiry = DateTime.parse(_expiry.text).toUtc();
       final request = <String, dynamic>{
         if (widget.plan != null) 'plan_id': widget.plan!.id,
+        if (widget.copyEventId != null) 'copy_event_id': widget.copyEventId,
         'wallet_id': _policy!['wallet_id'],
         'grant_id': _policy!['id'],
         'drop_id': widget.drop.id,

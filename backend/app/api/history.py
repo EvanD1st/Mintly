@@ -1,21 +1,24 @@
 """Complete account records, including archived plans and in-flight transactions."""
 from typing import Literal
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user, get_db
 from app.api.tasks import task_response
 from app.services.parser import format_wei_to_eth
-from app.models import ActivityEvent, MintPlanRecord, MintTask, Wallet, User, MintPermission, MintRecovery
+from app.models import ActivityEvent, MintPlanRecord, MintTask, Wallet, User, MintPermission, MintRecovery, CopyRule, CopyWatch
 
 router = APIRouter(prefix='/history', tags=['history'])
 
 
 @router.get('')
-async def history(section: Literal['plans', 'mints', 'activity', 'permissions'] = 'mints',
+async def history(section: Literal['plans', 'mints', 'activity', 'permissions', 'copies'] = 'mints',
                   offset: int = Query(0, ge=0), limit: int = Query(30, ge=1, le=100),
                   user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    if section == 'plans':
+    if section == 'copies':
+        stmt = select(CopyRule).where(CopyRule.user_id == user.id).order_by(CopyRule.created_at.desc(), CopyRule.id.desc())
+    elif section == 'plans':
         stmt = select(MintPlanRecord).where(MintPlanRecord.user_id == user.id).order_by(
             MintPlanRecord.recorded_at.desc(), MintPlanRecord.id.desc())
     elif section == 'mints':
@@ -30,7 +33,18 @@ async def history(section: Literal['plans', 'mints', 'activity', 'permissions'] 
     rows = (await db.execute(stmt.offset(offset).limit(limit + 1))).scalars().all()
     records = []
     for row in rows[:limit]:
-        if section == 'plans':
+        if section == 'copies':
+            from app.api.copy_mints import public_rule
+            from app.services.copy_mints import CHAINS
+            watch = await db.get(CopyWatch, row.watch_id)
+            details = public_rule(row)
+            details.update(label=f'Copy approval · {watch.label}', created_at=row.created_at,
+                wallet_address=row.snapshot['account'], source_address=row.snapshot['source_address'],
+                quantity=row.snapshot['quantity'], chain=CHAINS[row.chain_id],
+                authorized_at=datetime.fromtimestamp(row.snapshot['approved_at'], timezone.utc),
+                authorization=row.snapshot, snapshot=None)
+            records.append(details)
+        elif section == 'plans':
             records.append({'id': row.id, 'event': row.event, 'recorded_at': row.recorded_at, 'snapshot': row.snapshot})
         elif section == 'mints':
             # Queue serializer covers legacy tasks too, without exposing raw signed bytes or key material.

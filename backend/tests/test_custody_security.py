@@ -13,7 +13,9 @@ def test_mainnets_blocked_without_a_supported_explicit_opt_in(monkeypatch,chain)
     monkeypatch.setattr(settings,'ENABLE_CUSTODIAL_AUTOMATIC',True)
     monkeypatch.setattr(settings,'AUTOMATIC_CHAIN_ID',chain)
     monkeypatch.setattr(settings,'ENABLE_ROBINHOOD_AUTOMATIC',False)
-    with pytest.raises(HTTPException,match='unsupported or Robinhood'):
+    monkeypatch.setattr(settings,'ENABLE_ETHEREUM_AUTOMATIC',False)
+    monkeypatch.setattr(settings,'ENABLE_BASE_AUTOMATIC',False)
+    with pytest.raises(HTTPException,match='disabled for this network'):
         automatic.enabled()
 
 

@@ -7,6 +7,8 @@ import {AllowListData, SignedMintValidationParams} from "src/lib/SeaDropStructs.
 
 // Test collection only. The mint policy is enforced by the real SeaDrop.
 contract PresaleTestNFT {
+    event Transfer(address indexed from, address indexed to, uint256 indexed tokenId);
+    function name() external pure returns (string memory) {return 'Verified copy test NFT';}
     address public immutable seaDrop;
     address public immutable owner;
     uint256 public totalSupply;
@@ -19,7 +21,7 @@ contract PresaleTestNFT {
     function mintSeaDrop(address minter,uint256 quantity) external {
         require(msg.sender==seaDrop);
         minted[minter]+=quantity;
-        for(uint256 i=0;i<quantity;i++)ownerOf[++totalSupply]=minter;
+        for(uint256 i=0;i<quantity;i++) {ownerOf[++totalSupply]=minter;emit Transfer(address(0),minter,totalSupply);}
     }
     function getMintStats(address minter) external view returns(uint256,uint256,uint256) {
         return(minted[minter],totalSupply,100);

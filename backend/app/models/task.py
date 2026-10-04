@@ -38,6 +38,8 @@ class MintTask(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     authorization_id: Mapped[str] = mapped_column(String(36), ForeignKey("mint_authorizations.id"), nullable=False)
     plan_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey('mint_plans.id'), nullable=True, index=True)
+    copy_rule_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey('copy_rules.id'), nullable=True)
+    copy_stage_key: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, unique=True)
     archived_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     wallet_id: Mapped[str] = mapped_column(String(36), ForeignKey("wallets.id"), nullable=False)
     drop_id: Mapped[str] = mapped_column(String(64), ForeignKey("drops.id"), nullable=False)

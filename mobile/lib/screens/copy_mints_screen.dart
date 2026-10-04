@@ -1,0 +1,1561 @@
+import 'dart:async';
+import 'dart:math';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../models/drop_model.dart';
+import '../state/app_state.dart';
+import '../theme/colors.dart';
+import 'automatic_review_screen.dart';
+import 'history_screen.dart';
+
+// Drawn icons keep this section compatible with installed OTA font subsets.
+class CopyGlyph extends StatelessWidget {
+  final String kind;
+  final double size;
+  const CopyGlyph(this.kind, {super.key, this.size = 24});
+  @override
+  Widget build(BuildContext context) => Semantics(
+    label: kind,
+    child: CustomPaint(
+      size: Size.square(size),
+      painter: _GlyphPainter(kind, Theme.of(context).colorScheme.primary),
+    ),
+  );
+}
+
+class _GlyphPainter extends CustomPainter {
+  final String kind;
+  final Color color;
+  _GlyphPainter(this.kind, this.color);
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.scale(size.width / 24);
+    final p = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.8
+      ..strokeCap = StrokeCap.round;
+    switch (kind) {
+      case 'pause':
+        canvas.drawLine(const Offset(8, 5), const Offset(8, 19), p);
+        canvas.drawLine(const Offset(16, 5), const Offset(16, 19), p);
+      case 'play':
+        canvas.drawPath(
+          Path()
+            ..moveTo(7, 5)
+            ..lineTo(19, 12)
+            ..lineTo(7, 19)
+            ..close(),
+          p,
+        );
+      case 'wallets':
+        canvas.drawCircle(const Offset(9, 7), 3, p);
+        canvas.drawArc(const Rect.fromLTWH(3, 12, 13, 9), pi, pi, false, p);
+        canvas.drawArc(const Rect.fromLTWH(14, 4, 6, 6), -pi / 2, pi, false, p);
+        canvas.drawArc(
+          const Rect.fromLTWH(16, 12, 5, 8),
+          -pi / 2,
+          pi,
+          false,
+          p,
+        );
+      case 'activity':
+        for (var i = 0; i < 3; i++) {
+          canvas.drawCircle(Offset(4, 6 + 6.0 * i), .5, p);
+          canvas.drawLine(Offset(9, 6 + 6.0 * i), Offset(21, 6 + 6.0 * i), p);
+        }
+      case 'search':
+        canvas.drawCircle(const Offset(10, 10), 6, p);
+        canvas.drawLine(const Offset(15, 15), const Offset(21, 21), p);
+      case 'more':
+        for (var i = 0; i < 3; i++) {
+          canvas.drawCircle(Offset(5 + 7.0 * i, 12), .9, p);
+        }
+      default:
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(
+            const Rect.fromLTWH(8, 8, 12, 13),
+            const Radius.circular(2),
+          ),
+          p,
+        );
+        canvas.drawPath(
+          Path()
+            ..moveTo(15, 4)
+            ..lineTo(4, 4)
+            ..lineTo(4, 16),
+          p,
+        );
+    }
+  }
+
+  @override
+  bool shouldRepaint(_GlyphPainter old) =>
+      old.kind != kind || old.color != color;
+}
+
+String copyEth(dynamic wei) {
+  final value = BigInt.tryParse('$wei') ?? BigInt.zero;
+  final unit = BigInt.from(10).pow(18);
+  final fraction = (value % unit)
+      .toString()
+      .padLeft(18, '0')
+      .replaceFirst(RegExp(r'0+$'), '');
+  return '${value ~/ unit}${fraction.isEmpty ? '' : '.$fraction'}';
+}
+
+String _short(String address) => address.length < 15
+    ? address
+    : '${address.substring(0, 6)}…${address.substring(address.length - 4)}';
+String _network(dynamic id) =>
+    {
+      1: 'Ethereum',
+      8453: 'Base',
+      4663: 'Robinhood',
+      31337: 'Local test',
+      11155111: 'Sepolia',
+    }[id] ??
+    'Chain $id';
+String _date(dynamic value) {
+  final date = DateTime.tryParse('$value')?.toLocal();
+  if (date == null) return 'Awaiting first check';
+  return '${date.day}/${date.month} ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
+}
+
+class _Panel extends StatelessWidget {
+  final Widget child;
+  final bool highlighted;
+  const _Panel({required this.child, this.highlighted = false});
+  @override
+  Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: highlighted
+            ? MintlyColors.getSoft(dark)
+            : MintlyColors.getPanel(dark),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: MintlyColors.getLine(dark)),
+      ),
+      child: Material(type: MaterialType.transparency, child: child),
+    );
+  }
+}
+
+class _Avatar extends StatelessWidget {
+  final String name;
+  const _Avatar(this.name);
+  @override
+  Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    return Container(
+      width: 54,
+      height: 54,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        gradient: LinearGradient(
+          colors: [
+            MintlyColors.getSoft(dark),
+            MintlyColors.getGreen(dark).withValues(alpha: .25),
+          ],
+        ),
+        border: Border.all(
+          color: MintlyColors.getGreen(dark).withValues(alpha: .25),
+        ),
+      ),
+      child: Text(
+        name.isEmpty ? '?' : name.substring(0, 1).toUpperCase(),
+        style: TextStyle(
+          fontSize: 23,
+          fontWeight: FontWeight.w700,
+          color: MintlyColors.getGreen(dark),
+        ),
+      ),
+    );
+  }
+}
+
+class _Chip extends StatelessWidget {
+  final String text;
+  const _Chip(this.text);
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+    decoration: BoxDecoration(
+      color: Theme.of(context).colorScheme.primary.withValues(alpha: .09),
+      borderRadius: BorderRadius.circular(9),
+    ),
+    child: Text(
+      text,
+      style: TextStyle(
+        fontSize: 12,
+        color: Theme.of(context).colorScheme.primary,
+        fontWeight: FontWeight.w600,
+      ),
+    ),
+  );
+}
+
+class CopyMintsScreen extends ConsumerStatefulWidget {
+  const CopyMintsScreen({super.key});
+  @override
+  ConsumerState<CopyMintsScreen> createState() => _CopyMintsState();
+}
+
+class _CopyDetails extends StatefulWidget {
+  final Map<String, dynamic> event;
+  const _CopyDetails({super.key, required this.event});
+  @override
+  State<_CopyDetails> createState() => _CopyDetailsState();
+}
+
+class _CopyDetailsState extends State<_CopyDetails> {
+  bool _open = false;
+  @override
+  Widget build(BuildContext context) {
+    final o = widget.event['observation'] as Map;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        TextButton(
+          onPressed: () => setState(() => _open = !_open),
+          child: Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'Transaction details',
+                  style: TextStyle(fontSize: 13),
+                ),
+              ),
+              const CopyGlyph('more', size: 18),
+            ],
+          ),
+        ),
+        if (_open) ...[
+          const Text('Collection contract'),
+          SelectableText('${o['contract']}'),
+          const SizedBox(height: 9),
+          const Text('Followed wallet mint'),
+          SelectableText('${o['source_hash']}'),
+          if (widget.event['transaction_hash'] != null) ...[
+            const SizedBox(height: 9),
+            const Text('Your mint'),
+            SelectableText('${widget.event['transaction_hash']}'),
+          ],
+        ],
+      ],
+    );
+  }
+}
+
+class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
+  Map<String, dynamic>? _data, _activity;
+  final _search = TextEditingController();
+  Timer? _timer;
+  String? _error, _filter;
+  bool _busy = false, _loading = true;
+  int _tab = 0;
+  int _generation = 0;
+  List<Map<String, dynamic>> get _watches =>
+      (_data?['watches'] as List? ?? []).cast<Map<String, dynamic>>();
+  bool get _active => _watches.any(
+    (w) => (w['rules'] as List).any((r) => r['status'] == 'active'),
+  );
+  bool get _hasApproved => _watches.any(
+    (w) => (w['rules'] as List).any(
+      (r) => ['active', 'paused'].contains(r['status']),
+    ),
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+    _timer = Timer.periodic(const Duration(seconds: 25), (_) {
+      if (!_busy && (ModalRoute.of(context)?.isCurrent ?? false)) {
+        _load(silent: true);
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _search.dispose();
+    super.dispose();
+  }
+
+  Future<void> _load({bool silent = false}) async {
+    final generation = ++_generation;
+    final filter = _filter;
+    try {
+      final api = ref.read(apiServiceProvider);
+      final data = await api.fetchCopyMints();
+      final activity = await api.fetchCopyActivity(watchId: filter);
+      if (mounted && generation == _generation) {
+        setState(() {
+          _data = data;
+          _activity = activity;
+          _error = null;
+          _loading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted && generation == _generation) {
+        setState(() {
+          _error = '$e';
+          _loading = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _act(
+    Future<void> Function() action, {
+    bool refresh = true,
+  }) async {
+    if (_busy) return;
+    _generation++;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await action();
+      if (refresh) await _load();
+    } catch (e) {
+      if (mounted) setState(() => _error = '$e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _follow([Map<String, dynamic>? wallet]) async {
+    final address = TextEditingController(text: wallet?['address']);
+    final name = TextEditingController(text: wallet?['label']);
+    final networks = (_data?['networks'] as List? ?? [])
+        .cast<Map<String, dynamic>>();
+    final chains =
+        (wallet?['chains'] as List? ??
+                networks.map((n) => n['chain_id']).toList())
+            .cast<int>()
+            .toSet();
+    String? error;
+    bool saving = false;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (context, update) => Padding(
+          padding: EdgeInsets.fromLTRB(
+            24,
+            24,
+            24,
+            MediaQuery.viewInsetsOf(context).bottom + 24,
+          ),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  wallet == null ? 'Follow a wallet' : 'Edit followed wallet',
+                  style: Theme.of(context).textTheme.headlineSmall,
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Monitor public NFT mints. Adding a wallet does not enable spending.',
+                ),
+                const SizedBox(height: 20),
+                TextField(
+                  controller: address,
+                  enabled: !saving && wallet == null,
+                  autocorrect: false,
+                  decoration: const InputDecoration(
+                    labelText: 'Wallet address',
+                    hintText: '0x…',
+                  ),
+                ),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: name,
+                  enabled: !saving,
+                  maxLength: 80,
+                  decoration: const InputDecoration(
+                    labelText: 'Name this wallet',
+                    hintText: 'Your own label',
+                  ),
+                ),
+                const Text('Networks to monitor'),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  children: networks
+                      .map(
+                        (n) => FilterChip(
+                          label: Text('${n['name']}'),
+                          selected: chains.contains(n['chain_id']),
+                          onSelected: saving
+                              ? null
+                              : (selected) => update(() {
+                                  if (selected) {
+                                    chains.add(n['chain_id'] as int);
+                                  } else {
+                                    chains.remove(n['chain_id']);
+                                  }
+                                }),
+                        ),
+                      )
+                      .toList(),
+                ),
+                if (error != null)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    child: Text(
+                      error!,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                      ),
+                    ),
+                  ),
+                const SizedBox(height: 20),
+                FilledButton(
+                  onPressed: saving
+                      ? null
+                      : () async {
+                          if (!RegExp(
+                                r'^0x[0-9a-fA-F]{40}$',
+                              ).hasMatch(address.text.trim()) ||
+                              name.text.trim().isEmpty ||
+                              chains.isEmpty) {
+                            update(
+                              () => error =
+                                  'Enter a wallet address, a name and at least one network.',
+                            );
+                            return;
+                          }
+                          update(() {
+                            saving = true;
+                            error = null;
+                          });
+                          try {
+                            await ref
+                                .read(apiServiceProvider)
+                                .followCopyWallet({
+                                  'address': address.text.trim(),
+                                  'label': name.text.trim(),
+                                  'chains': chains.toList(),
+                                });
+                            if (sheetContext.mounted) {
+                              Navigator.pop(sheetContext);
+                            }
+                            await _load();
+                          } catch (e) {
+                            if (sheetContext.mounted) {
+                              update(() {
+                                saving = false;
+                                error = '$e';
+                              });
+                            }
+                          }
+                        },
+                  child: Text(
+                    saving
+                        ? 'Saving…'
+                        : wallet == null
+                        ? 'Follow wallet'
+                        : 'Save changes',
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    // Let the dismissed sheet finish its exit animation before disposing fields.
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    address.dispose();
+    name.dispose();
+  }
+
+  Future<void> _remove(Map<String, dynamic> watch) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Stop following ${watch['label']}?'),
+        content: const Text(
+          'Unsigned copies will stop. Signed transactions remain tracked, and all records stay in History.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Keep wallet'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) {
+      await _act(
+        () => ref.read(apiServiceProvider).removeCopyWallet('${watch['id']}'),
+      );
+    }
+  }
+
+  Future<void> _setup(Map<String, dynamic> watch) async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute<void>(builder: (_) => CopySettingsScreen(watch: watch)),
+    );
+    await _load();
+  }
+
+  Widget _watch(Map<String, dynamic> watch) {
+    final rules = (watch['rules'] as List).cast<Map<String, dynamic>>();
+    final active = rules.any((r) => r['status'] == 'active');
+    final cursors = (watch['cursors'] as Map).values.cast<Map>();
+    final unavailable = cursors.any((c) => c['status'] == 'unavailable');
+    final checked =
+        cursors
+            .map((c) => '${c['checked_at'] ?? ''}')
+            .where((s) => s.isNotEmpty)
+            .toList()
+          ..sort();
+    return _Panel(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              _Avatar('${watch['label']}'),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '${watch['label']}',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    InkWell(
+                      onTap: () => Clipboard.setData(
+                        ClipboardData(text: '${watch['address']}'),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 5),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(_short('${watch['address']}')),
+                            const SizedBox(width: 8),
+                            const CopyGlyph('copy', size: 15),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              PopupMenuButton<String>(
+                tooltip: 'Wallet options',
+                icon: const CopyGlyph('more'),
+                onSelected: (value) {
+                  if (value == 'edit') _follow(watch);
+                  if (value == 'remove') _remove(watch);
+                  if (value == 'pause') {
+                    _act(
+                      () => ref
+                          .read(apiServiceProvider)
+                          .pauseCopying(active, watchId: '${watch['id']}'),
+                    );
+                  }
+                },
+                itemBuilder: (_) => [
+                  const PopupMenuItem(
+                    value: 'edit',
+                    child: Text('Edit name / networks'),
+                  ),
+                  if (rules.any(
+                    (r) => ['active', 'paused'].contains(r['status']),
+                  ))
+                    PopupMenuItem(
+                      value: 'pause',
+                      child: Text(active ? 'Pause copying' : 'Resume copying'),
+                    ),
+                  const PopupMenuItem(
+                    value: 'remove',
+                    child: Text('Remove wallet'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 7,
+            runSpacing: 7,
+            children: [
+              for (final chain in watch['chains'] as List)
+                _Chip(_network(chain)),
+              _Chip(active ? 'Copying on' : 'Watching only'),
+            ],
+          ),
+          const SizedBox(height: 18),
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Recent public mints',
+                      style: TextStyle(fontSize: 12),
+                    ),
+                    Text(
+                      '${watch['recent_mints']}',
+                      style: const TextStyle(
+                        fontSize: 28,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              FilledButton(
+                onPressed: _busy ? null : () => _setup(watch),
+                child: const Text('Set up copy'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            unavailable
+                ? 'Network check delayed. Last saved activity is preserved.'
+                : checked.isEmpty
+                ? 'Scanning recent blocks…'
+                : 'Checked ${_date(checked.first)} · last 7 days, scanned blocks',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          TextButton(
+            onPressed: () {
+              setState(() {
+                _tab = 1;
+                _filter = '${watch['id']}';
+              });
+              _load();
+            },
+            child: const Text('View activity'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _following() {
+    final search = _search.text.trim().toLowerCase();
+    final watches = _watches
+        .where(
+          (w) => '${w['label']} ${w['address']}'.toLowerCase().contains(search),
+        )
+        .toList();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          'Copy minting',
+          style: Theme.of(
+            context,
+          ).textTheme.headlineLarge?.copyWith(fontWeight: FontWeight.w700),
+        ),
+        const SizedBox(height: 7),
+        const Text('Follow wallets. Mint on your terms.'),
+        const SizedBox(height: 22),
+        _Panel(
+          highlighted: true,
+          child: Row(
+            children: [
+              const CopyGlyph('wallets', size: 32),
+              const SizedBox(width: 15),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '${_watches.length} wallet${_watches.length == 1 ? '' : 's'} followed',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 16,
+                      ),
+                    ),
+                    Text(
+                      _active
+                          ? 'Automatic copying active'
+                          : 'Auto-copy paused / not enabled',
+                    ),
+                  ],
+                ),
+              ),
+              if (_hasApproved)
+                IconButton(
+                  tooltip: _active
+                      ? 'Pause all copying'
+                      : 'Resume approved copying',
+                  onPressed: _busy
+                      ? null
+                      : () => _act(
+                          () => ref
+                              .read(apiServiceProvider)
+                              .pauseCopying(_active),
+                        ),
+                  icon: CopyGlyph(_active ? 'pause' : 'play'),
+                ),
+            ],
+          ),
+        ),
+        TextField(
+          controller: _search,
+          onChanged: (_) => setState(() {}),
+          decoration: const InputDecoration(
+            hintText: 'Search followed wallets',
+            prefixIcon: Padding(
+              padding: EdgeInsets.all(14),
+              child: CopyGlyph('search', size: 20),
+            ),
+          ),
+        ),
+        const SizedBox(height: 22),
+        Row(
+          children: [
+            const Expanded(
+              child: Text(
+                'Followed wallets',
+                style: TextStyle(fontSize: 19, fontWeight: FontWeight.w700),
+              ),
+            ),
+            Text('${watches.length} wallets'),
+          ],
+        ),
+        const SizedBox(height: 14),
+        if (_watches.isEmpty)
+          const _Panel(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                CopyGlyph('wallets', size: 36),
+                SizedBox(height: 16),
+                Text(
+                  'Find your next mint through wallets you follow.',
+                  style: TextStyle(fontWeight: FontWeight.w600),
+                ),
+                SizedBox(height: 8),
+                Text(
+                  'Add an address and give it a name. Review recent public mints, then choose a receiving wallet and limits to enable copying.',
+                ),
+              ],
+            ),
+          ),
+        if (_watches.isNotEmpty && watches.isEmpty)
+          const Padding(
+            padding: EdgeInsets.all(20),
+            child: Text('No followed wallets match this search.'),
+          ),
+        ...watches.map(_watch),
+        FilledButton.icon(
+          onPressed: _busy || _data?['enabled'] != true
+              ? null
+              : () => _follow(),
+          icon: const Text('+', style: TextStyle(fontSize: 24)),
+          label: const Text('Follow wallet'),
+        ),
+        const SizedBox(height: 18),
+        const Text(
+          'Supports direct public SeaDrop mints on Ethereum, Base and Robinhood. Allowlist mints, transfers and airdrops are excluded. Each public stage is copied once per receiving wallet.',
+          style: TextStyle(fontSize: 12),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _copy(Map<String, dynamic> event) async {
+    await _act(() async {
+      final data = await ref
+          .read(apiServiceProvider)
+          .copyMintContext('${event['id']}');
+      if (!mounted) return;
+      await Navigator.push(
+        context,
+        MaterialPageRoute<void>(
+          builder: (_) => AutomaticReviewScreen(
+            drop: DropModel.fromJson(data['drop'] as Map<String, dynamic>),
+            copyEventId: '${event['id']}',
+          ),
+        ),
+      );
+    });
+  }
+
+  Widget _event(Map<String, dynamic> event) {
+    final o = event['observation'] as Map<String, dynamic>;
+    final status = '${event['status']}';
+    final label =
+        {
+          'confirmed': 'Mint confirmed',
+          'submitted': 'Submitted',
+          'uncertain': 'Tracking transaction',
+          'armed': 'Queued',
+          'prepared': 'Signed',
+          'detected': 'Public mint detected',
+          'skipped': 'Skipped',
+          'disarmed': 'Stopped',
+        }[status] ??
+        status;
+    return _Panel(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _Avatar('${o['name']}'),
+              const SizedBox(width: 13),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '${o['name']}',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 17,
+                      ),
+                    ),
+                    const SizedBox(height: 7),
+                    Wrap(
+                      spacing: 7,
+                      runSpacing: 7,
+                      children: [_Chip(label), _Chip('${o['chain']}')],
+                    ),
+                    const SizedBox(height: 9),
+                    Text('Followed ${event['wallet_label']}'),
+                    Text(
+                      event['quantity'] == null
+                          ? '${o['source_quantity']} NFT(s) minted by followed wallet'
+                          : '${event['quantity']} NFT(s) copied',
+                    ),
+                    Text(
+                      event['actual_cost_wei'] == null
+                          ? 'Source price ${copyEth(o['price_wei'])} ETH / NFT'
+                          : '${copyEth(event['actual_cost_wei'])} ETH spent',
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(
+            _date(event['observed_at']),
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          if (event['note'] != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(
+                '${event['note']}',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ),
+          const SizedBox(height: 8),
+          _CopyDetails(key: ValueKey(event['id']), event: event),
+          if (event['task_id'] == null)
+            OutlinedButton(
+              onPressed: _busy ? null : () => _copy(event),
+              child: const Text('Review & copy this mint'),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _activities() {
+    final events = (_activity?['events'] as List? ?? [])
+        .cast<Map<String, dynamic>>();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          'Copy activity',
+          style: Theme.of(
+            context,
+          ).textTheme.headlineLarge?.copyWith(fontWeight: FontWeight.w700),
+        ),
+        const SizedBox(height: 7),
+        const Text('Public mints and updates for your copied wallets.'),
+        const SizedBox(height: 22),
+        Row(
+          children: [
+            Expanded(
+              child: _Panel(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '${_activity?['copied_mints'] ?? 0}',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 25,
+                      ),
+                    ),
+                    const Text('copied mints'),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _Panel(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      copyEth(_activity?['spent_wei'] ?? '0'),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 20,
+                      ),
+                    ),
+                    const Text('ETH spent · all fees'),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+        DropdownButtonFormField<String>(
+          key: ValueKey(_filter),
+          initialValue: _filter,
+          decoration: const InputDecoration(labelText: 'Activity for'),
+          items: [
+            const DropdownMenuItem<String>(
+              value: null,
+              child: Text('All followed wallets'),
+            ),
+            for (final w in _watches)
+              DropdownMenuItem(
+                value: '${w['id']}',
+                child: Text('${w['label']}', overflow: TextOverflow.ellipsis),
+              ),
+          ],
+          onChanged: (value) {
+            setState(() {
+              _filter = value;
+              _activity = null;
+            });
+            _load();
+          },
+        ),
+        const SizedBox(height: 20),
+        if (events.isEmpty)
+          const _Panel(
+            child: Padding(
+              padding: EdgeInsets.symmetric(vertical: 18),
+              child: Text(
+                'No public mints detected yet. New activity appears here after network confirmation.',
+              ),
+            ),
+          ),
+        ...events.map(_event),
+        if (_activity?['next_offset'] != null)
+          OutlinedButton(
+            onPressed: _busy
+                ? null
+                : () => _act(() async {
+                    final next = await ref
+                        .read(apiServiceProvider)
+                        .fetchCopyActivity(
+                          watchId: _filter,
+                          offset: _activity!['next_offset'] as int,
+                        );
+                    if (mounted) {
+                      setState(() {
+                        _activity = {
+                          ...next,
+                          'events': [
+                            ...events,
+                            ...(next['events'] as List).where(
+                              (e) => !events.any((old) => old['id'] == e['id']),
+                            ),
+                          ],
+                        };
+                      });
+                    }
+                  }, refresh: false),
+            child: const Text('Load more activity'),
+          ),
+        if (_active)
+          OutlinedButton.icon(
+            onPressed: _busy
+                ? null
+                : () => _act(
+                    () => ref.read(apiServiceProvider).pauseCopying(true),
+                  ),
+            icon: const CopyGlyph('pause'),
+            label: const Text('Pause copying'),
+          ),
+        TextButton(
+          onPressed: () => Navigator.push(
+            context,
+            MaterialPageRoute<void>(builder: (_) => const HistoryScreen()),
+          ),
+          child: const Text('Open full History'),
+        ),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(
+      title: Text(
+        'mintly.',
+        style: TextStyle(
+          color: Theme.of(context).colorScheme.primary,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+      actions: [
+        Padding(
+          padding: const EdgeInsets.only(right: 18),
+          child: Center(
+            child: _Chip(_active ? 'Copying on' : 'Copying paused'),
+          ),
+        ),
+      ],
+    ),
+    body: RefreshIndicator(
+      onRefresh: _load,
+      child: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.fromLTRB(20, 14, 20, 28),
+              children: [
+                if (_error != null)
+                  _Panel(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(_error!),
+                        TextButton(
+                          onPressed: _load,
+                          child: const Text('Retry'),
+                        ),
+                      ],
+                    ),
+                  ),
+                if (_data?['enabled'] == false)
+                  const _Panel(
+                    child: Text(
+                      'Copy mints is awaiting server activation. Your existing mint plans continue normally.',
+                    ),
+                  ),
+                if (_tab == 0) _following() else _activities(),
+              ],
+            ),
+    ),
+    bottomNavigationBar: SafeArea(
+      top: false,
+      child: Container(
+        decoration: BoxDecoration(
+          border: Border(
+            top: BorderSide(color: Theme.of(context).dividerColor),
+          ),
+        ),
+        child: Row(
+          children: [
+            for (final (index, name, glyph) in [
+              (0, 'Following', 'copy'),
+              (1, 'Activity', 'activity'),
+            ])
+              Expanded(
+                child: TextButton(
+                  onPressed: () {
+                    setState(() {
+                      _tab = index;
+                      if (index == 1) _filter = null;
+                    });
+                    if (index == 1) _load();
+                  },
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        CopyGlyph(glyph),
+                        const SizedBox(height: 5),
+                        Text(
+                          name,
+                          style: TextStyle(
+                            fontWeight: _tab == index
+                                ? FontWeight.w700
+                                : FontWeight.w400,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+class CopySettingsScreen extends ConsumerStatefulWidget {
+  final Map<String, dynamic> watch;
+  const CopySettingsScreen({super.key, required this.watch});
+  @override
+  ConsumerState<CopySettingsScreen> createState() => _CopySettingsState();
+}
+
+class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
+  final _form = GlobalKey<FormState>();
+  final _quantity = TextEditingController(text: '1'),
+      _price = TextEditingController(),
+      _gas = TextEditingController(),
+      _budget = TextEditingController();
+  late Future<List<Map<String, dynamic>>> _policies;
+  Map<String, dynamic>? _policy, _pending;
+  DateTime? _expiry;
+  bool _free = false, _consent = false, _busy = false, _customQuantity = false;
+  int _days = 7;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _policies = _loadPolicies();
+  }
+
+  Future<List<Map<String, dynamic>>> _loadPolicies() async {
+    final all = await ref.read(apiServiceProvider).fetchAutomaticPolicies();
+    return all
+        .where(
+          (p) =>
+              p['status'] == 'enabled' &&
+              (widget.watch['chains'] as List).contains(p['chain_id']) &&
+              '${p['account']}'.toLowerCase() !=
+                  '${widget.watch['address']}'.toLowerCase() &&
+              ((p['scope'] as Map)['mint_kinds'] as List).contains('public'),
+        )
+        .toList();
+  }
+
+  @override
+  void dispose() {
+    for (final field in [_quantity, _price, _gas, _budget]) {
+      field.dispose();
+    }
+    super.dispose();
+  }
+
+  void _setExpiry() {
+    final policyExpiry = DateTime.parse('${_policy!['expires_at']}').toUtc();
+    final expiry = DateTime.now().toUtc().add(Duration(days: _days));
+    _expiry = expiry.isBefore(policyExpiry) ? expiry : policyExpiry;
+  }
+
+  String? _amount(String? text) =>
+      text == null || !RegExp(r'^\d+(\.\d{1,18})?$').hasMatch(text.trim())
+      ? 'Enter an exact ETH amount (up to 18 decimals).'
+      : null;
+  String _uuid() {
+    final random = Random.secure();
+    final bytes = List.generate(16, (_) => random.nextInt(256));
+    bytes[6] = (bytes[6] & 15) | 64;
+    bytes[8] = (bytes[8] & 63) | 128;
+    final h = bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+    return '${h.substring(0, 8)}-${h.substring(8, 12)}-${h.substring(12, 16)}-${h.substring(16, 20)}-${h.substring(20)}';
+  }
+
+  Future<void> _enable() async {
+    if (_busy ||
+        _policy == null ||
+        !_consent ||
+        !_form.currentState!.validate()) {
+      return;
+    }
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    _pending ??= {
+      'request_id': _uuid(),
+      'grant_id': _policy!['id'],
+      'quantity': int.parse(_quantity.text.trim()),
+      'price_cap_eth': _price.text.trim(),
+      'fee_cap_eth': _gas.text.trim(),
+      'budget_eth': _budget.text.trim(),
+      'free_only': _free,
+      'expires_at': _expiry!.toIso8601String(),
+      'consent': true,
+    };
+    try {
+      final result = await ref
+          .read(apiServiceProvider)
+          .approveCopyRule('${widget.watch['id']}', _pending!);
+      if (mounted) {
+        if (result['status'] == 'active') {
+          Navigator.pop(context);
+        } else {
+          setState(
+            () => _error =
+                'This approval is ${result['status']}. Open a new review to enable copying.',
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) setState(() => _error = '$e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final locked = _busy || _pending != null;
+    return Scaffold(
+      appBar: AppBar(title: const Text('Copy settings')),
+      body: FutureBuilder<List<Map<String, dynamic>>>(
+        future: _policies,
+        builder: (context, snapshot) {
+          if (snapshot.hasError) {
+            return Padding(
+              padding: const EdgeInsets.all(24),
+              child: Text('${snapshot.error}'),
+            );
+          }
+          if (!snapshot.hasData) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          final policies = snapshot.data!;
+          return Form(
+            key: _form,
+            child: ListView(
+              padding: const EdgeInsets.all(20),
+              children: [
+                _Panel(
+                  child: Row(
+                    children: [
+                      _Avatar('${widget.watch['label']}'),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '${widget.watch['label']}',
+                              style: const TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 5),
+                            Text(_short('${widget.watch['address']}')),
+                            const SizedBox(height: 9),
+                            Wrap(
+                              spacing: 6,
+                              runSpacing: 6,
+                              children: [
+                                for (final c in widget.watch['chains'] as List)
+                                  _Chip(_network(c)),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Text(
+                  'Choose your limits',
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 7),
+                const Text(
+                  'Set when and how Mintly should copy this wallet’s public mints.',
+                ),
+                const SizedBox(height: 18),
+                if (policies.isEmpty)
+                  const _Panel(
+                    child: Text(
+                      'Import your receiving wallet and approve a policy for Ethereum, Base or Robinhood from the Wallet screen first. A connected address alone cannot sign automatically.',
+                    ),
+                  ),
+                if (policies.isNotEmpty) ...[
+                  DropdownButtonFormField<String>(
+                    decoration: const InputDecoration(
+                      labelText: 'Receiving wallet / network',
+                    ),
+                    isExpanded: true,
+                    items: policies
+                        .map(
+                          (p) => DropdownMenuItem(
+                            value: '${p['id']}',
+                            child: Text(
+                              '${_network(p['chain_id'])} · ${_short('${p['account']}')} · ${copyEth(p['remaining_wei'])} ETH left',
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: locked
+                        ? null
+                        : (id) => setState(() {
+                            _policy = policies.firstWhere((p) => p['id'] == id);
+                            _setExpiry();
+                          }),
+                    validator: (_) =>
+                        _policy == null ? 'Choose a receiving policy.' : null,
+                  ),
+                  const SizedBox(height: 18),
+                  _Panel(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const Text('Quantity per mint'),
+                        const SizedBox(height: 10),
+                        Row(
+                          children: [
+                            for (final count in [1, 2])
+                              Expanded(
+                                child: Padding(
+                                  padding: const EdgeInsets.only(right: 8),
+                                  child: OutlinedButton(
+                                    onPressed: locked
+                                        ? null
+                                        : () => setState(() {
+                                            _quantity.text = '$count';
+                                            _customQuantity = false;
+                                          }),
+                                    style: OutlinedButton.styleFrom(
+                                      backgroundColor:
+                                          _quantity.text == '$count'
+                                          ? Theme.of(context)
+                                                .colorScheme
+                                                .primary
+                                                .withValues(alpha: .12)
+                                          : null,
+                                    ),
+                                    child: Text(
+                                      '$count NFT${count == 1 ? '' : 's'}',
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            Expanded(
+                              child: TextButton(
+                                onPressed: locked
+                                    ? null
+                                    : () => setState(
+                                        () => _customQuantity = true,
+                                      ),
+                                child: const Text('Custom'),
+                              ),
+                            ),
+                          ],
+                        ),
+                        if (_customQuantity)
+                          TextFormField(
+                            controller: _quantity,
+                            enabled: !locked,
+                            keyboardType: TextInputType.number,
+                            decoration: const InputDecoration(
+                              labelText: 'NFTs per copied mint',
+                            ),
+                            validator: (v) =>
+                                (int.tryParse(v ?? '') ?? 0) < 1 ||
+                                    (int.tryParse(v ?? '') ?? 101) > 100
+                                ? 'Choose 1 to 100.'
+                                : null,
+                          ),
+                      ],
+                    ),
+                  ),
+                  _Panel(
+                    child: Column(
+                      children: [
+                        TextFormField(
+                          controller: _price,
+                          enabled: !locked && !_free,
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                          ),
+                          validator: _amount,
+                          decoration: const InputDecoration(
+                            labelText: 'Max mint price per NFT',
+                            suffixText: 'ETH',
+                          ),
+                        ),
+                        const SizedBox(height: 15),
+                        TextFormField(
+                          controller: _gas,
+                          enabled: !locked,
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                          ),
+                          validator: _amount,
+                          decoration: const InputDecoration(
+                            labelText: 'Max network fee per mint',
+                            suffixText: 'ETH',
+                          ),
+                        ),
+                        const SizedBox(height: 15),
+                        TextFormField(
+                          controller: _budget,
+                          enabled: !locked,
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                          ),
+                          validator: _amount,
+                          decoration: const InputDecoration(
+                            labelText: 'Total copy budget',
+                            suffixText: 'ETH',
+                          ),
+                        ),
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('Free mints only'),
+                          subtitle: const Text('Network fees still apply.'),
+                          value: _free,
+                          onChanged: locked
+                              ? null
+                              : (v) => setState(() {
+                                  _free = v;
+                                  _price.text = v ? '0' : '';
+                                }),
+                        ),
+                        const ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: Text('Only eligible public drops'),
+                          subtitle: Text(
+                            'Wallet limits, supply and the exact public stage are always checked.',
+                          ),
+                          trailing: Text('Always on'),
+                        ),
+                        DropdownButtonFormField<int>(
+                          initialValue: _days,
+                          decoration: const InputDecoration(
+                            labelText: 'Copy permission duration',
+                          ),
+                          items: [
+                            for (final d in [1, 3, 7, 14, 30])
+                              DropdownMenuItem(
+                                value: d,
+                                child: Text('Up to $d day${d == 1 ? '' : 's'}'),
+                              ),
+                          ],
+                          onChanged: locked
+                              ? null
+                              : (d) => setState(() {
+                                  _days = d!;
+                                  if (_policy != null) _setExpiry();
+                                }),
+                        ),
+                        if (_expiry != null)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 12),
+                            child: Text(
+                              'Ends ${_date(_expiry!.toIso8601String())} · within your wallet policy',
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  _Panel(
+                    highlighted: true,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Copies eligible mints after new wallet activity is detected.',
+                          style: TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                        const SizedBox(height: 8),
+                        const Text(
+                          'Only activity after enabling or resuming is copied automatically. Each collection’s public stage is copied once for your receiving wallet. Your wallet’s overall spending policy also applies.',
+                        ),
+                        if (_policy?['chain_id'] == 8453)
+                          const Padding(
+                            padding: EdgeInsets.only(top: 8),
+                            child: Text(
+                              'Base parent-chain fees vary until inclusion. Fee limits are checked before submission; an inclusion-time overrun stops future signing.',
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    value: _consent,
+                    onChanged: locked
+                        ? null
+                        : (v) => setState(() => _consent = v == true),
+                    title: const Text(
+                      'I authorize future public mints from this followed wallet within these quantity, price, fee, total-budget and expiry limits.',
+                    ),
+                    subtitle: const Text(
+                      'Pausing stops unsigned copies. Signed transactions remain tracked.',
+                    ),
+                  ),
+                  if (_error != null)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      child: Text(
+                        _error!,
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.error,
+                        ),
+                      ),
+                    ),
+                  FilledButton(
+                    onPressed: _busy || !_consent || _policy == null
+                        ? null
+                        : _enable,
+                    child: Text(
+                      _busy
+                          ? 'Confirming copy permission…'
+                          : _pending != null
+                          ? 'Retry saved approval'
+                          : 'Enable copy minting',
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+}

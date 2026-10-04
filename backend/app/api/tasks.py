@@ -22,8 +22,11 @@ router = APIRouter(prefix="/tasks", tags=["tasks"])
 async def draft_task_preview(req: DraftTaskRequest, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     grant, snapshot = await automatic.make_snapshot(db, req, user.id)
     await automatic.signer_ready(grant.id)
-    web3 = await automatic.provider()
+    web3 = await automatic.provider_for(grant.chain_id)
     try:
+        if req.copy_event_id:
+            from app.services.copy_mints import verify_source
+            await verify_source(web3, snapshot['copy_source'])
         execution = await automatic.prepare_mint(web3, snapshot)
         eligibility = 'verified'
     except Exception as error:
@@ -58,9 +61,16 @@ async def arm_mint_task(req: ArmTaskRequest, user: User = Depends(get_current_us
         if pending:
             raise HTTPException(409, 'This plan already has an active automatic mint. Check its task before arming another.')
     grant, snapshot = await automatic.make_snapshot(db, req, user.id)
+    copy_key = None
+    if req.copy_event_id:
+        from app.services.copy_mints import no_duplicate
+        copy_key = await no_duplicate(db, snapshot)
     await automatic.signer_ready(grant.id)
-    web3 = await automatic.provider()
+    web3 = await automatic.provider_for(grant.chain_id)
     try:
+        if req.copy_event_id:
+            from app.services.copy_mints import verify_source
+            await verify_source(web3, snapshot['copy_source'])
         execution = await automatic.prepare_mint(web3, snapshot)
     except Exception as error:
         if (snapshot['mint_kind'] == 'public' or not req.conditional_eligibility
@@ -78,7 +88,7 @@ async def arm_mint_task(req: ArmTaskRequest, user: User = Depends(get_current_us
         recipient_address=snapshot['recipient'], user_consent_text='Arm exact custodial automatic mint with the displayed finite limits.',
         authorized_at=datetime.now(timezone.utc), grant_id=grant.id, snapshot=snapshot)
     task = MintTask(id=str(uuid.uuid4()), authorization_id=auth.id, wallet_id=req.wallet_id,
-        drop_id=req.drop_id, stage_id=req.stage_id, plan_id=req.plan_id, status='armed', is_demo=False,
+        drop_id=req.drop_id, stage_id=req.stage_id, plan_id=req.plan_id, copy_stage_key=copy_key, status='armed', is_demo=False,
         idempotency_key=key, request_hash=request_hash, execution_mode=automatic.MODE,
         scheduled_for_utc=datetime.fromtimestamp(snapshot['start'], timezone.utc),
         expires_at_utc=datetime.fromtimestamp(snapshot['expiry'], timezone.utc))
@@ -86,6 +96,11 @@ async def arm_mint_task(req: ArmTaskRequest, user: User = Depends(get_current_us
     db.add(auth)
     await db.flush()
     db.add(task)
+    if req.copy_event_id:
+        from app.models import CopyEvent
+        await db.flush()
+        event = await db.get(CopyEvent, req.copy_event_id)
+        event.task_id, event.status, event.note = task.id, 'armed', None
     db.add(ActivityEvent(user_id=user.id, event_type='automatic_armed', label='Automatic mint armed',
                          detail=task.id, icon_name='gem', is_demo=False))
     await db.commit()

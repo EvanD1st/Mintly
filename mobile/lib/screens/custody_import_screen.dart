@@ -37,6 +37,7 @@ class _CustodyImportScreenState extends ConsumerState<CustodyImportScreen>
   late DateTime _expiry;
   Uint8List? _walletKey;
   int _days = 7, _generation = 0;
+  int? _chainId;
   bool _phrase = true,
       _limits = false,
       _moreLimits = false,
@@ -145,6 +146,7 @@ class _CustodyImportScreenState extends ConsumerState<CustodyImportScreen>
     final payload = <String, dynamic>{
       'request_id': _requestId,
       'wallet_id': widget.walletId,
+      if (_chainId != null) 'chain_id': _chainId,
       'private_key': _walletKey!
           .map((v) => v.toRadixString(16).padLeft(2, '0'))
           .join(),
@@ -211,6 +213,8 @@ class _CustodyImportScreenState extends ConsumerState<CustodyImportScreen>
           if (!snapshot.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
+          final networks = (snapshot.data!['networks'] as List? ?? [])
+              .cast<Map<String, dynamic>>();
           return Form(
             key: _form,
             child: ListView(
@@ -223,9 +227,32 @@ class _CustodyImportScreenState extends ConsumerState<CustodyImportScreen>
                   style: Theme.of(context).textTheme.headlineSmall,
                 ),
                 const SizedBox(height: 8),
-                Text(
-                  'Network: ${snapshot.data!['chain_id'] == 4663 ? 'Robinhood mainnet' : 'Chain ${snapshot.data!['chain_id']}'}',
-                ),
+                if (networks.length > 1)
+                  DropdownButtonFormField<int>(
+                    initialValue: _chainId ?? snapshot.data!['chain_id'] as int,
+                    decoration: const InputDecoration(
+                      labelText: 'Network for this wallet policy',
+                    ),
+                    items: networks
+                        .map(
+                          (n) => DropdownMenuItem(
+                            value: n['chain_id'] as int,
+                            child: Text('${n['name']}'),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: _busy || _attempted
+                        ? null
+                        : (value) => setState(() => _chainId = value),
+                  )
+                else
+                  Text(
+                    'Network: ${snapshot.data!['chain_id'] == 4663 ? 'Robinhood mainnet' : 'Chain ${snapshot.data!['chain_id']}'}',
+                  ),
+                if (_chainId == 8453)
+                  const Text(
+                    'Base parent-chain fees can change until inclusion. Limits are checked before submission.',
+                  ),
                 const SizedBox(height: 8),
                 SelectableText(
                   widget.address,
