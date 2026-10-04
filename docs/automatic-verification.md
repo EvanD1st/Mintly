@@ -5,10 +5,10 @@
 Production Robinhood automation is explicitly activated. Mint plans now arm
 reviewed exact-stage tasks; Remove archives records and safely cancels unsigned
 work; Settings → History paginates all versions, approvals and receipts.
-The full backend suite passed **177 tests in 191.01 seconds**, with real local
+The final full backend suite passed **178 tests in 204.97 seconds**, with real local
 EVM execution enabled and no skips. Flutter passed **23 tests** and analysis;
-the OTA guard passed **10 tests**. After the final recovery status improvement,
-**10 focused recovery tests** passed, including reverted receipts and expired
+the OTA guard passed **10 tests**. The final suite includes
+**10 recovery tests**, covering reverted receipts and expired
 original submission windows. The local consent clock follows the deliberately
 advanced test chain; production retains real wall-time and chain expiry checks.
 

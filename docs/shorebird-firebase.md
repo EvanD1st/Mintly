@@ -58,6 +58,13 @@ Imported social posts and OpenSea URLs require independent stage and eligibility
 verification before execution. The automatic notification service has a separate
 protected Firebase credential copy and has no wallet-key mount.
 
+The automatic-plans and History update was published to all four installed
+Android versions on 4 October 2026: `1.1.1+4` patch 3, `1.1.0+3` patch 13,
+`1.0.1+2` patch 3 and `1.0.0+1` patch 3. All three architectures passed the
+existing native and asset checks. See [verified OTA records](automatic-plans-history-ota-2026-10-04.json).
+Open Mintly online, allow the patch download to finish, then fully close and
+reopen the app. Activation on a particular phone must be observed on that device.
+
 ## Wallet import OTA compatibility
 
 Pure Dart recovery libraries can be included in a patch. Their new license

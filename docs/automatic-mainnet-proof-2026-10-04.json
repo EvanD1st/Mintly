@@ -1,0 +1,78 @@
+{
+  "task_id": "1c9445a9-30ed-4dbd-89aa-52752a59dd2a",
+  "plan_id": "5b7f4cb5-1f29-4b29-bf76-993cd508e8a9",
+  "status": "submitted",
+  "hash": "0x76638de8650ea090dd6218718d89591da92f4cf2f44ccc04b253ed01ec42e31b",
+  "failure_reason": "Receipt observed; waiting for canonical confirmations.",
+  "quantity": 1,
+  "nonce": 7,
+  "actual_total_cost_wei": null,
+  "actual_gas_used": null,
+  "actual_effective_gas_price": null,
+  "submitted_at": "2026-10-04 05:43:40.416475+00:00",
+  "confirmed_at": "None",
+  "receipt_block_number": null,
+  "receipt_block_hash": null,
+  "maximum_total_wei": "50000000000000",
+  "reserved_wei": "50000000000000",
+  "spent_wei": "0",
+  "notification_pending": false,
+  "broadcast_attempts": 6,
+  "collection": "0xAA19274645CbFdC4De5C9C10586CBaCA409b2C72",
+  "recipient": "0x5f1A65c4C3011eb22c2882c3e9ea8299f42Ccf7E",
+  "recovery": {
+    "id": "a16f89af-c0c7-5970-9564-0e046811bb9e",
+    "status": "submitted",
+    "original_hash": "0x47cfd09301cd4e4eba1a7b09c26426f1fa0af8a76c4ba37f53ab3aaca44f8edc",
+    "replacement_hash": "0x76638de8650ea090dd6218718d89591da92f4cf2f44ccc04b253ed01ec42e31b",
+    "authorized_at": "2026-10-04 06:20:47.408248+00:00",
+    "expires_at": "2026-10-04 06:35:39.386003+00:00",
+    "reference": "user-consent-2026-10-04-controlled-nonce-7-usd-0.50",
+    "attempt_ceiling": 6
+  },
+  "latest_nonce": 8,
+  "pending_nonce": 8,
+  "onchain": {
+    "hash": "0x76638de8650ea090dd6218718d89591da92f4cf2f44ccc04b253ed01ec42e31b",
+    "receipt_status": 1,
+    "chain_id": 4663,
+    "sender": "0x5f1A65c4C3011eb22c2882c3e9ea8299f42Ccf7E",
+    "value_wei": "37000000000000",
+    "nonce": 7,
+    "gas_limit": 141370,
+    "gas_price_wei": "24045600",
+    "gas_used": 109242,
+    "effective_gas_price": "20096000",
+    "transfers": [
+      {
+        "token_id": 316,
+        "from": "0x0000000000000000000000000000000000000000",
+        "to": "0x5f1a65c4c3011eb22c2882c3e9ea8299f42ccf7e"
+      }
+    ],
+    "owners": [
+      "0x5f1a65c4c3011eb22c2882c3e9ea8299f42ccf7e"
+    ],
+    "block_number": 79719109,
+    "finalized_block": 79718703,
+    "receipt_timestamp": 1791094858,
+    "finalized_timestamp": 1791094817,
+    "canonical_receipt": true,
+    "final_receipt_verified": false,
+    "actual_total_wei": "39195327232000"
+  },
+  "checked_at": "2026-10-04T06:40:11.114994+00:00",
+  "authorization": "Owner authorized one NFT for at most USD 0.50 and then explicitly authorized controlled same-nonce recovery.",
+  "eth_usd_reference": "2694.43",
+  "maximum_reference_usd": "0.1347215",
+  "backend_source_commit": "3a03c00",
+  "previous_unsigned_attempt": {
+    "task_id": "b02c5fe7-b4c3-4567-9a31-bede0ab79d07",
+    "status": "failed",
+    "signed": false,
+    "broadcast": false,
+    "journal_entries": 0,
+    "cost_wei": "0",
+    "cause": "Simulation omitted gas limit; bounded RPC simulation corrected before retry."
+  }
+}
