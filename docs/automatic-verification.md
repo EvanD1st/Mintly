@@ -17,6 +17,11 @@ The real owner-approved Robinhood test minted NFT #316 using nonce 7, for
 the same NFT call, recipient, value and finite debit ceiling. Both signatures
 remain in the protected journal and app history. [Live receipt evidence](automatic-mainnet-proof-2026-10-04.json)
 records receipt status, token ownership, finality and single-reservation accounting.
+The live task reached `confirmed` at 06:40:49 UTC after canonical finalized
+coverage. Reserved budget is zero and spent budget equals the exact receipt
+debit, 39195327232000 wei. The protected signer journal retains both valid
+signatures, the same nonce and one original lifetime liability; it reconciles
+the finalized winner before any later fresh signing.
 
 The sections below record the earlier 2 October verification and its limits.
 

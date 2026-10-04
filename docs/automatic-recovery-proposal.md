@@ -2,7 +2,14 @@
 
 The owner explicitly approved this scope on 4 October 2026:
 “Authorize controlled same-nonce recovery”. Execution evidence is recorded separately
-in the mainnet proof report when a receipt is available.
+in the [mainnet proof report](automatic-mainnet-proof-2026-10-04.json).
+
+Executed successfully: replacement hash
+`0x76638de8650ea090dd6218718d89591da92f4cf2f44ccc04b253ed01ec42e31b`
+minted token #316 to the same owner using nonce 7. Canonical finalized settlement
+was recorded at 06:40:49 UTC. The single reservation is released; actual debit is
+0.000039195327232 ETH (about USD 0.105609 at the execution quote), below USD 0.50.
+Both signatures and approvals remain retained and integrity-verified.
 
 Existing automatic task: `1c9445a9-30ed-4dbd-89aa-52752a59dd2a`.
 Saved transaction: `0x47cfd09301cd4e4eba1a7b09c26426f1fa0af8a76c4ba37f53ab3aaca44f8edc`.

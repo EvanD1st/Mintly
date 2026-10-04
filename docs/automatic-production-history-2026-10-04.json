@@ -10,8 +10,8 @@
   "signer_policy_ready": true,
   "mainnet_arming_enabled": true,
   "chain_id": 4663,
-  "task_status": "submitted",
+  "task_status": "confirmed",
   "original_expiry": "2026-10-04 05:48:16+00:00",
   "recovery_expiry": "2026-10-04 06:35:39.386003+00:00",
-  "checked_at": "2026-10-04T06:35:09.635735+00:00"
+  "checked_at": "2026-10-04T06:44:55.488444+00:00"
 }
