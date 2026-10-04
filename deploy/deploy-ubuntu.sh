@@ -61,6 +61,8 @@ if [[ -f "$APP_DIR/shared/x-cookies.json" ]]; then
 fi
 "${COMPOSE[@]}" config --quiet
 "${COMPOSE[@]}" build backend
+"${DOCKER[@]}" run --rm --read-only --user 10001:10001 --entrypoint python \
+    "mintly-backend:$MINTLY_RELEASE" -c 'from app.services.automatic_signer import app; from app.models import MintRecovery'
 "${COMPOSE[@]}" up -d --wait --wait-timeout 180
 if [[ -f "$APP_DIR/shared/custody.env" ]]; then
     "${COMPOSE[@]}" up -d --wait --wait-timeout 180 automatic-signer custody-import
