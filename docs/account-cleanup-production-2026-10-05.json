@@ -1,0 +1,56 @@
+{
+  "read_only": true,
+  "copy_mints_enabled": true,
+  "probes": [
+    {
+      "role": "admin",
+      "synthetic_owner": false,
+      "wallet_scope": "passed",
+      "history_sections": 5,
+      "copy_scope": "passed",
+      "foreign_watch_status": null
+    },
+    {
+      "role": "member",
+      "synthetic_owner": true,
+      "wallet_scope": "passed",
+      "history_sections": 5,
+      "copy_scope": "passed",
+      "foreign_watch_status": 404
+    }
+  ],
+  "migration": "011_dismissed_drops",
+  "counts": {
+    "User": 1,
+    "Wallet": 1,
+    "CopyWatch": 1,
+    "CopyRule": 3,
+    "CopyEvent": 1,
+    "MintTask": 5
+  },
+  "anonymous_wallet_status": 401,
+  "mint_notification_owner_required": true,
+  "source_alerts_admin_only": true,
+  "checked_at": "2026-10-05T22:43:28.659024+00:00",
+  "release": "account-cleanup-416419b",
+  "source_commit": "416419b979a95c3c426a686a70c7edbcb1375094",
+  "public_health": {
+    "status": "ok",
+    "env": "production"
+  },
+  "account_cache": "Cleared on account change; earlier-session responses rejected",
+  "notification_delivery": "Owner required for mint status; source health administrator-only; shared public drop notices retain device preferences",
+  "validation": {
+    "targeted_backend_checks": 11,
+    "flutter_normal": 36,
+    "flutter_legacy_icons": 36,
+    "ota_guard_unit_tests": 10,
+    "flutter_analyze": "No issues found",
+    "visual_review": [
+      "Splash wordmark removed; animation and reduced motion verified",
+      "Account settings reviewed in a phone-sized Flutter render",
+      "Copy wordmark absent in light and dark Flutter renders"
+    ]
+  },
+  "verification_limits": "Production read probes used the existing account and a synthetic foreign owner in a child process. Two separate real account records were exercised only in disposable local tests. No test notifications, mint tasks, rules or accounts were created in production."
+}
