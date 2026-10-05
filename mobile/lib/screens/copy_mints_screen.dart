@@ -1046,13 +1046,6 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(
-      title: Text(
-        'mintly.',
-        style: TextStyle(
-          color: Theme.of(context).colorScheme.primary,
-          fontWeight: FontWeight.w800,
-        ),
-      ),
       actions: [
         Padding(
           padding: const EdgeInsets.only(right: 18),

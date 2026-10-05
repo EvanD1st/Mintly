@@ -31,6 +31,7 @@ async def test_fcm_delivery_respects_saved_preferences(test_db, monkeypatch):
             })
             assert login.status_code == 200
             client.headers["Authorization"] = "Bearer " + login.json()["token"]
+            owner = login.json()['user']['id']
             registered = await client.post("/api/notifications/register", json={"token": token})
             assert registered.status_code == 200
             assert registered.json()["preferences"]["daily_list"] is True
@@ -45,12 +46,12 @@ async def test_fcm_delivery_respects_saved_preferences(test_db, monkeypatch):
             assert reconnected.json()["preferences"]["daily_list"] is False
             assert not await NotificationService.send_notification("New drops", "Two drops", "daily_list")
             assert len(sent) == 1
-            assert await NotificationService.send_notification("Confirmed", "Confirmed", "mint_status")
+            assert await NotificationService.send_notification("Confirmed", "Confirmed", "mint_status", user_id=owner)
             assert len(sent) == 2
 
             unregistered = await client.post("/api/notifications/unregister", json={"token": token})
             assert unregistered.status_code == 200
-            assert not await NotificationService.send_notification("Confirmed", "Again", "mint_status")
+            assert not await NotificationService.send_notification("Confirmed", "Again", "mint_status", user_id=owner)
             assert len(sent) == 2
     finally:
         app.dependency_overrides.pop(get_db, None)

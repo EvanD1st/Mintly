@@ -318,6 +318,7 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.text('0 wallets followed'), findsOneWidget);
+      expect(find.text('mintly.'), findsNothing);
       expect(find.text('Moon scout'), findsNothing);
       await tester.pumpWidget(const SizedBox());
     },

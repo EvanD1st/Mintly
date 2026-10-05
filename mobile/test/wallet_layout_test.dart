@@ -137,6 +137,8 @@ void main() {
       await tester.tap(find.text('Settings'));
       await tester.pumpAndSettle();
       expect(find.text('New drop notifications'), findsOneWidget);
+      expect(find.text('Live source'), findsNothing);
+      await capture('account-settings');
       await tester.pageBack();
       await tester.pumpAndSettle();
       await tester.tap(find.text('Set up automatic minting'));

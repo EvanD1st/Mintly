@@ -1,12 +1,9 @@
-import 'history_screen.dart';
+import 'account_settings_screen.dart';
 import '../theme/compatible_icons.dart';
-import 'copy_mints_screen.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../state/app_state.dart';
-import '../services/push_service.dart';
-import 'admin_screen.dart';
 import 'import_screen.dart';
 import 'custody_import_screen.dart';
 
@@ -297,112 +294,6 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
     );
   }
 
-  Widget _settings() {
-    final api = ref.read(apiServiceProvider);
-    return Scaffold(
-      appBar: AppBar(title: const Text('Account settings')),
-      body: ListView(
-        padding: const EdgeInsets.all(20),
-        children: [
-          Text(
-            'Signed in as ${api.username}',
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
-          const SizedBox(height: 20),
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('History'),
-            subtitle: const Text(
-              'All plans, removed items and mint transactions',
-            ),
-            trailing: const Icon(MintlyIcons.chevronRight),
-            onTap: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const HistoryScreen()),
-            ),
-          ),
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: const CopyGlyph('copy'),
-            title: const Text('Copy mints'),
-            subtitle: const Text(
-              'Follow wallets. Copy public mints on your terms.',
-            ),
-            trailing: const Icon(MintlyIcons.chevronRight),
-            onTap: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const CopyMintsScreen()),
-            ),
-          ),
-          for (final daily in [true, false])
-            ValueListenableBuilder<PushPreferences>(
-              valueListenable: PushService.instance.preferences,
-              builder: (context, prefs, _) => SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: Text(
-                  daily
-                      ? 'New drop notifications'
-                      : 'Mint status notifications',
-                ),
-                value: daily ? prefs.dailyList : prefs.mintStatus,
-                onChanged: (value) async {
-                  try {
-                    await PushService.instance.setPreferences(
-                      dailyList: daily ? value : null,
-                      mintStatus: daily ? null : value,
-                    );
-                  } catch (_) {
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Could not update notifications.'),
-                        ),
-                      );
-                    }
-                  }
-                },
-              ),
-            ),
-          const SizedBox(height: 20),
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: const Icon(MintlyIcons.public),
-            title: const Text('Live source'),
-            subtitle: Text(ref.read(mintlyProvider).sourceStatusText),
-          ),
-          if (api.isAdmin)
-            OutlinedButton.icon(
-              onPressed: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const AdminScreen()),
-              ),
-              icon: const Icon(MintlyIcons.adminPanelSettings),
-              label: const Text('Manage accounts'),
-            ),
-          const SizedBox(height: 24),
-          TextButton(
-            onPressed: () =>
-                showLicensePage(context: context, applicationName: 'Mintly'),
-            child: const Text('Open source licenses'),
-          ),
-          OutlinedButton.icon(
-            onPressed: () async {
-              final notifier = ref.read(mintlyProvider.notifier);
-              try {
-                await PushService.instance.disconnect();
-              } catch (_) {}
-              await api.logout();
-              await notifier.loadInitialData();
-              if (mounted) Navigator.pop(context);
-            },
-            icon: const Icon(MintlyIcons.logout),
-            label: const Text('Sign out'),
-          ),
-        ],
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) => ListView(
     padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
@@ -420,7 +311,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
           TextButton(
             onPressed: () => Navigator.push(
               context,
-              MaterialPageRoute(builder: (_) => _settings()),
+              MaterialPageRoute(builder: (_) => const AccountSettingsScreen()),
             ),
             child: const Text('Settings'),
           ),

@@ -47,6 +47,9 @@ class NotificationService:
         user_id: Optional[str] = None,
     ) -> bool:
         """Send to opted-in devices; return True only if FCM accepted a message."""
+        if category == 'mint_status' and not user_id:
+            logger.warning('Mint-status delivery requires an account owner.')
+            return False
         payload = {
             "title": title,
             "body": body,
@@ -75,6 +78,7 @@ class NotificationService:
                     NotificationDevice.is_active.is_(True), User.is_active.is_(True),
                     User.deleted_at.is_(None),
                     *((NotificationDevice.user_id == user_id,) if user_id else ()),
+                    *((User.role == 'admin',) if category == 'source_health' else ()),
                 )
             )).scalars().all()
             for device in devices:
@@ -83,7 +87,8 @@ class NotificationService:
                 message = messaging.Message(
                     token=device.device_token,
                     notification=messaging.Notification(title=title, body=body),
-                    data={**(data or {}), "category": category, "deep_link": deep_link or ""},
+                    data={**(data or {}), "category": category, "deep_link": deep_link or "",
+                          "user_id": device.user_id},
                     android=messaging.AndroidConfig(priority="high"),
                 )
                 try:

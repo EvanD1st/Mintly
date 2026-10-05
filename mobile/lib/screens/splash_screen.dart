@@ -11,7 +11,8 @@ class SplashScreen extends StatefulWidget {
   State<SplashScreen> createState() => _SplashScreenState();
 }
 
-class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderStateMixin {
+class _SplashScreenState extends State<SplashScreen>
+    with SingleTickerProviderStateMixin {
   late AnimationController _controller;
   late Animation<double> _loaderAnimation;
   Timer? _timer;
@@ -25,7 +26,10 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
     );
 
     _loaderAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(parent: _controller, curve: const Cubic(0.2, 0.7, 0.4, 1.0)),
+      CurvedAnimation(
+        parent: _controller,
+        curve: const Cubic(0.2, 0.7, 0.4, 1.0),
+      ),
     );
 
     _controller.forward();
@@ -36,15 +40,19 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
         Navigator.of(context).pushReplacement(
           PageRouteBuilder(
             pageBuilder: (context, anim1, anim2) => const AuthGate(),
-            transitionsBuilder: (context, anim1, anim2, child) => FadeTransition(
-              opacity: anim1,
-              child: child,
-            ),
+            transitionsBuilder: (context, anim1, anim2, child) =>
+                FadeTransition(opacity: anim1, child: child),
             transitionDuration: const Duration(milliseconds: 400),
           ),
         );
       }
     });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (MediaQuery.disableAnimationsOf(context)) _controller.value = 1;
   }
 
   @override
@@ -58,7 +66,6 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final bg = MintlyColors.getBg(isDark);
-    final ink = MintlyColors.getInk(isDark);
     final muted = MintlyColors.getMuted(isDark);
     final green = MintlyColors.getGreen(isDark);
     final line = MintlyColors.getLine(isDark);
@@ -74,7 +81,11 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
               top: MediaQuery.of(context).size.height * 0.25,
               child: CustomPaint(
                 size: const Size(600, 600),
-                painter: _OrbitRingsPainter(lineColor: line),
+                painter: _OrbitRingsPainter(
+                  lineColor: line,
+                  green: green,
+                  animation: _controller,
+                ),
               ),
             ),
             // Splash Content
@@ -91,7 +102,10 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
                       Container(
                         width: 5,
                         height: 5,
-                        decoration: BoxDecoration(color: green, shape: BoxShape.circle),
+                        decoration: BoxDecoration(
+                          color: green,
+                          shape: BoxShape.circle,
+                        ),
                       ),
                       const SizedBox(width: 8),
                       Text(
@@ -106,86 +120,92 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
                     ],
                   ),
 
-                  // Center Logo, Wordmark, Tagline & Loader
+                  // Animated logo, tagline and loader
                   Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       // Orbit Logo Mark
-                      Stack(
-                        clipBehavior: Clip.none,
-                        alignment: Alignment.center,
-                        children: [
-                          Transform.rotate(
-                            angle: -7 * math.pi / 180,
-                            child: Container(
-                              width: 96,
-                              height: 96,
-                              decoration: BoxDecoration(
-                                color: green,
-                                borderRadius: BorderRadius.circular(28),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: green.withValues(alpha: 0.25),
-                                    blurRadius: 36,
-                                    offset: const Offset(0, 10),
-                                  ),
-                                ],
+                      AnimatedBuilder(
+                        animation: _controller,
+                        builder: (context, child) {
+                          final progress = _controller.value;
+                          final entrance = Curves.easeOutCubic.transform(
+                            (progress / .45).clamp(0.0, 1.0),
+                          );
+                          return Opacity(
+                            opacity: entrance,
+                            child: Transform.translate(
+                              offset: Offset(
+                                0,
+                                16 * (1 - entrance) -
+                                    4 * math.sin(progress * math.pi),
                               ),
-                              child: Center(
+                              child: Transform.scale(
+                                key: const Key('splash-mark-scale'),
+                                scale: .82 + .18 * entrance,
                                 child: Transform.rotate(
-                                  angle: 7 * math.pi / 180,
-                                  child: const Icon(
-                                    Icons.adjust,
-                                    size: 52,
-                                    color: Colors.white,
+                                  angle: -.12 * (1 - entrance),
+                                  child: child,
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                        child: Stack(
+                          clipBehavior: Clip.none,
+                          alignment: Alignment.center,
+                          children: [
+                            Transform.rotate(
+                              angle: -7 * math.pi / 180,
+                              child: Container(
+                                width: 96,
+                                height: 96,
+                                decoration: BoxDecoration(
+                                  color: green,
+                                  borderRadius: BorderRadius.circular(28),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: green.withValues(alpha: 0.25),
+                                      blurRadius: 36,
+                                      offset: const Offset(0, 10),
+                                    ),
+                                  ],
+                                ),
+                                child: Center(
+                                  child: Transform.rotate(
+                                    angle: 7 * math.pi / 180,
+                                    child: const Icon(
+                                      Icons.adjust,
+                                      size: 52,
+                                      color: Colors.white,
+                                    ),
                                   ),
                                 ),
                               ),
                             ),
-                          ),
-                          // Sparkle
-                          Positioned(
-                            top: -6,
-                            right: -10,
-                            child: Icon(Icons.star, size: 22, color: green),
-                          ),
-                          // Dot
-                          Positioned(
-                            bottom: 6,
-                            left: -8,
-                            child: Container(
-                              width: 7,
-                              height: 7,
-                              decoration: BoxDecoration(
-                                color: green.withValues(alpha: 0.6),
-                                shape: BoxShape.circle,
-                              ),
+                            // Sparkle
+                            Positioned(
+                              top: -6,
+                              right: -10,
+                              child: Icon(Icons.star, size: 22, color: green),
                             ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 22),
-
-                      // Wordmark: mintly.
-                      RichText(
-                        text: TextSpan(
-                          style: TextStyle(
-                            fontSize: 54,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: -3.0,
-                            color: ink,
-                            fontFamily: 'Roboto',
-                          ),
-                          children: [
-                            const TextSpan(text: 'mintly'),
-                            TextSpan(
-                              text: '.',
-                              style: TextStyle(color: green),
+                            // Dot
+                            Positioned(
+                              bottom: 6,
+                              left: -8,
+                              child: Container(
+                                width: 7,
+                                height: 7,
+                                decoration: BoxDecoration(
+                                  color: green.withValues(alpha: 0.6),
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
                             ),
                           ],
                         ),
                       ),
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 28),
 
                       // Tagline
                       Text(
@@ -228,7 +248,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
                       const SizedBox(height: 12),
 
                       Text(
-                        'Opening Mintly…',
+                        'Getting ready…',
                         style: TextStyle(
                           fontSize: 11,
                           color: muted,
@@ -272,8 +292,13 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
 }
 
 class _OrbitRingsPainter extends CustomPainter {
-  final Color lineColor;
-  _OrbitRingsPainter({required this.lineColor});
+  final Color lineColor, green;
+  final Animation<double> animation;
+  _OrbitRingsPainter({
+    required this.lineColor,
+    required this.green,
+    required this.animation,
+  }) : super(repaint: animation);
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -283,14 +308,35 @@ class _OrbitRingsPainter extends CustomPainter {
       ..strokeWidth = 1.0;
 
     final center = Offset(size.width / 2, size.height / 2);
+    final angle = animation.value * math.pi * .9 - math.pi / 2;
+    canvas.drawCircle(
+      center + Offset(math.cos(angle) * 210, math.sin(angle) * 210),
+      4,
+      Paint()..color = green.withValues(alpha: .35),
+    );
     // Outer ring
-    canvas.drawCircle(center, 280, paint..color = lineColor.withValues(alpha: 0.3));
+    canvas.drawCircle(
+      center,
+      280,
+      paint..color = lineColor.withValues(alpha: 0.3),
+    );
     // Middle ring
-    canvas.drawCircle(center, 210, paint..color = lineColor.withValues(alpha: 0.5));
+    canvas.drawCircle(
+      center,
+      210,
+      paint..color = lineColor.withValues(alpha: 0.5),
+    );
     // Inner ring
-    canvas.drawCircle(center, 140, paint..color = lineColor.withValues(alpha: 0.35));
+    canvas.drawCircle(
+      center,
+      140,
+      paint..color = lineColor.withValues(alpha: 0.35),
+    );
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+  bool shouldRepaint(_OrbitRingsPainter oldDelegate) =>
+      oldDelegate.lineColor != lineColor ||
+      oldDelegate.green != green ||
+      oldDelegate.animation != animation;
 }

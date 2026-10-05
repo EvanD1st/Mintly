@@ -161,6 +161,7 @@ class MintlyWorker:
             task.explorer_url = f"https://basescan.org/tx/{tx_hash}" if drop.chain.lower() == "base" else f"https://etherscan.io/tx/{tx_hash}"
 
             session.add(ActivityEvent(
+                user_id=wallet.user_id,
                 event_type="task_submitted",
                 label="Transaction submitted",
                 detail=f"{drop.name} ({auth.quantity} NFTs) submitted to {drop.chain}",
@@ -174,6 +175,7 @@ class MintlyWorker:
                 body=f"Submitted mint for {drop.name}. Tracking confirmation...",
                 category="mint_status",
                 deep_link=f"mintly://queue",
+                user_id=wallet.user_id,
             )
             logger.info(f"[{self.worker_id}] Task {task.id} successfully broadcasted. Hash: {tx_hash}")
 
@@ -215,6 +217,7 @@ class MintlyWorker:
 
             res = await self.executor.reconcile_transaction(t.transaction_hash, chain, is_demo=t.is_demo)
             if res.get("status") == "confirmed":
+                wallet = await session.get(Wallet, t.wallet_id)
                 t.status = "confirmed"
                 t.confirmed_at = datetime.now(timezone.utc)
                 t.actual_gas_used = res.get("gas_used")
@@ -223,6 +226,7 @@ class MintlyWorker:
                 t.block_number = res.get("block_number")
 
                 session.add(ActivityEvent(
+                    user_id=wallet.user_id if wallet else None,
                     event_type="task_confirmed",
                     label="Mint confirmed!",
                     detail=f"{drop.name if drop else 'NFT'} confirmed in block {t.block_number}",
@@ -236,6 +240,7 @@ class MintlyWorker:
                     body=f"Your mint for {drop.name if drop else 'NFT'} was confirmed on-chain.",
                     category="mint_status",
                     deep_link="mintly://queue",
+                    user_id=wallet.user_id if wallet else None,
                 )
                 logger.info(f"Task {t.id} confirmed on-chain!")
 
