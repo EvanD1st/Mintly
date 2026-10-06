@@ -191,6 +191,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(approved?['grant_id'], 'policy8453');
       expect(approved?['quantity'], 1);
+      expect(approved?['quantity_mode'], 'fixed');
       expect(approved?['price_cap_eth'], '0.00001');
       expect(approved?['fee_cap_eth'], '0.0001');
       expect(approved?['budget_eth'], '0.001');
@@ -201,6 +202,96 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     },
   );
+
+  for (final keepFree in [true, false]) {
+    testWidgets(
+      'Free mints only approves max; toggling off restores fixed quantity: $keepFree',
+      (tester) async {
+        tester.view.physicalSize = const Size(390, 844);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        Map<String, dynamic>? approved;
+        final api = await apiFor(approved: (r) => approved = r);
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [apiServiceProvider.overrideWith((ref) => api)],
+            child: MaterialApp(
+              theme: MintlyTheme.light(),
+              home: CopySettingsScreen(watch: watch),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.byType(DropdownButtonFormField<String>));
+        await tester.pumpAndSettle();
+        await tester.tap(find.textContaining('Base ·').last);
+        await tester.pumpAndSettle();
+        await tester.ensureVisible(find.text('2 NFTs'));
+        await tester.tap(find.text('2 NFTs'));
+        Future<void> reveal(Finder finder, {bool up = false}) async {
+          await tester.scrollUntilVisible(
+            finder,
+            up ? -200 : 200,
+            scrollable: find
+                .byWidgetPredicate(
+                  (w) =>
+                      w is Scrollable && w.axisDirection == AxisDirection.down,
+                )
+                .last,
+          );
+          await tester.pumpAndSettle();
+        }
+
+        Future<void> enter(String label, String value) async {
+          final field = find.byWidgetPredicate(
+            (w) => w is TextField && w.decoration?.labelText == label,
+          );
+          await reveal(field);
+          await tester.enterText(field, value);
+          await tester.pump();
+        }
+
+        await enter('Max mint price per NFT', '0.00001');
+        await enter('Max network fee per mint', '0.0001');
+        await enter('Total copy budget', '0.001');
+        await reveal(find.byType(CheckboxListTile));
+        await tester.tap(find.byType(CheckboxListTile));
+        await reveal(find.text('Free mints only'), up: true);
+        await tester.tap(find.text('Free mints only'));
+        await tester.pumpAndSettle();
+        await reveal(find.text('Maximum available for my wallet'), up: true);
+        expect(find.text('Maximum available for my wallet'), findsOneWidget);
+        expect(find.text('Quantity per mint'), findsNothing);
+        await reveal(find.byType(CheckboxListTile));
+        expect(
+          tester.widget<CheckboxListTile>(find.byType(CheckboxListTile)).value,
+          isFalse,
+        );
+        if (!keepFree) {
+          await reveal(find.text('Free mints only'), up: true);
+          await tester.tap(find.text('Free mints only'));
+          await tester.pumpAndSettle();
+          expect(find.text('Maximum available for my wallet'), findsNothing);
+          await reveal(find.text('Quantity per mint'), up: true);
+          expect(find.text('Quantity per mint'), findsOneWidget);
+          await enter('Max mint price per NFT', '0.00001');
+        }
+        await reveal(find.byType(CheckboxListTile));
+        await tester.tap(find.byType(CheckboxListTile));
+        await reveal(find.text('Enable copy minting'));
+        await tester.tap(find.text('Enable copy minting'));
+        await tester.pumpAndSettle();
+        expect(approved?['quantity_mode'], keepFree ? 'max_free' : 'fixed');
+        expect(approved?['quantity'], keepFree ? 100 : 2);
+        expect(approved?['price_cap_eth'], keepFree ? '0' : '0.00001');
+        expect(approved?['free_only'], keepFree);
+        expect(approved?['fee_cap_eth'], '0.0001');
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox());
+      },
+    );
+  }
 
   for (final dark in [false, true]) {
     testWidgets(
@@ -298,6 +389,28 @@ void main() {
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);
         await capture('settings');
+        await tester.scrollUntilVisible(
+          find.text('Free mints only'),
+          200,
+          scrollable: find
+              .byWidgetPredicate(
+                (w) => w is Scrollable && w.axisDirection == AxisDirection.down,
+              )
+              .last,
+        );
+        await tester.tap(find.text('Free mints only'));
+        await tester.pumpAndSettle();
+        await tester.scrollUntilVisible(
+          find.text('Maximum available for my wallet'),
+          -200,
+          scrollable: find
+              .byWidgetPredicate(
+                (w) => w is Scrollable && w.axisDirection == AxisDirection.down,
+              )
+              .last,
+        );
+        expect(tester.takeException(), isNull);
+        await capture('max-free-settings');
         await tester.pumpWidget(const SizedBox());
       },
     );

@@ -39,7 +39,8 @@ async def copying(lab, monkeypatch):
         fee = lab.w.eth.accounts[1]
         tx = lab.sea.functions.mintPublic(lab.nft.address, fee, watched.address, quantity).build_transaction({
             'from': watched.address, 'nonce': lab.w.eth.get_transaction_count(watched.address),
-            'gas': 400000, 'gasPrice': lab.w.eth.gas_price, 'value': 10 * quantity, 'chainId': 31337})
+            'gas': 400000, 'gasPrice': lab.w.eth.gas_price,
+            'value': lab.sea.functions.getPublicDrop(lab.nft.address).call()[0] * quantity, 'chainId': 31337})
         result = lab.w.eth.send_raw_transaction(watched.sign_transaction(tx).raw_transaction)
         receipt = lab.w.eth.wait_for_transaction_receipt(result)
         assert receipt.status == 1
@@ -291,3 +292,153 @@ async def test_base_inclusion_overrun_keeps_real_charge_and_disables_future_copy
         rule = await db.get(CopyRule,c['request']['request_id'])
         assert grant.status == 'disabled' and grant.spent_wei == actual and grant.reserved_wei == 0
         assert rule.status == 'paused' and rule.spent_wei == actual and rule.reserved_wei == 0
+
+# Maximum free copying is approved separately; old pinned quantities stay fixed.
+def free_stage(lab, limit=10):
+    lab.w.provider.make_request("hardhat_impersonateAccount", [lab.nft.address])
+    lab.w.eth.wait_for_transaction_receipt(lab.sea.functions.updatePublicDrop((0, lab.start, lab.end, limit, 500, True)).transact({"from": lab.nft.address}))
+    lab.w.provider.make_request("hardhat_stopImpersonatingAccount", [lab.nft.address])
+
+
+def mint_before_copy(lab, quantity, recipient=None):
+    if lab.w.eth.get_block("latest").timestamp < lab.start:
+        lab.w.provider.make_request("evm_setNextBlockTimestamp", [lab.start])
+    tx = lab.sea.functions.mintPublic(lab.nft.address, lab.w.eth.accounts[1], recipient or lab.owner.address, quantity).build_transaction({
+        "from": lab.owner.address, "nonce": lab.w.eth.get_transaction_count(lab.owner.address),
+        "gas": 12000000, "gasPrice": lab.w.eth.gas_price, "value": 0, "chainId": 31337})
+    receipt = lab.w.eth.wait_for_transaction_receipt(lab.w.eth.send_raw_transaction(lab.owner.sign_transaction(tx).raw_transaction))
+    assert receipt.status == 1
+
+
+def maximum_request(c):
+    c["request"].update(quantity=100, quantity_mode="max_free", free_only=True,
+        price_cap_eth="0", fee_cap_eth="0.001", budget_eth="0.002")
+
+
+@pytest.mark.parametrize("already_minted", [0, 3])
+async def test_maximum_free_copies_remaining_wallet_allowance_with_real_receipt(copying, already_minted):
+    c = copying; lab = c["lab"]
+    free_stage(lab)
+    if already_minted: mint_before_copy(lab, already_minted)
+    maximum_request(c)
+    rule = await c["approve"]()
+    assert rule["snapshot"]["quantity_mode"] == "max_free"
+    assert rule["snapshot"]["quantity"] == 100
+    await c["mint"](1); await c["scan"]()
+    event = (await lab.client.get("/api/copy-mints/activity")).json()["events"][0]
+    assert event["quantity"] == 10 - already_minted and event["observation"]["source_quantity"] == 1
+    await lab.sign(event["task_id"]); await lab.due(); await lab.tick()
+    lab.w.provider.make_request("evm_mine", []); await lab.due(); await lab.tick()
+    event = (await lab.client.get("/api/copy-mints/activity")).json()["events"][0]
+    assert event["status"] == "confirmed"
+    assert lab.nft.functions.minted(lab.owner.address).call() == 10
+    assert lab.nft.functions.minted(c["source"].address).call() == 1
+    assert event["actual_cost_wei"] and int(event["actual_cost_wei"]) <= 10**15
+    # Activity is actual quantity; history retains the approved dynamic ceiling.
+    history = (await lab.client.get("/api/history?section=copies")).json()["records"][0]
+    assert history["authorization"]["quantity_mode"] == "max_free" and history["quantity"] == 100
+    await c["mint"](1); await c["scan"]()
+    events = (await lab.client.get("/api/copy-mints/activity")).json()["events"]
+    assert len(events) == 2 and sum(e["task_id"] is not None for e in events) == 1
+
+
+async def test_maximum_free_is_bounded_by_remaining_collection_supply(copying):
+    c = copying; lab = c["lab"]
+    free_stage(lab, 100)
+    if lab.w.eth.get_block('latest').timestamp < lab.start:
+        lab.w.provider.make_request('evm_setNextBlockTimestamp', [lab.start])
+    receipt = lab.w.eth.wait_for_transaction_receipt(lab.sea.functions.mintPublic(
+        lab.nft.address, lab.w.eth.accounts[1], lab.w.eth.accounts[4], 98).transact({
+            'from': lab.w.eth.accounts[4], 'gas': 12000000, 'value': 0}))
+    assert receipt.status == 1 and lab.nft.functions.totalSupply().call() == 98
+    free_stage(lab, 10)
+    maximum_request(c); await c["approve"](); await c["mint"](1); await c["scan"]()
+    event = (await lab.client.get("/api/copy-mints/activity")).json()["events"][0]
+    assert event["quantity"] == 1
+    await lab.sign(event["task_id"]); await lab.due(); await lab.tick()
+    lab.w.provider.make_request("evm_mine", []); await lab.due(); await lab.tick()
+    assert lab.nft.functions.totalSupply().call() == 100
+    assert lab.nft.functions.ownerOf(100).call() == lab.owner.address
+
+
+@pytest.mark.parametrize("blocker", ["fees", "already_full", "gas_balance"])
+async def test_maximum_free_skips_unaffordable_or_exhausted_mints_without_signing(copying, blocker):
+    c = copying; lab = c["lab"]
+    free_stage(lab)
+    if blocker == "already_full": mint_before_copy(lab, 10)
+    maximum_request(c)
+    if blocker == "fees": c["request"]["fee_cap_eth"] = "0.000000000000000001"
+    await c["approve"]()
+    if blocker == "gas_balance": lab.w.provider.make_request("hardhat_setBalance", [lab.owner.address, "0x0"])
+    await c["mint"](1); await c["scan"]()
+    event = (await lab.client.get("/api/copy-mints/activity")).json()["events"][0]
+    assert event["status"] == "skipped" and event["task_id"] is None
+    assert (await lab.client.get("/api/tasks/queue")).json()["tasks"] == []
+    journal = CustodyVault().journal()
+    assert journal.execute("SELECT COUNT(*) FROM signed").fetchone()[0] == 0
+    journal.close()
+
+
+@pytest.mark.parametrize("invalid", ["paid", "nonzero_price", "ceiling", "unknown_mode"])
+async def test_maximum_quantity_approval_rejects_nonfree_or_unbounded_scope(copying, invalid):
+    c = copying; lab = c["lab"]
+    maximum_request(c)
+    if invalid == "paid": c["request"]["free_only"] = False
+    if invalid == "nonzero_price": c["request"]["price_cap_eth"] = "0.000000000000000001"
+    if invalid == "ceiling": c["request"]["quantity"] = 10
+    if invalid == "unknown_mode": c["request"]["quantity_mode"] = "max_paid"
+    result = await lab.client.post(f"/api/copy-mints/watches/{c['watch_id']}/rules", json=c["request"])
+    assert result.status_code == 422
+    assert (await lab.client.get("/api/copy-mints")).json()["watches"][0]["rules"] == []
+
+
+async def test_legacy_free_approval_retains_fixed_quantity(copying):
+    c = copying; lab = c["lab"]
+    free_stage(lab)
+    c["request"].update(free_only=True, price_cap_eth="0")
+    rule = await c["approve"]()
+    assert "quantity_mode" not in rule["snapshot"]
+    await c["mint"](1); await c["scan"]()
+    event = (await lab.client.get("/api/copy-mints/activity")).json()["events"][0]
+    assert event["quantity"] == 1
+    await lab.sign(event["task_id"])
+    assert lab.nft.functions.totalSupply().call() == 1  # source only; copied bytes have not broadcast
+
+
+@pytest.mark.parametrize("tamper", ["quantity", "price", "mode", "pin"])
+async def test_maximum_free_signer_rejects_altered_task_or_rule(copying, tamper):
+    c = copying; lab = c["lab"]
+    free_stage(lab); mint_before_copy(lab, 3)
+    maximum_request(c); await c["approve"](); await c["mint"](1); await c["scan"]()
+    event = (await lab.client.get("/api/copy-mints/activity")).json()["events"][0]
+    async with lab.factory() as db:
+        task = await db.get(MintTask, event["task_id"])
+        auth = await db.get(MintAuthorization, task.authorization_id)
+        snapshot = dict(auth.snapshot)
+        if tamper == "quantity": snapshot["quantity"] = auth.quantity = 8
+        if tamper == "price": snapshot["price_wei"] = 1
+        if tamper == "mode": snapshot["copy_quantity_mode"] = "fixed"
+        if tamper == "pin":
+            rule = await db.get(CopyRule, c["request"]["request_id"])
+            rule.snapshot = {**rule.snapshot, "quantity_mode": "fixed"}
+            rule.context_hash = automatic.digest(rule.snapshot)
+        auth.snapshot = snapshot
+        await db.commit()
+    result = await lab.signer_client.post(f"/tasks/{event['task_id']}/prepare")
+    assert result.status_code == 409, result.text
+    journal = CustodyVault().journal()
+    assert journal.execute("SELECT COUNT(*) FROM signed").fetchone()[0] == 0
+    journal.close()
+
+@pytest.mark.parametrize("original_mode", ["fixed", "max_free"])
+async def test_quantity_mode_retry_cannot_rewrite_a_pinned_approval(copying, original_mode):
+    c = copying; lab = c["lab"]
+    maximum_request(c)
+    c["request"]["quantity_mode"] = original_mode
+    rule = await c["approve"]()
+    c["request"]["quantity_mode"] = "fixed" if original_mode == "max_free" else "max_free"
+    response = await lab.client.post(f"/api/copy-mints/watches/{c['watch_id']}/rules", json=c["request"])
+    assert response.status_code == 409
+    async with lab.factory() as db:
+        saved = await db.get(CopyRule, rule["id"])
+        assert saved.snapshot.get("quantity_mode", "fixed") == original_mode

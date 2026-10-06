@@ -1,5 +1,6 @@
 """Owner-scoped Copy mints API. Following never grants spending authority."""
 from datetime import datetime, timezone, timedelta
+from typing import Literal
 from pathlib import Path
 import uuid
 import httpx
@@ -29,6 +30,7 @@ class RuleRequest(BaseModel):
     request_id: uuid.UUID
     grant_id: uuid.UUID
     quantity: int = Field(ge=1, le=100, strict=True)
+    quantity_mode: Literal['fixed', 'max_free'] = 'fixed'
     price_cap_eth: str = Field(pattern=r'^[0-9]+(\.[0-9]+)?$', max_length=40)
     fee_cap_eth: str = Field(pattern=r'^[0-9]+(\.[0-9]+)?$', max_length=40)
     budget_eth: str = Field(pattern=r'^[0-9]+(\.[0-9]+)?$', max_length=40)
@@ -166,14 +168,20 @@ async def approve(watch_id: str, req: RuleRequest, user=Depends(get_current_user
     total = price * req.quantity + fee
     if req.free_only and price != 0:
         raise HTTPException(422, 'Free mints only requires a zero mint-price cap.')
+    if req.quantity_mode == 'max_free' and (not req.free_only or price != 0 or req.quantity != 100):
+        raise HTTPException(422, 'Maximum quantity requires free mints only, a zero price and the 100-NFT execution ceiling.')
     key = str(req.request_id)
     old = await db.get(CopyRule, key)
     request = dict(watch_id=watch.id, user_id=user.id, grant_id=grant.id, wallet_id=grant.wallet_id,
         account=grant.account, source_address=watch.address, chain_id=grant.chain_id, quantity=req.quantity,
         price_cap_wei=price, fee_cap_wei=fee, total_cap_wei=total, budget_wei=budget,
         free_only=req.free_only, expiry=int(expiry.timestamp()))
+    # Legacy approvals keep their exact pinned quantity; only new consent adds a mode.
+    if req.quantity_mode != 'fixed':
+        request['quantity_mode'] = req.quantity_mode
     if old:
-        if any(old.snapshot.get(k) != v for k, v in request.items()):
+        if (old.snapshot.get('quantity_mode', 'fixed') != req.quantity_mode
+                or any(old.snapshot.get(k) != v for k, v in request.items())):
             raise HTTPException(409, 'Approval request changed. Open a new review.')
         if old.status != 'registering':
             return public_rule(old)  # Retry cannot reset spent money or resume a paused rule.

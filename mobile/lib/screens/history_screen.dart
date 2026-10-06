@@ -93,7 +93,11 @@ class _HistoryState extends ConsumerState<HistoryScreen> {
             if (data['archived_at'] != null)
               Text('Removed ${_time(data['archived_at'])} · record retained'),
             if (data['quantity'] != null)
-              Text('${data['quantity']} NFTs · ${data['chain'] ?? ''}'),
+              Text(
+                authorization?['quantity_mode'] == 'max_free'
+                    ? 'Max free quantity (up to ${data['quantity']} NFTs) · ${data['chain'] ?? ''}'
+                    : '${data['quantity']} NFTs · ${data['chain'] ?? ''}',
+              ),
             if (authorization?['contract'] != null)
               SelectableText('Collection: ${authorization!['contract']}'),
             if (authorization?['copy_source'] != null) ...[

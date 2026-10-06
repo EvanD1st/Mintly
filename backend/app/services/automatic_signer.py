@@ -103,12 +103,16 @@ async def prepare_task(db, task_id, vault=None):
                 if not rule or rule.status != 'active' or not pin or pin['intent'] != rule.context_hash:
                     raise ValueError('Copy approval is paused or not independently registered')
                 r = json.loads(pin['snapshot'])
+                mode = copy_mints.quantity_mode(r)
+                quantity_matches = (r['quantity'] == s['quantity'] if mode == 'fixed' else (
+                    s.get('copy_quantity_mode') == mode and 1 <= s['quantity'] <= r['quantity']
+                    and s['price_wei'] == 0 and s['price_cap_wei'] == 0))
                 if (automatic.digest(rule.snapshot) != pin['intent'] or s.get('copy_rule_id') != rule.id
                         or r['grant_id'] != grant.id or r['user_id'] != grant.user_id
                         or r['chain_id'] != s['chain_id'] or r['wallet_id'] != wallet.id
                         or r['source_address'].lower() != source['source_address'].lower()
                         or source['block_number'] <= r['after_block']
-                        or r['quantity'] != s['quantity'] or s['expiry'] > r['expiry']
+                        or not quantity_matches or s['expiry'] > r['expiry']
                         or s['price_cap_wei'] != r['price_cap_wei'] or s['fee_cap_wei'] != r['fee_cap_wei']
                         or s['total_cap_wei'] != r['total_cap_wei'] or (r['free_only'] and s['price_wei'] != 0)):
                     raise ValueError('Copy mint differs from the independently approved limits')
@@ -238,6 +242,10 @@ async def register_copy_rule(rule_id: str, db=Depends(get_db)):
     vault = CustodyVault()
     policy = vault.policy(grant)
     r = rule.snapshot
+    try:
+        copy_mints.quantity_mode(r)
+    except (ValueError, KeyError):
+        raise HTTPException(409, 'Copy quantity mode is outside the approved free-mint scope.') from None
     user = await db.get(User, rule.user_id)
     if (not watch or watch.archived_at or watch.user_id != grant.user_id or not user or not user.is_active or user.deleted_at
             or automatic.digest(r) != rule.context_hash or r['user_id'] != grant.user_id

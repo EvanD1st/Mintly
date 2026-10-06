@@ -1217,7 +1217,8 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
     _pending ??= {
       'request_id': _uuid(),
       'grant_id': _policy!['id'],
-      'quantity': int.parse(_quantity.text.trim()),
+      'quantity': _free ? 100 : int.parse(_quantity.text.trim()),
+      'quantity_mode': _free ? 'max_free' : 'fixed',
       'price_cap_eth': _price.text.trim(),
       'fee_cap_eth': _gas.text.trim(),
       'budget_eth': _budget.text.trim(),
@@ -1348,69 +1349,86 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
                         _policy == null ? 'Choose a receiving policy.' : null,
                   ),
                   const SizedBox(height: 18),
-                  _Panel(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        const Text('Quantity per mint'),
-                        const SizedBox(height: 10),
-                        Row(
-                          children: [
-                            for (final count in [1, 2])
-                              Expanded(
-                                child: Padding(
-                                  padding: const EdgeInsets.only(right: 8),
-                                  child: OutlinedButton(
-                                    onPressed: locked
-                                        ? null
-                                        : () => setState(() {
-                                            _quantity.text = '$count';
-                                            _customQuantity = false;
-                                          }),
-                                    style: OutlinedButton.styleFrom(
-                                      backgroundColor:
-                                          _quantity.text == '$count'
-                                          ? Theme.of(context)
-                                                .colorScheme
-                                                .primary
-                                                .withValues(alpha: .12)
-                                          : null,
-                                    ),
-                                    child: Text(
-                                      '$count NFT${count == 1 ? '' : 's'}',
+                  if (_free)
+                    const _Panel(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Maximum available for my wallet',
+                            style: TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                          SizedBox(height: 8),
+                          Text(
+                            'Copies your remaining wallet allowance, up to 100 NFTs per drop, limited by available supply. The mint is skipped if its network fee exceeds your approved limit or gas balance.',
+                          ),
+                        ],
+                      ),
+                    )
+                  else
+                    _Panel(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          const Text('Quantity per mint'),
+                          const SizedBox(height: 10),
+                          Row(
+                            children: [
+                              for (final count in [1, 2])
+                                Expanded(
+                                  child: Padding(
+                                    padding: const EdgeInsets.only(right: 8),
+                                    child: OutlinedButton(
+                                      onPressed: locked
+                                          ? null
+                                          : () => setState(() {
+                                              _quantity.text = '$count';
+                                              _customQuantity = false;
+                                            }),
+                                      style: OutlinedButton.styleFrom(
+                                        backgroundColor:
+                                            _quantity.text == '$count'
+                                            ? Theme.of(context)
+                                                  .colorScheme
+                                                  .primary
+                                                  .withValues(alpha: .12)
+                                            : null,
+                                      ),
+                                      child: Text(
+                                        '$count NFT${count == 1 ? '' : 's'}',
+                                      ),
                                     ),
                                   ),
                                 ),
+                              Expanded(
+                                child: TextButton(
+                                  onPressed: locked
+                                      ? null
+                                      : () => setState(
+                                          () => _customQuantity = true,
+                                        ),
+                                  child: const Text('Custom'),
+                                ),
                               ),
-                            Expanded(
-                              child: TextButton(
-                                onPressed: locked
-                                    ? null
-                                    : () => setState(
-                                        () => _customQuantity = true,
-                                      ),
-                                child: const Text('Custom'),
-                              ),
-                            ),
-                          ],
-                        ),
-                        if (_customQuantity)
-                          TextFormField(
-                            controller: _quantity,
-                            enabled: !locked,
-                            keyboardType: TextInputType.number,
-                            decoration: const InputDecoration(
-                              labelText: 'NFTs per copied mint',
-                            ),
-                            validator: (v) =>
-                                (int.tryParse(v ?? '') ?? 0) < 1 ||
-                                    (int.tryParse(v ?? '') ?? 101) > 100
-                                ? 'Choose 1 to 100.'
-                                : null,
+                            ],
                           ),
-                      ],
+                          if (_customQuantity)
+                            TextFormField(
+                              controller: _quantity,
+                              enabled: !locked,
+                              keyboardType: TextInputType.number,
+                              decoration: const InputDecoration(
+                                labelText: 'NFTs per copied mint',
+                              ),
+                              validator: (v) =>
+                                  (int.tryParse(v ?? '') ?? 0) < 1 ||
+                                      (int.tryParse(v ?? '') ?? 101) > 100
+                                  ? 'Choose 1 to 100.'
+                                  : null,
+                            ),
+                        ],
+                      ),
                     ),
-                  ),
                   _Panel(
                     child: Column(
                       children: [
@@ -1455,12 +1473,15 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
                         SwitchListTile(
                           contentPadding: EdgeInsets.zero,
                           title: const Text('Free mints only'),
-                          subtitle: const Text('Network fees still apply.'),
+                          subtitle: const Text(
+                            'Use the maximum remaining wallet allowance. Network fees still apply.',
+                          ),
                           value: _free,
                           onChanged: locked
                               ? null
                               : (v) => setState(() {
                                   _free = v;
+                                  _consent = false;
                                   _price.text = v ? '0' : '';
                                 }),
                         ),
@@ -1531,8 +1552,10 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
                     onChanged: locked
                         ? null
                         : (v) => setState(() => _consent = v == true),
-                    title: const Text(
-                      'I authorize future public mints from this followed wallet within these quantity, price, fee, total-budget and expiry limits.',
+                    title: Text(
+                      _free
+                          ? 'I authorize the maximum eligible quantity of future free public mints, up to 100 NFTs per drop, within my network-fee, total-budget and expiry limits.'
+                          : 'I authorize future public mints from this followed wallet within these quantity, price, fee, total-budget and expiry limits.',
                     ),
                     subtitle: const Text(
                       'Pausing stops unsigned copies. Signed transactions remain tracked.',

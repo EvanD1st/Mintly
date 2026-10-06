@@ -14,11 +14,55 @@ from app.services.mint_plans import aware
 from app.services.seadrop_mint import decode_mint
 from app.services.signer.base import SEADROP_V1_ADDRESS, MINT_PUBLIC_SELECTOR
 from app.services.parser import format_wei_to_eth
+from app.services.automatic_fees import quote_gas, maximum_fee
 
 CHAINS = {1: 'Ethereum', 8453: 'Base', 4663: 'Robinhood', 31337: 'Local test', 11155111: 'Sepolia'}
 TRANSFER = '0x' + keccak(text='Transfer(address,address,uint256)').hex()
 SEADROP_MINT = '0x' + keccak(text='SeaDropMint(address,address,address,address,uint256,uint256,uint256,uint256)').hex()
 ZERO_TOPIC = '0x' + '0' * 64
+
+
+def quantity_mode(rule):
+    mode = rule.get('quantity_mode', 'fixed')
+    if mode not in ('fixed', 'max_free') or (mode == 'max_free' and (
+            not rule['free_only'] or rule['price_cap_wei'] != 0 or rule['quantity'] != 100)):
+        raise ValueError('Unsupported or unapproved copy quantity mode')
+    return mode
+
+
+async def maximum_free_quantity(web3, observation, rule):
+    """Remaining supported quantity, submitted only when its fee quote fits.
+
+    Reads only the receiving wallet's stats. RPC/eligibility failures propagate;
+    a successfully quoted fee above the limit skips the maximum mint.
+    """
+    if quantity_mode(rule) != 'max_free' or observation['price_wei'] != 0:
+        raise ValueError('Maximum copying requires a verified zero-price mint')
+    current = await public_stage(web3, observation['contract'])
+    if any(current[k] != observation[k] for k in ('price_wei', 'start', 'end')):
+        raise ValueError('Free public stage changed')
+    account = to_checksum_address(rule['account'])
+    minted, supply, maximum = decode(['uint256'] * 3, await web3.eth.call({
+        'to': observation['contract'], 'data': keccak(text='getMintStats(address)')[:4]
+        + encode(['address'], [account])}))
+    ceiling = min(rule['quantity'], max(0, current['limit'] - minted), max(0, maximum - supply))
+    balance = await web3.eth.get_balance(account, 'pending')
+    fee_limit = min(rule['fee_cap_wei'], balance)
+    if ceiling < 1 or fee_limit <= 0:
+        raise HTTPException(409, 'No remaining free mint allowance, supply or gas balance.')
+    base = dict(mint_kind='public', contract=observation['contract'], account=account,
+        recipient=account, chain_id=observation['chain_id'], price_wei=0, price_cap_wei=0,
+        start=current['start'], end=current['end'])
+
+    async def fits(count):
+        execution = await automatic.prepare_mint(web3, {**base, 'quantity': count})
+        tx = {'from': account, 'to': execution['target'], 'data': execution['data'], 'value': 0}
+        gas, price = await quote_gas(web3, tx, observation['chain_id'])
+        return await maximum_fee(web3, tx, observation['chain_id'], gas, price) <= fee_limit
+
+    if await fits(ceiling):
+        return ceiling
+    raise HTTPException(409, 'Maximum free mint exceeds your network-fee limit or available gas balance.')
 
 
 def enabled():
@@ -181,13 +225,17 @@ async def arm_event(db, event, rule, web3):
         return
     await verify_source(web3, o)
     drop, stage = await drop_for(db, web3, o)
+    mode = quantity_mode(r)
+    quantity = await maximum_free_quantity(web3, o, r) if mode == 'max_free' else r['quantity']
     req = SimpleNamespace(plan_id=None, grant_id=rule.grant_id, wallet_id=r['wallet_id'], drop_id=drop.id,
-        stage_id=stage.id, quantity=r['quantity'], price_cap_eth=format_wei_to_eth(r['price_cap_wei']),
+        stage_id=stage.id, quantity=quantity, price_cap_eth=format_wei_to_eth(r['price_cap_wei']),
         fee_cap_eth=format_wei_to_eth(r['fee_cap_wei']), total_cap_eth=format_wei_to_eth(r['total_cap_wei']),
         expires_at=min(aware(rule.expires_at), aware(stage.end_time_utc)), mint_kind='public',
         conditional_eligibility=False, onchain_stage_index=None)
     grant, s = await automatic.make_snapshot(db, req, rule.user_id)
     s['copy_rule_id'], s['copy_source'] = rule.id, o
+    if mode == 'max_free':
+        s['copy_quantity_mode'] = mode
     key = await no_duplicate(db, s)
     s['execution'] = await automatic.prepare_mint(web3, s)
     auth = MintAuthorization(id=str(uuid.uuid4()), wallet_id=r['wallet_id'], drop_id=drop.id, stage_id=stage.id,
