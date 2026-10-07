@@ -11,7 +11,7 @@ import 'package:mintly/services/api_service.dart';
 import 'package:mintly/services/wallet_secret.dart';
 import 'package:mintly/state/app_state.dart';
 import 'package:mintly/theme/app_theme.dart';
-import 'wallet_secret_test.dart' show phrase, firstAddress;
+import 'wallet_secret_test.dart' show phrase;
 
 void main() {
   testWidgets(
