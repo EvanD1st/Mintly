@@ -37,6 +37,10 @@ class _GlyphPainter extends CustomPainter {
       ..strokeWidth = 1.8
       ..strokeCap = StrokeCap.round;
     switch (kind) {
+      case 'add':
+        canvas.drawLine(const Offset(12, 5), const Offset(12, 19), p);
+        canvas.drawLine(const Offset(5, 12), const Offset(19, 12), p);
+        break;
       case 'down':
         canvas.drawPath(
           Path()
@@ -300,18 +304,22 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
 
   Future<void> _load({bool silent = false}) async {
     final generation = ++_generation;
-    final filter = _filter;
     try {
       final api = ref.read(apiServiceProvider);
       final data = await api.fetchCopyMints();
-      final activity = await api.fetchCopyActivity(watchId: filter);
+      if (!mounted || generation != _generation) return;
+      final watches = (data['watches'] as List).cast<Map>();
+      if (_filter != null && !watches.any((w) => w['id'] == _filter)) {
+        _filter = null;
+      }
+      setState(() {
+        _data = data;
+        _loading = false;
+        _error = null;
+      });
+      final activity = await api.fetchCopyActivity(watchId: _filter);
       if (mounted && generation == _generation) {
-        setState(() {
-          _data = data;
-          _activity = activity;
-          _error = null;
-          _loading = false;
-        });
+        setState(() => _activity = activity);
       }
     } catch (e) {
       if (mounted && generation == _generation) {
@@ -373,7 +381,9 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Text(
-                  wallet == null ? 'Follow a wallet' : 'Edit followed wallet',
+                  wallet == null
+                      ? 'Follow another wallet'
+                      : 'Edit name and networks',
                   style: Theme.of(context).textTheme.headlineSmall,
                 ),
                 const SizedBox(height: 8),
@@ -464,6 +474,8 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
                             if (sheetContext.mounted) {
                               Navigator.pop(sheetContext);
                             }
+                            _search.clear();
+                            _filter = null;
                             await _load();
                           } catch (e) {
                             if (sheetContext.mounted) {
@@ -782,13 +794,19 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
             padding: EdgeInsets.all(20),
             child: Text('No followed wallets match this search.'),
           ),
-        ...watches.map(_watch),
+        for (final watch in watches)
+          KeyedSubtree(
+            key: ValueKey('copy-watch-${watch['id']}'),
+            child: _watch(watch),
+          ),
         FilledButton.icon(
           onPressed: _busy || _data?['enabled'] != true
               ? null
               : () => _follow(),
           icon: const Text('+', style: TextStyle(fontSize: 24)),
-          label: const Text('Follow wallet'),
+          label: Text(
+            _watches.isEmpty ? 'Follow wallet' : 'Follow another wallet',
+          ),
         ),
         const SizedBox(height: 18),
         const Text(
@@ -1047,6 +1065,11 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(
       actions: [
+        IconButton(
+          tooltip: 'Follow another wallet',
+          icon: const CopyGlyph('add'),
+          onPressed: _busy || _data == null ? null : () => _follow(),
+        ),
         Padding(
           padding: const EdgeInsets.only(right: 18),
           child: Center(
@@ -1310,15 +1333,10 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
                   ),
                 ),
                 const SizedBox(height: 7),
-                const Text(
-                  'Set when and how Mintly should copy this wallet’s public mints.',
-                ),
                 const SizedBox(height: 18),
                 if (policies.isEmpty)
                   const _Panel(
-                    child: Text(
-                      'Import your receiving wallet and approve a policy for Ethereum, Base or Robinhood from the Wallet screen first. A connected address alone cannot sign automatically.',
-                    ),
+                    child: Text('Add a receiving wallet in Wallets first.'),
                   ),
                 if (policies.isNotEmpty) ...[
                   DropdownButtonFormField<String>(
@@ -1359,9 +1377,7 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
                             style: TextStyle(fontWeight: FontWeight.w700),
                           ),
                           SizedBox(height: 8),
-                          Text(
-                            'Copies your remaining wallet allowance, up to 100 NFTs per drop, limited by available supply. The mint is skipped if its network fee exceeds your approved limit or gas balance.',
-                          ),
+                          Text('Up to 100 NFTs per drop.'),
                         ],
                       ),
                     )
@@ -1474,7 +1490,7 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
                           contentPadding: EdgeInsets.zero,
                           title: const Text('Free mints only'),
                           subtitle: const Text(
-                            'Use the maximum remaining wallet allowance. Network fees still apply.',
+                            'Use the maximum available quantity.',
                           ),
                           value: _free,
                           onChanged: locked
@@ -1488,9 +1504,7 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
                         const ListTile(
                           contentPadding: EdgeInsets.zero,
                           title: Text('Only eligible public drops'),
-                          subtitle: Text(
-                            'Wallet limits, supply and the exact public stage are always checked.',
-                          ),
+
                           trailing: Text('Always on'),
                         ),
                         DropdownButtonFormField<int>(
@@ -1525,25 +1539,9 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
                   ),
                   _Panel(
                     highlighted: true,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Copies eligible mints after new wallet activity is detected.',
-                          style: TextStyle(fontWeight: FontWeight.w700),
-                        ),
-                        const SizedBox(height: 8),
-                        const Text(
-                          'Only activity after enabling or resuming is copied automatically. Each collection’s public stage is copied once for your receiving wallet. Your wallet’s overall spending policy also applies.',
-                        ),
-                        if (_policy?['chain_id'] == 8453)
-                          const Padding(
-                            padding: EdgeInsets.only(top: 8),
-                            child: Text(
-                              'Base parent-chain fees vary until inclusion. Fee limits are checked before submission; an inclusion-time overrun stops future signing.',
-                            ),
-                          ),
-                      ],
+                    child: Text(
+                      'Network fees apply. Mints outside your limits are skipped. Already signed transactions may still finish after pausing or unlinking.'
+                      '${_policy?['chain_id'] == 8453 ? ' Base fees can change until inclusion.' : ''}',
                     ),
                   ),
                   CheckboxListTile(
@@ -1554,11 +1552,8 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
                         : (v) => setState(() => _consent = v == true),
                     title: Text(
                       _free
-                          ? 'I authorize the maximum eligible quantity of future free public mints, up to 100 NFTs per drop, within my network-fee, total-budget and expiry limits.'
-                          : 'I authorize future public mints from this followed wallet within these quantity, price, fee, total-budget and expiry limits.',
-                    ),
-                    subtitle: const Text(
-                      'Pausing stops unsigned copies. Signed transactions remain tracked.',
+                          ? 'Approve maximum free minting (up to 100 NFTs) within these limits.'
+                          : 'Approve copy minting within these limits.',
                     ),
                   ),
                   if (_error != null)

@@ -66,6 +66,7 @@ class MintTask(Base):
     signed_tx_raw: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     transaction_hash: Mapped[Optional[str]] = mapped_column(String(66), nullable=True, index=True)
     broadcast_attempts: Mapped[int] = mapped_column(Integer, default=0)
+    broadcast_disabled_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     
     submitted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     confirmed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)

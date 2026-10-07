@@ -65,7 +65,7 @@ async def prepare_task(db, task_id, vault=None):
     wallet = await db.get(Wallet, task.wallet_id)
     user = await db.get(User, grant.user_id)
     if (auth.is_revoked or not user or not user.is_active or user.deleted_at
-            or not wallet or wallet.user_id != grant.user_id or wallet.id != grant.wallet_id
+            or not wallet or wallet.archived_at or wallet.user_id != grant.user_id or wallet.id != grant.wallet_id
             or wallet.address.lower() != grant.account.lower() or auth.wallet_id != wallet.id
             or s['account'].lower() != wallet.address.lower() or s['recipient'].lower() != wallet.address.lower()
             or task.stage_id != auth.stage_id or task.drop_id != auth.drop_id

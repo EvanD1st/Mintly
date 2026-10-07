@@ -302,7 +302,11 @@ class ApiService extends ChangeNotifier {
       );
       if (result is! Map ||
           result['id'] != payload['request_id'] ||
-          result['wallet_id'] != payload['wallet_id']) {
+          (payload['wallet_id'] != null
+              ? result['wallet_id'] != payload['wallet_id']
+              : result['wallet_id'] is! String ||
+                    '${result['account']}'.toLowerCase() !=
+                        '${payload['account_address']}'.toLowerCase())) {
         throw const ApiException('Import response could not be verified.');
       }
     } catch (_) {

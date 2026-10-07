@@ -115,6 +115,9 @@ async def grant_for(db, grant_id, user_id):
     if grant.adapter != MODE:
         raise HTTPException(409, 'Unsupported automatic policy adapter or chain.')
     enabled(grant.chain_id)
+    wallet = await db.get(Wallet, grant.wallet_id)
+    if not wallet or wallet.archived_at:
+        raise HTTPException(409, 'Wallet is unlinked. Add it again and approve a new policy.')
     if grant.status != 'enabled' or aware(grant.expires_at) <= datetime.now(timezone.utc):
         raise HTTPException(409, 'Automatic policy is disabled or expired. Renew it in the signer before arming.')
     return grant
@@ -134,7 +137,7 @@ async def make_snapshot(db, req, user_id):
     wallet = await db.get(Wallet, req.wallet_id)
     drop = await db.get(Drop, req.drop_id)
     stage = await db.get(MintStage, req.stage_id)
-    if not wallet or wallet.user_id != user_id or not drop or not stage or stage.drop_id != drop.id:
+    if not wallet or wallet.archived_at or wallet.user_id != user_id or not drop or not stage or stage.drop_id != drop.id:
         raise HTTPException(404, 'Wallet, drop or selected stage not found.')
     if grant.wallet_id != wallet.id or grant.account.lower() != wallet.address.lower():
         raise HTTPException(409, 'Signer policy does not belong to this wallet.')

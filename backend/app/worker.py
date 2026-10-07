@@ -283,7 +283,7 @@ class MintlyWorker:
         if plan is None:
             return
         wallet = (await session.execute(select(Wallet).where(
-            Wallet.id == plan.wallet_id, Wallet.user_id == plan.user_id,
+            Wallet.id == plan.wallet_id, Wallet.user_id == plan.user_id, Wallet.archived_at.is_(None),
         ))).scalar_one_or_none()
         if wallet is None:
             plan.status = "error"

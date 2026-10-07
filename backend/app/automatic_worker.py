@@ -119,6 +119,12 @@ async def step(session_factory=AsyncSessionLocal, sign=request_signature, *, now
                     await db.commit()
                     return True
                 expiry = active_recovery.expires_at if active_recovery else task.expires_at_utc
+                if task.broadcast_disabled_at:
+                    task.status = 'uncertain'
+                    task.failure_reason = 'Wallet unlinked. Signed transaction remains tracked; further broadcasting is disabled.'
+                    task.next_attempt_at = now + timedelta(seconds=15)
+                    await db.commit()
+                    return True
                 attempt_ceiling = active_recovery.attempt_ceiling if active_recovery else 4
                 if (aware(expiry) <= now or task.broadcast_attempts >= attempt_ceiling):
                     task.status = 'uncertain'

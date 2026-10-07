@@ -1,8 +1,9 @@
 """SQLAlchemy models for Wallets and Address Book."""
 
 import uuid
+from datetime import datetime
 from typing import List
-from sqlalchemy import String, Boolean, JSON, ForeignKey
+from sqlalchemy import String, Boolean, JSON, ForeignKey, DateTime
 from sqlalchemy.orm import Mapped, mapped_column
 from app.database import Base
 
@@ -20,3 +21,4 @@ class Wallet(Base):
     supported_chains: Mapped[list] = mapped_column(JSON, default=lambda: ["Ethereum", "Base", "Sepolia", "Base Sepolia"])
     is_default: Mapped[bool] = mapped_column(Boolean, default=False)
     is_demo: Mapped[bool] = mapped_column(Boolean, default=False)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

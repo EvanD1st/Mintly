@@ -34,7 +34,9 @@ _capacity = asyncio.Semaphore(1)
 class ImportRequest(BaseModel):
     model_config = ConfigDict(extra='forbid', hide_input_in_errors=True)
     request_id: uuid.UUID
-    wallet_id: uuid.UUID
+    wallet_id: uuid.UUID | None = None
+    account_address: str | None = Field(default=None, min_length=42, max_length=42)
+    wallet_label: str = Field(default='Wallet', min_length=1, max_length=80)
     chain_id: int | None = None
     private_key: SecretStr
     password: SecretStr
@@ -81,6 +83,7 @@ async def config(user=Depends(get_current_user)):
     web3 = await automatic.provider()
     await web3.provider.disconnect()
     return {'chain_id':settings.AUTOMATIC_CHAIN_ID, 'max_expiry_days':30,
+        'phrase_wallet_setup': True,
         'automatic_collection_selection': True,
         'networks': [{'chain_id': c, 'name': n} for c, n, flag in (
             (1, 'Ethereum', settings.ENABLE_ETHEREUM_AUTOMATIC),
@@ -133,8 +136,8 @@ async def store_import(req, user, db):
     chain_id = req.chain_id if req.chain_id is not None else settings.AUTOMATIC_CHAIN_ID
     automatic.enabled(chain_id)
     await automatic.lock_execution(db)
-    wallet = await db.get(Wallet, str(req.wallet_id))
-    if not wallet or wallet.user_id != user.id or wallet.is_demo:
+    wallet = await db.get(Wallet, str(req.wallet_id)) if req.wallet_id else None
+    if req.wallet_id and (not wallet or wallet.user_id != user.id or wallet.is_demo):
         raise HTTPException(404, 'Linked wallet not found.')
     now = datetime.now(timezone.utc)
     if not req.consent or req.expires_at.tzinfo is None or not now < req.expires_at <= now + timedelta(days=30):
@@ -144,20 +147,46 @@ async def store_import(req, user, db):
         raise ValueError('Invalid finite budget')
     account = Account.from_key(req.private_key.get_secret_value().strip())
     req.private_key = SecretStr('')
-    if account.address.lower() != wallet.address.lower():
+    if ((wallet and account.address.lower() != wallet.address.lower())
+            or (req.account_address and account.address.lower() != req.account_address.lower())):
         raise HTTPException(409, 'Private key does not match the linked wallet. Nothing was imported.')
     contracts = [to_checksum_address(req.contract)] if req.contract else []
     grant_id = str(req.request_id)
     vault = CustodyVault()
     old = await db.get(AutomaticGrant, grant_id)
     if old:
-        if old.user_id != user.id or old.wallet_id != wallet.id:
+        if wallet is None:
+            wallet = await db.get(Wallet, old.wallet_id)
+        if (old.user_id != user.id or not wallet or old.wallet_id != wallet.id
+                or account.address.lower() != wallet.address.lower() or wallet.archived_at):
             raise ValueError('Request owner mismatch')
         policy = vault.policy(old)
         if (policy['chain_id'] != chain_id or policy['contracts'] != contracts or policy.get('collection_scope') != req.collection_scope or policy['budget_wei'] != budget or
                 policy['max_task_wei'] != maximum or policy['expires_at'] != int(req.expires_at.timestamp())):
             raise ValueError('Request changed')
         return automatic.public_grant(old)  # Never renew/reactivate or reset a budget on retry.
+    if wallet is None:
+        if not req.account_address:
+            raise HTTPException(422, 'Confirm the account selected from your phrase.')
+        from app.models import User
+        matches = (await db.scalars(select(Wallet).join(User, User.id == Wallet.user_id).where(
+            func.lower(Wallet.address) == account.address.lower(), User.is_active.is_(True), User.deleted_at.is_(None)))).all()
+        if any(w.user_id != user.id for w in matches):
+            raise HTTPException(409, 'This wallet belongs to another Mintly account.')
+        wallet = next(iter(matches), None)
+        if wallet is not None and wallet.archived_at is None:
+            raise HTTPException(409, 'This account is already linked. Choose another account or open its wallet details.')
+        if wallet is None:
+            active_count = await db.scalar(select(func.count()).select_from(Wallet).where(
+                Wallet.user_id == user.id, Wallet.archived_at.is_(None)))
+            if active_count >= 20:
+                raise HTTPException(409, 'Unlink a wallet before adding more than 20.')
+            wallet = Wallet(id=str(uuid.uuid5(uuid.NAMESPACE_URL, f'mintly-wallet:{user.id}:{account.address.lower()}')),
+                user_id=user.id, label=req.wallet_label.strip() or 'Wallet',
+                address=account.address, signing_capability='custodial', supported_chains=['Ethereum','Base','Robinhood Chain'],
+                is_default=active_count == 0, is_demo=False)
+            db.add(wallet)
+            await db.flush()
     web3 = await automatic.provider_for(chain_id)
     try:
         code = await web3.eth.get_code(account.address, 'pending')
@@ -197,5 +226,16 @@ async def store_import(req, user, db):
         expires_at=req.expires_at,scope={k:policy[k] for k in ('contracts','mint_kinds','max_task_wei','collection_scope') if k in policy},
         budget_wei=budget,reserved_wei=0,spent_wei=0,status='enabled')
     db.add(grant)
+    if wallet.archived_at:
+        active = await db.scalar(select(func.count()).select_from(Wallet).where(
+            Wallet.user_id == user.id, Wallet.archived_at.is_(None), Wallet.id != wallet.id))
+        if active >= 20:
+            raise HTTPException(409, 'Unlink a wallet before adding more than 20.')
+        wallet.is_default = active == 0
+    wallet.archived_at = None
+    wallet.signing_capability = 'custodial'
+    wallet.supported_chains = sorted(set(wallet.supported_chains or []) | {'Ethereum','Base','Robinhood Chain'})
+    if req.wallet_id is None:
+        wallet.label = req.wallet_label.strip() or 'Wallet'
     await db.commit()
     return automatic.public_grant(grant)

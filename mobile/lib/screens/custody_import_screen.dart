@@ -13,13 +13,9 @@ final walletSecretResolverProvider =
     );
 
 class CustodyImportScreen extends ConsumerStatefulWidget {
-  final String walletId;
-  final String address;
-  const CustodyImportScreen({
-    super.key,
-    required this.walletId,
-    required this.address,
-  });
+  final String? walletId;
+  final String? address;
+  const CustodyImportScreen({super.key, this.walletId, this.address});
   @override
   ConsumerState<CustodyImportScreen> createState() =>
       _CustodyImportScreenState();
@@ -29,6 +25,9 @@ class _CustodyImportScreenState extends ConsumerState<CustodyImportScreen>
     with WidgetsBindingObserver {
   final _form = GlobalKey<FormState>();
   final _key = TextEditingController();
+  final _accountNumber = TextEditingController(text: '1');
+  final _label = TextEditingController(text: 'Wallet');
+  String? _selectedAddress;
   final _password = TextEditingController();
   final _budget = TextEditingController();
   final _maximum = TextEditingController();
@@ -38,8 +37,7 @@ class _CustodyImportScreenState extends ConsumerState<CustodyImportScreen>
   Uint8List? _walletKey;
   int _days = 7, _generation = 0;
   int? _chainId;
-  bool _phrase = true,
-      _limits = false,
+  bool _limits = false,
       _moreLimits = false,
       _consent = false,
       _busy = false,
@@ -64,6 +62,7 @@ class _CustodyImportScreenState extends ConsumerState<CustodyImportScreen>
   void _clearKey() {
     _walletKey?.fillRange(0, _walletKey!.length, 0);
     _walletKey = null;
+    _selectedAddress = null;
   }
 
   @override
@@ -83,7 +82,14 @@ class _CustodyImportScreenState extends ConsumerState<CustodyImportScreen>
     _generation++;
     WidgetsBinding.instance.removeObserver(this);
     _clearKey();
-    for (final c in [_key, _password, _budget, _maximum]) {
+    for (final c in [
+      _key,
+      _password,
+      _budget,
+      _maximum,
+      _accountNumber,
+      _label,
+    ]) {
       c.clear();
       c.dispose();
     }
@@ -94,9 +100,11 @@ class _CustodyImportScreenState extends ConsumerState<CustodyImportScreen>
     if (!_form.currentState!.validate()) return;
     final generation = _generation;
     final secret = <String, String>{
-      'kind': _phrase ? 'phrase' : 'private_key',
+      'kind': 'phrase',
       'secret': _key.text,
-      'address': widget.address,
+      if (widget.address != null) 'address': widget.address!,
+      if (widget.address == null)
+        'account_index': '${(int.tryParse(_accountNumber.text) ?? 1) - 1}',
     };
     _key.clear();
     setState(() {
@@ -113,11 +121,31 @@ class _CustodyImportScreenState extends ConsumerState<CustodyImportScreen>
       if (derived == null) {
         setState(
           () => _error =
-              'This secret does not match your linked wallet. Check the phrase or use that account’s private key.',
+              'This phrase does not contain the selected wallet account.',
         );
       } else {
+        final accountAddress = walletAddressFromKey(derived);
+        if (widget.walletId == null && !_attempted) {
+          final wallets = await ref.read(apiServiceProvider).fetchWallets();
+          if (!mounted || generation != _generation) {
+            derived.fillRange(0, derived.length, 0);
+            return;
+          }
+          if (wallets.any(
+            (w) =>
+                '${w['address']}'.toLowerCase() == accountAddress.toLowerCase(),
+          )) {
+            derived.fillRange(0, derived.length, 0);
+            setState(
+              () => _error =
+                  'This account is already linked. Choose another account number or phrase.',
+            );
+            return;
+          }
+        }
         _clearKey();
         _walletKey = derived;
+        _selectedAddress = accountAddress;
         setState(() => _limits = true);
       }
     } catch (_) {
@@ -145,7 +173,11 @@ class _CustodyImportScreenState extends ConsumerState<CustodyImportScreen>
     });
     final payload = <String, dynamic>{
       'request_id': _requestId,
-      'wallet_id': widget.walletId,
+      if (widget.walletId != null) 'wallet_id': widget.walletId,
+      'account_address': _selectedAddress,
+      'wallet_label': _label.text.trim().isEmpty
+          ? 'Wallet'
+          : _label.text.trim(),
       if (_chainId != null) 'chain_id': _chainId,
       'private_key': _walletKey!
           .map((v) => v.toRadixString(16).padLeft(2, '0'))
@@ -202,7 +234,9 @@ class _CustodyImportScreenState extends ConsumerState<CustodyImportScreen>
         builder: (context, snapshot) {
           if (snapshot.hasError ||
               (snapshot.hasData &&
-                  snapshot.data!['automatic_collection_selection'] != true)) {
+                  (snapshot.data!['automatic_collection_selection'] != true ||
+                      (widget.walletId == null &&
+                          snapshot.data!['phrase_wallet_setup'] != true)))) {
             return const Padding(
               padding: EdgeInsets.all(24),
               child: Text(
@@ -258,49 +292,45 @@ class _CustodyImportScreenState extends ConsumerState<CustodyImportScreen>
                     'Base parent-chain fees can change until inclusion. Limits are checked before submission.',
                   ),
                 const SizedBox(height: 8),
-                SelectableText(
-                  widget.address,
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
+                if (_selectedAddress != null || widget.address != null)
+                  SelectableText(
+                    _selectedAddress ?? widget.address!,
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
                 const SizedBox(height: 24),
                 if (!_limits) ...[
                   const Text(
-                    'Your recovery phrase is checked on this device. Only the key for this linked account is sent to Mintly’s encrypted signer.',
+                    'Your phrase stays on this device. Mintly stores the selected account’s encrypted key for automatic minting.',
                   ),
                   const SizedBox(height: 16),
-                  Wrap(
-                    spacing: 8,
-                    children: [
-                      TextButton(
-                        onPressed: _busy
-                            ? null
-                            : () => setState(() {
-                                _phrase = true;
-                                _key.clear();
-                                _error = null;
-                              }),
-                        child: Text(
-                          _phrase ? 'Recovery phrase ✓' : 'Recovery phrase',
-                        ),
+                  if (widget.walletId == null) ...[
+                    TextFormField(
+                      controller: _label,
+                      enabled: !_busy,
+                      maxLength: 80,
+                      decoration: const InputDecoration(
+                        labelText: 'Wallet name',
                       ),
-                      TextButton(
-                        onPressed: _busy
-                            ? null
-                            : () => setState(() {
-                                _phrase = false;
-                                _key.clear();
-                                _error = null;
-                              }),
-                        child: Text(!_phrase ? 'Private key ✓' : 'Private key'),
-                      ),
-                    ],
-                  ),
-                  TextFormField(
-                    key: Key(
-                      _phrase
-                          ? 'custody-recovery-phrase'
-                          : 'custody-private-key',
                     ),
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: _accountNumber,
+                      enabled: !_busy,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: 'Account number',
+                        helperText: 'Account 1, 2, etc. from this phrase',
+                      ),
+                      validator: (value) =>
+                          (int.tryParse(value ?? '') ?? 0) < 1 ||
+                              (int.tryParse(value ?? '') ?? 21) > 20
+                          ? 'Choose account 1 to 20'
+                          : null,
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+                  TextFormField(
+                    key: const Key('custody-recovery-phrase'),
                     controller: _key,
                     enabled: !_busy,
                     obscureText: true,
@@ -308,30 +338,16 @@ class _CustodyImportScreenState extends ConsumerState<CustodyImportScreen>
                     enableSuggestions: false,
                     autofillHints: const [],
                     keyboardType: TextInputType.visiblePassword,
-                    decoration: InputDecoration(
-                      labelText: _phrase
-                          ? 'Secret recovery phrase'
-                          : 'Private key',
-                      helperText: _phrase
-                          ? '12 or 24 English words, in order'
-                          : '64 hex characters, optionally starting with 0x',
+                    decoration: const InputDecoration(
+                      labelText: 'Secret recovery phrase',
+                      helperText: '12 or 24 words, in order',
                     ),
-                    validator: (v) => _phrase
-                        ? ([12, 24].contains(
-                                (v ?? '').trim().split(RegExp(r'\s+')).length,
-                              )
-                              ? null
-                              : 'Enter 12 or 24 words')
-                        : (RegExp(
-                                r'^(0x)?[0-9a-fA-F]{64}$',
-                              ).hasMatch((v ?? '').trim())
-                              ? null
-                              : 'Enter a valid private key'),
-                  ),
-                  const SizedBox(height: 12),
-                  const Text(
-                    'Finds the linked Ethereum account among your first 20 MetaMask accounts. Accounts imported separately into MetaMask need their own private key.',
-                    style: TextStyle(fontSize: 12),
+                    validator: (v) =>
+                        [12, 24].contains(
+                          (v ?? '').trim().split(RegExp(r'\s+')).length,
+                        )
+                        ? null
+                        : 'Enter 12 or 24 words',
                   ),
                   const SizedBox(height: 24),
                   FilledButton(
@@ -339,9 +355,7 @@ class _CustodyImportScreenState extends ConsumerState<CustodyImportScreen>
                     child: Text(_busy ? 'Checking wallet…' : 'Continue'),
                   ),
                 ] else ...[
-                  const Text(
-                    'The NFT collection is selected automatically from each mint you review. You do not need a contract address.',
-                  ),
+                  const Text('Approve access for this selected account.'),
                   const SizedBox(height: 20),
                   TextFormField(
                     key: const Key('custody-budget'),
@@ -424,7 +438,7 @@ class _CustodyImportScreenState extends ConsumerState<CustodyImportScreen>
                             _password.clear();
                             _limits = false;
                           }),
-                    child: const Text('Change wallet secret'),
+                    child: const Text('Change account'),
                   ),
                   TextButton(
                     onPressed: () => setState(() => _moreLimits = !_moreLimits),

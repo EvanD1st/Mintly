@@ -42,7 +42,7 @@ async def list_drops(
         source_text = f"@lakzonevn checked {synced:%d %b %H:%M} WAT"
     else:
         source_text = "@lakzonevn feed awaiting an X session; admin imports are available"
-    wallet = (await db.execute(select(Wallet).where(Wallet.user_id == user.id).order_by(
+    wallet = (await db.execute(select(Wallet).where(Wallet.user_id == user.id, Wallet.archived_at.is_(None)).order_by(
         Wallet.is_default.desc(), Wallet.created_at.asc(),
     ).limit(1))).scalar_one_or_none()
     return DropListResponse(
@@ -87,7 +87,7 @@ async def recheck_drop_eligibility(
 ):
     if wallet_id:
         wallet = (await db.execute(select(Wallet).where(
-            Wallet.id == wallet_id, Wallet.user_id == user.id,
+            Wallet.id == wallet_id, Wallet.user_id == user.id, Wallet.archived_at.is_(None),
         ))).scalar_one_or_none()
         if wallet is None:
             raise HTTPException(status_code=404, detail="Wallet not found.")

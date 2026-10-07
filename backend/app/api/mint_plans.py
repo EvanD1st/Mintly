@@ -73,7 +73,7 @@ async def import_open_sea_plan(req: ImportMintPlanRequest,
     except OpenSeaUnavailable as error:
         raise api_error(error) from error
     await automatic.lock_execution(db)
-    wallet_stmt = select(Wallet).where(Wallet.user_id == user.id, Wallet.is_demo.is_(False))
+    wallet_stmt = select(Wallet).where(Wallet.user_id == user.id, Wallet.archived_at.is_(None), Wallet.is_demo.is_(False))
     if req.wallet_id:
         wallet_stmt = wallet_stmt.where(Wallet.id == req.wallet_id)
     else:
@@ -136,7 +136,7 @@ async def refresh_open_sea_plan(plan_id: str, user: User = Depends(get_current_u
     if plan is None:
         raise HTTPException(status_code=404, detail="Mint plan not found.")
     wallet = (await db.execute(select(Wallet).where(
-        Wallet.id == plan.wallet_id, Wallet.user_id == user.id,
+        Wallet.id == plan.wallet_id, Wallet.user_id == user.id, Wallet.archived_at.is_(None),
     ))).scalar_one_or_none()
     if wallet is None:
         raise HTTPException(status_code=409, detail="The linked wallet is unavailable.")

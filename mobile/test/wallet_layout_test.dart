@@ -13,7 +13,7 @@ import 'package:mintly/services/api_service.dart';
 import 'package:mintly/services/wallet_secret.dart';
 import 'package:mintly/state/app_state.dart';
 import 'package:mintly/theme/app_theme.dart';
-import 'wallet_secret_test.dart' show firstAddress, firstKey;
+import 'wallet_secret_test.dart' show firstAddress, phrase;
 
 void main() {
   testWidgets(
@@ -61,7 +61,7 @@ void main() {
           }
           if (r.url.path.endsWith('/config')) {
             return http.Response(
-              '{"chain_id":4663,"automatic_collection_selection":true}',
+              '{"chain_id":4663,"automatic_collection_selection":true,"phrase_wallet_setup":true}',
               200,
             );
           }
@@ -114,7 +114,9 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
-      expect(find.text('Set up automatic minting'), findsOneWidget);
+      expect(find.text('Add wallet'), findsOneWidget);
+      expect(find.text('Unlink'), findsOneWidget);
+      expect(find.text('Connect MetaMask'), findsNothing);
       expect(find.text('New drop notifications'), findsNothing);
       expect(find.textContaining('Remaining:'), findsNothing);
       Future<void> capture(String name) async {
@@ -141,17 +143,19 @@ void main() {
       await capture('account-settings');
       await tester.pageBack();
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Set up automatic minting'));
+      await tester.tap(find.text('MetaMask'));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Add or renew a network policy'));
+      await tester.tap(find.text('Add or renew a network policy'));
       await tester.pumpAndSettle();
       expect(find.text('Secret recovery phrase'), findsOneWidget);
       expect(find.textContaining('Allowed NFT collection'), findsNothing);
       expect(tester.takeException(), isNull);
       await capture('phrase-import');
-      await tester.tap(find.text('Private key'));
-      await tester.pumpAndSettle();
+      expect(find.text('Private key'), findsNothing);
       await tester.enterText(
-        find.byKey(const Key('custody-private-key')),
-        firstKey,
+        find.byKey(const Key('custody-recovery-phrase')),
+        phrase,
       );
       await tester.ensureVisible(find.text('Continue'));
       await tester.tap(find.text('Continue'));

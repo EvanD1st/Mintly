@@ -411,8 +411,8 @@ async def test_import_encrypts_and_runs_unattended_without_duplicate_allowance(l
     assert response.headers['cache-control'] == 'no-store'
     assert request['private_key'] not in response.text and request['password'] not in response.text
     grant_id = response.json()['id']
-    unlink = await lab.client.delete('/api/wallets/'+lab.wallet.id)
-    assert unlink.status_code == 409 and 'custody' in unlink.text
+    unlink = await lab.client.delete('/api/wallets/'+str(uuid.uuid4()))
+    assert unlink.status_code == 404
     keyfile = json.loads((lab.tmp/f'{grant_id}.keystore.json').read_text())
     assert keyfile['crypto']['kdfparams']['n'] == 262144
     assert Account.from_key(Account.decrypt(keyfile,(lab.tmp/'password').read_text())).address == lab.owner.address

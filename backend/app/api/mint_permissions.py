@@ -59,7 +59,7 @@ async def create_permission(req:CreatePermission,user:User=Depends(get_current_u
     enabled()
     plan=(await db.execute(select(MintPlan).where(MintPlan.id==req.plan_id,MintPlan.user_id==user.id).with_for_update())).scalar_one_or_none()
     if plan is None: raise HTTPException(404,'Mint plan not found.')
-    wallet=(await db.execute(select(Wallet).where(Wallet.id==plan.wallet_id,Wallet.user_id==user.id,Wallet.is_demo.is_(False)))).scalar_one_or_none()
+    wallet=(await db.execute(select(Wallet).where(Wallet.id==plan.wallet_id,Wallet.user_id==user.id,Wallet.archived_at.is_(None),Wallet.is_demo.is_(False)))).scalar_one_or_none()
     if wallet is None: raise HTTPException(409,'Linked wallet unavailable.')
     existing=(await db.execute(select(MintPermission.id).where(MintPermission.plan_id==plan.id,MintPermission.status.in_(['awaiting_signature','armed','prepared','submitted'])))).first()
     if existing: raise HTTPException(409,'This plan already has a pending permission. Cancel it before creating another.')

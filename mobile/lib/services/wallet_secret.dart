@@ -17,7 +17,12 @@ Uint8List? resolveWalletSecret(Map<String, String> input) {
   Uint8List? seed, raw;
   final nodes = <bip32.BIP32>[];
   try {
-    final expected = input['address']!.toLowerCase();
+    final expected = (input['address'] ?? '').toLowerCase();
+    final selectedIndex = int.tryParse(input['account_index'] ?? '0');
+    if (expected.isEmpty &&
+        (selectedIndex == null || selectedIndex < 0 || selectedIndex >= 20)) {
+      return null;
+    }
     if (input['kind'] == 'private_key') {
       final text = input['secret']!.trim().replaceFirst(RegExp(r'^0x'), '');
       if (!RegExp(r'^[0-9a-fA-F]{64}$').hasMatch(text)) return null;
@@ -48,7 +53,9 @@ Uint8List? resolveWalletSecret(Map<String, String> input) {
     for (var index = 0; index < 20; index++) {
       final account = node.derive(index);
       nodes.add(account);
-      if (address(account.privateKey!) == expected) {
+      if (expected.isEmpty
+          ? index == selectedIndex
+          : address(account.privateKey!) == expected) {
         return Uint8List.fromList(account.privateKey!);
       }
     }
@@ -64,6 +71,16 @@ Uint8List? resolveWalletSecret(Map<String, String> input) {
     }
     input.clear();
   }
+}
+
+String walletAddressFromKey(Uint8List key) {
+  final curve = ECDomainParameters('secp256k1');
+  final scalar = BigInt.parse(_hex(key), radix: 16);
+  if (scalar <= BigInt.zero || scalar >= curve.n) {
+    throw ArgumentError('Invalid account');
+  }
+  final public = (curve.G * scalar)!.getEncoded(false);
+  return '0x${_hex(KeccakDigest(256).process(public.sublist(1)).sublist(12))}';
 }
 
 String _hex(Uint8List bytes) =>

@@ -32,7 +32,7 @@ async def recover_task(db, task_id, owner_id, expires_at, reference, vault=None)
     user = await db.get(User, owner_id)
     wallet = await db.get(Wallet, task.wallet_id)
     if (not user or not user.is_active or user.deleted_at or user.must_change_password
-            or not wallet or s['user_id'] != owner_id or wallet.user_id != owner_id or auth.is_revoked
+            or not wallet or wallet.archived_at or task.broadcast_disabled_at or s['user_id'] != owner_id or wallet.user_id != owner_id or auth.is_revoked
             or wallet.id != auth.wallet_id or wallet.address.lower() != s['account'].lower()):
         raise ValueError('Recovery must belong to the active authorizing owner')
     existing = await db.scalar(select(MintRecovery).where(MintRecovery.task_id == task.id))
