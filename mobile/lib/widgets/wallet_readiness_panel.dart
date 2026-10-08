@@ -2,10 +2,17 @@ import 'package:flutter/material.dart';
 import '../services/wat_time.dart';
 import '../theme/compatible_icons.dart';
 
-class WalletReadinessPanel extends StatelessWidget {
+class WalletReadinessPanel extends StatefulWidget {
   final String walletId;
   final Future<Map<String, dynamic>> readiness;
   const WalletReadinessPanel({super.key, required this.walletId, required this.readiness});
+
+  @override
+  State<WalletReadinessPanel> createState() => _WalletReadinessPanelState();
+}
+
+class _WalletReadinessPanelState extends State<WalletReadinessPanel> {
+  bool _expanded = false;
 
   String _amount(dynamic raw) {
     final value = BigInt.tryParse('$raw');
@@ -18,12 +25,20 @@ class WalletReadinessPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => FutureBuilder<Map<String, dynamic>>(
-    future: readiness,
-    builder: (context, snapshot) => ExpansionTile(
-      key: ValueKey('readiness-$walletId'),
-      title: const Text('Network readiness', style: TextStyle(fontSize: 14)),
-      trailing: const Icon(MintlyIcons.chevronRight, size: 20),
-      children: [_content(context, snapshot)],
+    future: widget.readiness,
+    builder: (context, snapshot) => Column(
+      children: [
+        ListTile(
+          key: ValueKey('readiness-${widget.walletId}'),
+          title: const Text('Network readiness', style: TextStyle(fontSize: 14)),
+          trailing: const Icon(MintlyIcons.chevronRight, size: 20),
+          onTap: () => setState(() => _expanded = !_expanded),
+        ),
+        AnimatedSize(
+          duration: const Duration(milliseconds: 200),
+          child: _expanded ? _content(context, snapshot) : const SizedBox.shrink(),
+        ),
+      ],
     ),
   );
 
@@ -31,7 +46,7 @@ class WalletReadinessPanel extends StatelessWidget {
         if (snapshot.hasError || snapshot.data?['unavailable'] == true) return const Padding(padding: EdgeInsets.all(16), child: Text('Readiness unavailable. Refresh wallets to retry.'));
         if (!snapshot.hasData) return const Padding(padding: EdgeInsets.all(16), child: Text('Checking networks…'));
         final wallets = snapshot.data!['wallets'] as List? ?? [];
-        final own = wallets.where((wallet) => wallet['wallet_id'] == walletId);
+        final own = wallets.where((wallet) => wallet['wallet_id'] == widget.walletId);
         final networks = own.isEmpty ? [] : own.first['networks'] as List? ?? [];
         return Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 16), child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
