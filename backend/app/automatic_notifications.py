@@ -13,13 +13,17 @@ async def deliver_one():
         messages = []
         for task in tasks:
             auth = await db.get(MintAuthorization, task.authorization_id)
-            messages.append((task.id, auth.snapshot['user_id'], task.status, task.updated_at))
+            from app.services.copy_mints import is_funding_note
+            funding = task.copy_rule_id and task.status == 'failed' and not task.signed_tx_raw and is_funding_note(
+                task.failure_reason, auth.snapshot['chain_id'])
+            messages.append((task.id, auth.snapshot['user_id'], task.status, task.updated_at,
+                task.failure_reason if funding else None))
     # Acknowledge after delivery. A crash may duplicate a notification, never lose it.
     # No transaction execution lock is held during FCM requests.
-    for task_id, user_id, status, version in messages:
+    for task_id, user_id, status, version, funding_note in messages:
         try:
-            sent = await NotificationService.send_notification('Automatic mint ' + status,
-                task_id, category='mint_status', deep_link='mintly://queue', user_id=user_id)
+            sent = await NotificationService.send_notification('Copy mint skipped' if funding_note else 'Automatic mint ' + status,
+                funding_note or task_id, category='mint_status', deep_link='mintly://queue', user_id=user_id)
         except Exception:
             sent = False
         async with AsyncSessionLocal() as db:

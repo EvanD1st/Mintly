@@ -286,6 +286,29 @@ class ApiService extends ChangeNotifier {
             timeout: const Duration(seconds: 60),
           ))
           as Map<String, dynamic>;
+  Future<Map<String, dynamic>> approveWalletCopyRules(
+    String watchId, Map<String, dynamic> request,
+  ) async {
+    final result = await _post('/copy-mints/watches/$watchId/wallet-rules', request,
+        timeout: const Duration(seconds: 90));
+    final rules = result is Map ? result['rules'] : null;
+    final ids = request['grant_ids'] as List;
+    if (result is! Map || result['id'] != request['request_id'] || rules is! List ||
+        rules.length != ids.length || rules.any((r) => r is! Map || r['snapshot'] is! Map) ||
+        rules.map((r) => r['snapshot']['grant_id']).toSet().length != ids.length ||
+        ids.any((id) => !rules.any((r) => r['snapshot']['grant_id'] == id))) {
+      throw const ApiException('Copy approval could not be confirmed. Retry with the same limits.');
+    }
+    return Map<String, dynamic>.from(result);
+  }
+
+  Future<void> retryCopyMint(String eventId) async {
+    final result = await _post('/copy-mints/events/$eventId/retry', {},
+        timeout: const Duration(seconds: 60));
+    if (result is! Map || result['status'] != 'queued' || result['task_id'] is! String) {
+      throw const ApiException('Retry was not confirmed. Refresh copy activity.');
+    }
+  }
   Future<Map<String, dynamic>> copyMintContext(String eventId) async =>
       (await _get('/copy-mints/events/$eventId/context'))
           as Map<String, dynamic>;

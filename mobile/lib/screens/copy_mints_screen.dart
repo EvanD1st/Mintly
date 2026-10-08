@@ -908,7 +908,12 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
             ),
           const SizedBox(height: 8),
           _CopyDetails(key: ValueKey(event['id']), event: event),
-          if (event['task_id'] == null)
+          if (event['retryable'] == true)
+            OutlinedButton(
+              onPressed: _busy ? null : () => _act(() => ref.read(apiServiceProvider).retryCopyMint('${event['id']}')),
+              child: const Text('Retry'),
+            )
+          else if (event['task_id'] == null)
             OutlinedButton(
               onPressed: _busy ? null : () => _copy(event),
               child: const Text('Review & copy this mint'),
@@ -1187,16 +1192,39 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
 
   Future<List<Map<String, dynamic>>> _loadPolicies() async {
     final all = await ref.read(apiServiceProvider).fetchAutomaticPolicies();
-    return all
+    final labels = <String, String>{};
+    try {
+      for (final wallet in await ref.read(apiServiceProvider).fetchWallets()) {
+        labels['${wallet['id']}'] = '${wallet['label']}';
+      }
+    } catch (_) {
+      // Wallet addresses still identify the owner-scoped approvals if labels cannot load.
+    }
+    final eligible = all
         .where(
           (p) =>
               p['status'] == 'enabled' &&
-              (widget.watch['chains'] as List).contains(p['chain_id']) &&
               '${p['account']}'.toLowerCase() !=
                   '${widget.watch['address']}'.toLowerCase() &&
               ((p['scope'] as Map)['mint_kinds'] as List).contains('public'),
         )
         .toList();
+    final wallets = <String, Map<String, dynamic>>{};
+    for (final policy in eligible) {
+      final wallet = wallets.putIfAbsent('${policy['wallet_id']}', () => {
+        'id': policy['wallet_id'], 'account': policy['account'],
+        'label': labels['${policy['wallet_id']}'] ?? 'Wallet',
+        'policies': <Map<String, dynamic>>[],
+      });
+      final policies = wallet['policies'] as List<Map<String, dynamic>>;
+      final index = policies.indexWhere((p) => p['chain_id'] == policy['chain_id']);
+      if (index < 0) {
+        policies.add(policy);
+      } else if (DateTime.parse('${policy['expires_at']}').isAfter(DateTime.parse('${policies[index]['expires_at']}'))) {
+        policies[index] = policy;
+      }
+    }
+    return wallets.values.toList();
   }
 
   @override
@@ -1208,7 +1236,9 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
   }
 
   void _setExpiry() {
-    final policyExpiry = DateTime.parse('${_policy!['expires_at']}').toUtc();
+    final policies = _policy!['policies'] as List<Map<String, dynamic>>;
+    final policyExpiry = policies.map((p) => DateTime.parse('${p['expires_at']}').toUtc())
+        .reduce((a, b) => a.isBefore(b) ? a : b);
     final expiry = DateTime.now().toUtc().add(Duration(days: _days));
     _expiry = expiry.isBefore(policyExpiry) ? expiry : policyExpiry;
   }
@@ -1239,7 +1269,7 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
     });
     _pending ??= {
       'request_id': _uuid(),
-      'grant_id': _policy!['id'],
+      'grant_ids': [for (final p in _policy!['policies'] as List<Map<String, dynamic>>) p['id']],
       'quantity': _free ? 100 : int.parse(_quantity.text.trim()),
       'quantity_mode': _free ? 'max_free' : 'fixed',
       'price_cap_eth': _price.text.trim(),
@@ -1252,7 +1282,7 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
     try {
       final result = await ref
           .read(apiServiceProvider)
-          .approveCopyRule('${widget.watch['id']}', _pending!);
+          .approveWalletCopyRules('${widget.watch['id']}', _pending!);
       if (mounted) {
         if (result['status'] == 'active') {
           Navigator.pop(context);
@@ -1342,7 +1372,7 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
                   DropdownButtonFormField<String>(
                     icon: const CopyGlyph('down'),
                     decoration: const InputDecoration(
-                      labelText: 'Receiving wallet / network',
+                      labelText: 'Receiving wallet',
                     ),
                     isExpanded: true,
                     items: policies
@@ -1350,7 +1380,7 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
                           (p) => DropdownMenuItem(
                             value: '${p['id']}',
                             child: Text(
-                              '${_network(p['chain_id'])} · ${_short('${p['account']}')} · ${copyEth(p['remaining_wei'])} ETH left',
+                              '${p['label']} · ${_short('${p['account']}')}',
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
                             ),
@@ -1364,8 +1394,19 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
                             _setExpiry();
                           }),
                     validator: (_) =>
-                        _policy == null ? 'Choose a receiving policy.' : null,
+                        _policy == null ? 'Choose a receiving wallet.' : null,
                   ),
+                  if (_policy != null) ...[
+                    const SizedBox(height: 12),
+                    Wrap(spacing: 6, runSpacing: 6, children: [
+                      for (final chain in [1, 4663, 8453])
+                        _Chip(((_policy!['policies'] as List).any((p) => p['chain_id'] == chain))
+                            ? _network(chain) : '${_network(chain)} · Not approved'),
+                    ]),
+                    const SizedBox(height: 8),
+                    const Text('Copies on the mint’s network. Add ETH there for gas.',
+                        style: TextStyle(fontSize: 12)),
+                  ],
                   const SizedBox(height: 18),
                   if (_free)
                     const _Panel(
@@ -1469,8 +1510,9 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
                           ),
                           validator: _amount,
                           decoration: const InputDecoration(
-                            labelText: 'Max network fee per mint',
+                            labelText: 'Gas spending limit',
                             suffixText: 'ETH',
+                            helperText: 'Maximum fee for one copied mint',
                           ),
                         ),
                         const SizedBox(height: 15),
@@ -1484,6 +1526,7 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
                           decoration: const InputDecoration(
                             labelText: 'Total copy budget',
                             suffixText: 'ETH',
+                            helperText: 'Shared across networks · includes mint prices and gas',
                           ),
                         ),
                         SwitchListTile(
@@ -1541,7 +1584,7 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
                     highlighted: true,
                     child: Text(
                       'Network fees apply. Mints outside your limits are skipped. Already signed transactions may still finish after pausing or unlinking.'
-                      '${_policy?['chain_id'] == 8453 ? ' Base fees can change until inclusion.' : ''}',
+                      '${(_policy?['policies'] as List? ?? []).any((p) => p['chain_id'] == 8453) ? ' Base fees can change until inclusion.' : ''}',
                     ),
                   ),
                   CheckboxListTile(
@@ -1552,8 +1595,8 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
                         : (v) => setState(() => _consent = v == true),
                     title: Text(
                       _free
-                          ? 'Approve maximum free minting (up to 100 NFTs) within these limits.'
-                          : 'Approve copy minting within these limits.',
+                          ? 'Approve maximum free minting (up to 100 NFTs) on the approved networks within these limits.'
+                          : 'Approve copying on the approved networks within these limits.',
                     ),
                   ),
                   if (_error != null)

@@ -104,6 +104,16 @@ async def prepare_task(db, task_id, vault=None):
                     raise ValueError('Copy approval is paused or not independently registered')
                 r = json.loads(pin['snapshot'])
                 mode = copy_mints.quantity_mode(r)
+                group = copy_mints.budget_group(r)
+                if group is not None:
+                    if rule.id not in group['members']:
+                        raise ValueError('Copy approval is outside its shared budget')
+                    for member in group['members']:
+                        sibling = journal.execute('SELECT snapshot FROM copy_rules WHERE id=?', (member,)).fetchone()
+                        sibling = json.loads(sibling['snapshot']) if sibling else None
+                        if (not sibling or copy_mints.budget_group(sibling) != group
+                                or any(sibling[k] != r[k] for k in ('user_id','watch_id','wallet_id','account','source_address'))):
+                            raise ValueError('Shared copy approval is not fully pinned')
                 quantity_matches = (r['quantity'] == s['quantity'] if mode == 'fixed' else (
                     s.get('copy_quantity_mode') == mode and 1 <= s['quantity'] <= r['quantity']
                     and s['price_wei'] == 0 and s['price_cap_wei'] == 0))
@@ -151,10 +161,20 @@ async def prepare_task(db, task_id, vault=None):
             if charged + s['total_cap_wei'] > policy['budget_wei']:
                 raise ValueError('Independent signer budget exhausted or reserved by uncertain submissions')
             if task.copy_rule_id:
+                if group is not None:
+                    await reconcile_copy_group(journal, group, web3, grant.chain_id)
+                    marks = ','.join('?' for _ in group['members'])
+                    charged_group = journal.execute('SELECT COALESCE(SUM(COALESCE(s.actual,s.liability)),0) '
+                        f'FROM signed s JOIN copy_signed c ON c.task=s.task WHERE c.rule IN ({marks})',
+                        group['members']).fetchone()[0]
+                    if charged_group + s['total_cap_wei'] > group['budget_wei']:
+                        raise ValueError('Independent shared copy budget exhausted or reserved')
                 charged_copy = journal.execute('SELECT COALESCE(SUM(COALESCE(s.actual,s.liability)),0) FROM signed s '
                     'JOIN copy_signed c ON c.task=s.task WHERE c.rule=?', (task.copy_rule_id,)).fetchone()[0]
                 if charged_copy + s['total_cap_wei'] > r['budget_wei']:
                     raise ValueError('Independent copy budget exhausted or reserved')
+            if await web3.eth.get_balance(address, 'pending') <= s['price_wei'] * s['quantity']:
+                raise ValueError('Insufficient funds for mint value and gas')
             execution = s.get('execution')
             if execution:
                 await automatic.validate_mint(web3, s, {'to': execution['target'], 'value': execution['value'], 'data': execution['data']})
@@ -172,7 +192,13 @@ async def prepare_task(db, task_id, vault=None):
                 return {'task_id': task.id, 'status': 'armed', 'note': 'Waiting for the prior reserved wallet nonce.'}
             tx = {'from': address, 'to': execution['target'], 'data': execution['data'],
                 'value': int(execution['value']), 'chainId': s['chain_id'], 'nonce': nonce}
-            gas, gas_price = await quote_gas(web3, tx, s['chain_id'])
+            try:
+                gas, gas_price = await quote_gas(web3, tx, s['chain_id'])
+            except Exception as error:
+                from app.services.copy_mints import balance_error
+                if balance_error(error):
+                    raise ValueError('Insufficient funds for mint value and gas') from None
+                raise
             tx['gasPrice'] = gas_price
             fee = await maximum_fee(web3, tx, s['chain_id'], gas, gas_price)
             if fee > s['fee_cap_wei'] or tx['value'] + fee > s['total_cap_wei']:
@@ -222,7 +248,8 @@ async def prepare(task_id: str, db=Depends(get_db)):
         await db.rollback()
         actionable = {'Insufficient funds for mint value and gas', 'Estimated gas or total debit exceeds task authorization',
                       'Task or signer policy expired', 'Public stage changed on chain',
-                      'Independent signer budget exhausted or reserved by uncertain submissions'}
+                      'Independent signer budget exhausted or reserved by uncertain submissions',
+                      'Independent shared copy budget exhausted or reserved'}
         detail = str(error) if str(error) in actionable else 'Independent signer rejected task policy, identity, budget or chain readiness.'
         raise HTTPException(409, detail) from None
     except Exception:
@@ -244,6 +271,9 @@ async def register_copy_rule(rule_id: str, db=Depends(get_db)):
     r = rule.snapshot
     try:
         copy_mints.quantity_mode(r)
+        group = copy_mints.budget_group(r)
+        if group is not None and rule.id not in group['members']:
+            raise ValueError('Rule missing from shared budget')
     except (ValueError, KeyError):
         raise HTTPException(409, 'Copy quantity mode is outside the approved free-mint scope.') from None
     user = await db.get(User, rule.user_id)
@@ -272,6 +302,46 @@ async def register_copy_rule(rule_id: str, db=Depends(get_db)):
     finally:
         journal.close()
     return {'status': 'registered', 'rule_id': rule.id}
+
+
+async def reconcile_copy_group(journal, group, current_web3, current_chain):
+    """Charge all networks together; uncertain receipts retain their full liability."""
+    marks = ','.join('?' for _ in group['members'])
+    entries = journal.execute('SELECT s.* FROM signed s JOIN copy_signed c ON c.task=s.task '
+        f'WHERE c.rule IN ({marks}) AND s.actual IS NULL', group['members']).fetchall()
+    providers = {current_chain: current_web3}
+    try:
+        for entry in entries:
+            try:
+                chain = entry['chain']
+                if chain not in providers:
+                    providers[chain] = await automatic.provider_for(chain)
+                web3 = providers[chain]
+                hashes = [entry['hash']] + [r['hash'] for r in journal.execute(
+                    'SELECT hash FROM recoveries WHERE task=?', (entry['task'],)).fetchall()]
+                for tx_hash in hashes:
+                    receipt = await final_receipt(web3, tx_hash, chain)
+                    if receipt:
+                        tx = await web3.eth.get_transaction(tx_hash)
+                        actual = await receipt_cost(web3, receipt, chain, tx.value)
+                        journal.execute('UPDATE signed SET actual=? WHERE task=?', (actual, entry['task']))
+                        break
+            except Exception:
+                continue  # A failed RPC never frees an uncertain reservation.
+        journal.commit()
+    finally:
+        for chain, web3 in providers.items():
+            if chain != current_chain:
+                await web3.provider.disconnect()
+
+
+@app.get('/tasks/{task_id}/unsigned', dependencies=[Depends(authenticate)])
+async def unsigned_task(task_id: str):
+    journal = CustodyVault().journal()
+    try:
+        return {'unsigned': journal.execute('SELECT task FROM signed WHERE task=?', (task_id,)).fetchone() is None}
+    finally:
+        journal.close()
 
 
 @app.get('/readyz', dependencies=[Depends(authenticate)])

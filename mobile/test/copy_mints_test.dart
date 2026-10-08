@@ -104,9 +104,14 @@ Future<ApiService> apiFor({
               },
             },
         ];
-      } else if (r.url.path.endsWith('/rules')) {
+      } else if (r.url.path.endsWith('/wallets')) {
+        data = [{'id': 'receiving', 'label': 'Everyday wallet'}];
+      } else if (r.url.path.endsWith('/wallet-rules')) {
         approved?.call(jsonDecode(r.body) as Map<String, dynamic>);
-        data = {'status': 'active'};
+        final sent = jsonDecode(r.body) as Map<String, dynamic>;
+        data = {'id': sent['request_id'], 'status': 'active', 'rules': [
+          for (final id in sent['grant_ids'] as List) {'snapshot': {'grant_id': id}},
+        ]};
       } else {
         data = <String, dynamic>{};
       }
@@ -123,7 +128,7 @@ Future<ApiService> apiFor({
 
 void main() {
   testWidgets(
-    'follow does not spend, copy approval binds selected network and explicit limits',
+    'follow does not spend, one wallet approval covers networks with explicit limits',
     (tester) async {
       tester.view.physicalSize = const Size(390, 844);
       tester.view.devicePixelRatio = 1;
@@ -150,11 +155,11 @@ void main() {
       await tester.ensureVisible(find.byType(DropdownButtonFormField<String>));
       await tester.tap(find.byType(DropdownButtonFormField<String>));
       await tester.pumpAndSettle();
-      await tester.tap(find.textContaining('Base ·').last);
+      await tester.tap(find.textContaining('Everyday wallet ·').last);
       await tester.pumpAndSettle();
       for (final (label, value) in [
         ('Max mint price per NFT', '0.00001'),
-        ('Max network fee per mint', '0.0001'),
+        ('Gas spending limit', '0.0001'),
         ('Total copy budget', '0.001'),
       ]) {
         final field = find.byWidgetPredicate(
@@ -189,7 +194,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Enable copy minting'));
       await tester.pumpAndSettle();
-      expect(approved?['grant_id'], 'policy8453');
+      expect((approved?['grant_ids'] as List).toSet(), {'policy1', 'policy8453', 'policy4663'});
       expect(approved?['quantity'], 1);
       expect(approved?['quantity_mode'], 'fixed');
       expect(approved?['price_cap_eth'], '0.00001');
@@ -225,7 +230,7 @@ void main() {
         await tester.pumpAndSettle();
         await tester.tap(find.byType(DropdownButtonFormField<String>));
         await tester.pumpAndSettle();
-        await tester.tap(find.textContaining('Base ·').last);
+        await tester.tap(find.textContaining('Everyday wallet ·').last);
         await tester.pumpAndSettle();
         await tester.ensureVisible(find.text('2 NFTs'));
         await tester.tap(find.text('2 NFTs'));
@@ -253,7 +258,7 @@ void main() {
         }
 
         await enter('Max mint price per NFT', '0.00001');
-        await enter('Max network fee per mint', '0.0001');
+        await enter('Gas spending limit', '0.0001');
         await enter('Total copy budget', '0.001');
         await reveal(find.byType(CheckboxListTile));
         await tester.tap(find.byType(CheckboxListTile));

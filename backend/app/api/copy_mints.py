@@ -39,6 +39,20 @@ class RuleRequest(BaseModel):
     consent: bool
 
 
+class WalletRuleRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    request_id: uuid.UUID
+    grant_ids: list[uuid.UUID] = Field(min_length=1, max_length=3)
+    quantity: int = Field(ge=1, le=100, strict=True)
+    quantity_mode: Literal['fixed', 'max_free'] = 'fixed'
+    price_cap_eth: str = Field(pattern=r'^[0-9]+(\.[0-9]+)?$', max_length=40)
+    fee_cap_eth: str = Field(pattern=r'^[0-9]+(\.[0-9]+)?$', max_length=40)
+    budget_eth: str = Field(pattern=r'^[0-9]+(\.[0-9]+)?$', max_length=40)
+    free_only: bool = False
+    expires_at: datetime
+    consent: bool
+
+
 class PauseRequest(BaseModel):
     paused: bool
 
@@ -152,6 +166,69 @@ async def remove(watch_id: str, user=Depends(get_current_user), db=Depends(get_d
 
 @router.post('/watches/{watch_id}/rules')
 async def approve(watch_id: str, req: RuleRequest, user=Depends(get_current_user), db=Depends(get_db)):
+    rule = await save_rule(watch_id, req, user, db)
+    await db.commit()
+    if rule.status != 'registering':
+        return public_rule(rule)
+    await register_rule(rule.id)
+    await automatic.lock_execution(db)
+    await db.refresh(rule)
+    watch = await own_watch(db, user, watch_id)
+    if rule.status == 'registering' and not watch.archived_at:
+        rule.status = 'active'
+    await db.commit()
+    return public_rule(rule)
+
+
+@router.post('/watches/{watch_id}/wallet-rules')
+async def approve_wallet(watch_id: str, req: WalletRuleRequest, user=Depends(get_current_user), db=Depends(get_db)):
+    copying.enabled()
+    await automatic.lock_execution(db)
+    watch = await own_watch(db, user, watch_id)
+    if len(set(req.grant_ids)) != len(req.grant_ids):
+        raise HTTPException(422, 'Choose distinct network approvals for one receiving wallet.')
+    grants = sorted([await automatic.grant_for(db, str(gid), user.id) for gid in req.grant_ids], key=lambda g: g.chain_id)
+    if len({g.wallet_id for g in grants}) != 1 or len({g.chain_id for g in grants}) != len(grants):
+        raise HTTPException(422, 'Choose one receiving wallet with one approval per network.')
+    allowed = {n['chain_id'] for n in copying.networks()}
+    if not {g.chain_id for g in grants} <= allowed:
+        raise HTTPException(409, 'A selected network is unavailable for copying.')
+    budget = automatic.wei(req.budget_eth)
+    if not 0 < budget < 2**63:
+        raise HTTPException(422, 'Choose a finite total copy budget.')
+    ids = [str(req.request_id) if i == 0 else str(uuid.uuid5(req.request_id, f'copy-network:{g.chain_id}'))
+        for i, g in enumerate(grants)]
+    group = {'id': str(req.request_id), 'budget_wei': budget, 'members': ids}
+    # One explicit consent covers the displayed networks, even when an older watch monitored fewer.
+    # No historical spending: each rule still pins its current chain head as after_block.
+    watch.chains = sorted(set(watch.chains) | {g.chain_id for g in grants})
+    rules = []
+    for gid, grant in zip(ids, grants):
+        old = await db.get(CopyRule, gid)
+        child_budget = old.budget_wei if old else min(budget, grant.budget_wei - grant.spent_wei - grant.reserved_wei)
+        child = RuleRequest(**{k:v for k,v in req.model_dump().items() if k != 'grant_ids'}, grant_id=grant.id)
+        child.request_id = uuid.UUID(gid)
+        child.budget_eth = str(child_budget // 10**18) + '.' + str(child_budget % 10**18).zfill(18)
+        rules.append(await save_rule(watch_id, child, user, db, group=group))
+    await db.commit()  # All siblings exist before any independent journal pin; none is active yet.
+    if all(rule.status == 'registering' for rule in rules):
+        for rule in rules:
+            await register_rule(rule.id)
+        await automatic.lock_execution(db)
+        watch = await own_watch(db, user, watch_id)
+        for rule in rules:
+            await db.refresh(rule)
+            await automatic.grant_for(db, rule.grant_id, user.id)
+        if all(rule.status == 'registering' for rule in rules):
+            for rule in rules:
+                rule.status = 'active'
+        await db.commit()
+    status = 'active' if all(r.status == 'active' for r in rules) else 'inactive'
+    return {'id': str(req.request_id), 'status': status, 'budget_wei': str(budget),
+        'rules': [public_rule(rule) for rule in rules]}
+
+
+async def save_rule(watch_id, req, user, db, *, group=None):
     copying.enabled()
     await automatic.lock_execution(db)
     watch = await own_watch(db, user, watch_id)
@@ -176,15 +253,17 @@ async def approve(watch_id: str, req: RuleRequest, user=Depends(get_current_user
         account=grant.account, source_address=watch.address, chain_id=grant.chain_id, quantity=req.quantity,
         price_cap_wei=price, fee_cap_wei=fee, total_cap_wei=total, budget_wei=budget,
         free_only=req.free_only, expiry=int(expiry.timestamp()))
+    if group is not None:
+        request['budget_group'] = group
     # Legacy approvals keep their exact pinned quantity; only new consent adds a mode.
     if req.quantity_mode != 'fixed':
         request['quantity_mode'] = req.quantity_mode
     if old:
-        if (old.snapshot.get('quantity_mode', 'fixed') != req.quantity_mode
+        if (old.snapshot.get('budget_group') != group or old.snapshot.get('quantity_mode', 'fixed') != req.quantity_mode
                 or any(old.snapshot.get(k) != v for k, v in request.items())):
             raise HTTPException(409, 'Approval request changed. Open a new review.')
         if old.status != 'registering':
-            return public_rule(old)  # Retry cannot reset spent money or resume a paused rule.
+            return old  # Retry cannot reset spent money or resume a paused rule.
         rule = old
     else:
         if not 0 < fee <= total <= min(budget, int(grant.scope['max_task_wei'])) or budget > grant.budget_wei - grant.spent_wei - grant.reserved_wei:
@@ -205,15 +284,8 @@ async def approve(watch_id: str, req: RuleRequest, user=Depends(get_current_user
             resume_after_block=head, budget_wei=budget, reserved_wei=0, spent_wei=0)
         db.add(rule)
         record(db, user.id, 'Copy mint limits approved', f'{watch.label}: rule {key}; chain {grant.chain_id}; expiry {expiry.isoformat()}')
-    await db.commit()  # Registration reads the durable approval, never caller-supplied signing data.
-    await register_rule(rule.id)
-    await automatic.lock_execution(db)
-    await db.refresh(rule)
-    await db.refresh(watch)
-    if rule.status == 'registering' and not watch.archived_at:
-        rule.status = 'active'
-    await db.commit()
-    return public_rule(rule)
+    await db.flush()
+    return rule
 
 
 @router.post('/pause')
@@ -265,9 +337,17 @@ async def activity(watch_id: str | None = None, offset: int = Query(0, ge=0), li
         watch = await db.get(CopyWatch, event.watch_id)
         o = dict(event.observation)
         o['price_wei'] = str(o['price_wei'])
+        note = task.failure_reason if task else event.note
+        funding = copying.is_funding_note(note, o['chain_id'])
+        unsigned = not task or not task.signed_tx_raw
+        if funding:
+            note = copying.funding_note(o['chain_id'], int(o['price_wei']) > 0)
         entries.append({'id': event.id, 'watch_id': event.watch_id, 'wallet_label': watch.label,
-            'observed_at': event.created_at, 'observation': o, 'status': task.status if task else event.status,
-            'note': task.failure_reason if task else event.note, 'task_id': event.task_id,
+            'observed_at': event.created_at, 'observation': o,
+            'status': 'skipped' if funding and unsigned else (task.status if task else event.status),
+            'note': note, 'task_id': event.task_id,
+            'retryable': funding and unsigned and (task is None or task.status == 'failed') and not watch.archived_at
+                and o.get('end', 0) > int(datetime.now(timezone.utc).timestamp()),
             'transaction_hash': task.transaction_hash if task else None,
             'quantity': (await db.get(MintAuthorization,
                 task.authorization_id)).quantity if task else None,
@@ -275,6 +355,71 @@ async def activity(watch_id: str | None = None, offset: int = Query(0, ge=0), li
     return {'events': entries, 'total': total, 'next_offset': offset + len(events) if offset + len(events) < total else None,
         'copied_mints': sum(t.status == 'confirmed' for t in tasks),
         'spent_wei': str(sum(t.actual_total_cost_wei or 0 for t in tasks))}
+
+
+async def confirm_unsigned(task_id):
+    try:
+        token = Path(settings.AUTOMATIC_SIGNER_TOKEN_FILE).read_text().strip()
+        async with httpx.AsyncClient(timeout=15, trust_env=False) as client:
+            response = await client.get(settings.AUTOMATIC_SIGNER_URL + f'/tasks/{task_id}/unsigned',
+                headers={'Authorization': 'Bearer ' + token})
+            response.raise_for_status()
+            if response.json() != {'unsigned': True}:
+                raise ValueError('Existing signature')
+    except Exception:
+        raise HTTPException(409, 'Retry unavailable: the signer cannot confirm this mint is unsigned.') from None
+
+
+@router.post('/events/{event_id}/retry')
+async def retry_funded(event_id: str, user=Depends(get_current_user), db=Depends(get_db)):
+    copying.enabled()
+    await automatic.lock_execution(db)
+    event = await own_event(db, user, event_id)
+    watch = await own_watch(db, user, event.watch_id)
+    task = await db.get(MintTask, event.task_id) if event.task_id else None
+    if task and task.status in ('armed','preparing') and not task.signed_tx_raw:
+        return {'status': 'queued', 'task_id': task.id}
+    note = task.failure_reason if task else event.note
+    if not copying.is_funding_note(note, event.observation['chain_id']) or (task and (
+            task.status != 'failed' or task.signed_tx_raw or not task.copy_rule_id or task.broadcast_disabled_at)):
+        raise HTTPException(409, 'Only a mint skipped for insufficient funds before signing can be retried.')
+    rule = await db.get(CopyRule, task.copy_rule_id) if task else await db.scalar(select(CopyRule).where(
+        CopyRule.watch_id == watch.id, CopyRule.chain_id == event.observation['chain_id'],
+        CopyRule.user_id == user.id, CopyRule.status == 'active'))
+    if not rule or rule.user_id != user.id or rule.status != 'active' or aware(rule.expires_at) <= datetime.now(timezone.utc):
+        raise HTTPException(409, 'Copying is paused or its approval has ended.')
+    grant = await automatic.grant_for(db, rule.grant_id, user.id)
+    web3 = await automatic.provider_for(rule.chain_id)
+    try:
+        if task is None:
+            await copying.arm_event(db, event, rule, web3)
+            if event.task_id is None:
+                raise HTTPException(409, event.note or 'This mint is no longer eligible for this approval.')
+        else:
+            await confirm_unsigned(task.id)
+            auth = await db.get(MintAuthorization, task.authorization_id)
+            s = auth.snapshot
+            if aware(task.expires_at_utc) <= datetime.now(timezone.utc) or s['user_id'] != user.id:
+                raise HTTPException(409, 'This mint has ended.')
+            await copying.verify_source(web3, event.observation)
+            execution = await automatic.prepare_mint(web3, s)
+            await copying.funding_check(web3, execution, s)
+            total = auth.total_spend_cap_wei
+            if min(grant.budget_wei - grant.spent_wei - grant.reserved_wei,
+                    rule.budget_wei - rule.spent_wei - rule.reserved_wei, await copying.group_remaining(db, rule)) < total:
+                raise HTTPException(409, 'Not enough approved copy budget remains.')
+            grant.reserved_wei += total
+            rule.reserved_wei += total
+            task.status, task.failure_reason, task.next_attempt_at = 'armed', None, None
+            task.preparation_attempts = 0
+            event.status, event.note = 'armed', None
+        record(db, user.id, 'Copy mint retry requested', 'Retry checked against the same wallet and approved limits.')
+        await db.commit()
+        return {'status': 'queued', 'task_id': event.task_id}
+    except ValueError:
+        raise HTTPException(409, 'The mint is no longer open or eligible.') from None
+    finally:
+        await web3.provider.disconnect()
 
 
 @router.get('/events/{event_id}/context')

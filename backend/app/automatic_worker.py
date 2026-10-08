@@ -37,10 +37,16 @@ async def request_signature(task_id):
 
 
 async def finish(db, task, status, note, actual=0):
+    auth = await db.get(MintAuthorization, task.authorization_id)
+    if task.copy_rule_id:
+        from app.services.copy_mints import funding_note, CHAINS
+        if note == 'Insufficient funds for mint value and gas':
+            note = funding_note(auth.snapshot['chain_id'], auth.snapshot['price_wei'] > 0)
+        elif note == 'Estimated gas or total debit exceeds task authorization':
+            note = f'Gas exceeds your spending limit on {CHAINS.get(auth.snapshot["chain_id"], "this network")}.'
     task.status, task.failure_reason = status, note
     task.notification_pending = True
     await automatic.release_reservation(db, task, actual)
-    auth = await db.get(MintAuthorization, task.authorization_id)
     db.add(ActivityEvent(user_id=auth.snapshot['user_id'], event_type='automatic_' + status,
         label='Automatic mint ' + status, detail=f'{task.id}: {note or "Receipt confirmed"}',
         is_demo=False, icon_name='gem'))

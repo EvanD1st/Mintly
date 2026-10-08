@@ -68,3 +68,26 @@ Migration 012 adds nullable wallet archive and task broadcast-stop timestamps;
 existing records start with no archive/stop flag. Tests use disposable accounts
 and local EVM balances; verification never unlinks a production wallet or submits
 a mainnet mint.
+
+Copy settings selects a receiving wallet once and approves its available network
+policies together. The displayed Total copy budget is one shared budget across
+those networks, not a separate allowance for each. Each child rule retains its
+own immutable wallet policy limits and records the complete group membership and
+shared cap. Database reservations sum the whole group; the isolated signer also
+sums independently pinned liabilities and finalized receipt costs across all
+group members. A missing sibling pin fails closed. Registration can be retried
+after interruption; no child is activated until all pins succeed. Existing
+single-network approvals retain their original snapshots and allowances.
+
+Max mint price per NFT stays visible. Gas spending limit replaces the old network
+fee label and stays visible, with a short explanation. Funding is checked before
+an automatic copy task is created and again before signing. Insufficient funds
+produce a short network-specific note in Copy activity; they do not pause other
+networks. Retry is an explicit, owner-scoped action, rechecking the stage, source,
+current wallet approval, expiry, eligibility and shared remaining budget. A
+previously armed funding failure reuses its unsigned task and immutable limits;
+the independent journal must confirm that no signature exists before rearming.
+Signed, submitted, uncertain, unlinked, paused or expired mints cannot use this
+funding retry. Skips before task creation remain unsigned records in Copy activity;
+funding failures after task creation also use the existing personal notification
+outbox with a short reason. No request changes old spending consent automatically.

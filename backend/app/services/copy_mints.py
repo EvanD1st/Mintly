@@ -22,6 +22,66 @@ SEADROP_MINT = '0x' + keccak(text='SeaDropMint(address,address,address,address,u
 ZERO_TOPIC = '0x' + '0' * 64
 
 
+def funding_note(chain, paid=False):
+    return f'Not enough ETH on {CHAINS.get(chain, "this network")} for {"mint + gas" if paid else "gas"}.'
+
+
+def is_funding_note(note, chain):
+    return note in (funding_note(chain), funding_note(chain, True), 'Insufficient funds for mint value and gas')
+
+
+def budget_group(snapshot):
+    group = snapshot.get('budget_group')
+    if group is None:
+        return None
+    if (set(group) != {'id', 'budget_wei', 'members'} or str(uuid.UUID(group['id'])) != group['id']
+            or not 0 < group['budget_wei'] < 2**63 or not 1 <= len(group['members']) <= 3
+            or len(set(group['members'])) != len(group['members'])
+            or any(str(uuid.UUID(member)) != member for member in group['members'])):
+        raise ValueError('Invalid shared copy budget')
+    return group
+
+
+async def group_remaining(db, rule):
+    group = budget_group(rule.snapshot)
+    if group is None:
+        return rule.budget_wei - rule.spent_wei - rule.reserved_wei
+    members = (await db.scalars(select(CopyRule).where(CopyRule.id.in_(group['members'])))).all()
+    if len(members) != len(group['members']) or any(
+            m.user_id != rule.user_id or m.watch_id != rule.watch_id
+            or m.snapshot['wallet_id'] != rule.snapshot['wallet_id'] or budget_group(m.snapshot) != group for m in members):
+        raise ValueError('Shared copy approval differs')
+    return group['budget_wei'] - sum(m.spent_wei + m.reserved_wei for m in members)
+
+
+async def funding_check(web3, execution, snapshot):
+    value = int(execution['value'])
+    balance = await web3.eth.get_balance(snapshot['account'], 'pending')
+    if balance <= value:
+        raise HTTPException(409, funding_note(snapshot['chain_id'], value > 0))
+    tx = {'from': snapshot['account'], 'to': execution['target'], 'data': execution['data'], 'value': value}
+    gas, price = await copy_gas_quote(web3, tx, snapshot['chain_id'], value > 0)
+    fee = await maximum_fee(web3, tx, snapshot['chain_id'], gas, price)
+    if balance < value + fee:
+        raise HTTPException(409, funding_note(snapshot['chain_id'], value > 0))
+    if fee > snapshot['fee_cap_wei'] or value + fee > snapshot['total_cap_wei']:
+        raise HTTPException(409, f'Gas exceeds your spending limit on {CHAINS.get(snapshot["chain_id"], "this network")}.')
+
+
+def balance_error(error):
+    message = str(error).lower()
+    return 'insufficient funds' in message or 'insufficient balance' in message
+
+
+async def copy_gas_quote(web3, tx, chain, paid=False):
+    try:
+        return await quote_gas(web3, tx, chain)
+    except Exception as error:
+        if balance_error(error):
+            raise HTTPException(409, funding_note(chain, paid)) from None
+        raise
+
+
 def quantity_mode(rule):
     mode = rule.get('quantity_mode', 'fixed')
     if mode not in ('fixed', 'max_free') or (mode == 'max_free' and (
@@ -47,9 +107,10 @@ async def maximum_free_quantity(web3, observation, rule):
         + encode(['address'], [account])}))
     ceiling = min(rule['quantity'], max(0, current['limit'] - minted), max(0, maximum - supply))
     balance = await web3.eth.get_balance(account, 'pending')
-    fee_limit = min(rule['fee_cap_wei'], balance)
-    if ceiling < 1 or fee_limit <= 0:
-        raise HTTPException(409, 'No remaining free mint allowance, supply or gas balance.')
+    if ceiling < 1:
+        raise HTTPException(409, 'No remaining free mint allowance or supply.')
+    if balance <= 0:
+        raise HTTPException(409, funding_note(observation['chain_id']))
     base = dict(mint_kind='public', contract=observation['contract'], account=account,
         recipient=account, chain_id=observation['chain_id'], price_wei=0, price_cap_wei=0,
         start=current['start'], end=current['end'])
@@ -57,8 +118,11 @@ async def maximum_free_quantity(web3, observation, rule):
     async def fits(count):
         execution = await automatic.prepare_mint(web3, {**base, 'quantity': count})
         tx = {'from': account, 'to': execution['target'], 'data': execution['data'], 'value': 0}
-        gas, price = await quote_gas(web3, tx, observation['chain_id'])
-        return await maximum_fee(web3, tx, observation['chain_id'], gas, price) <= fee_limit
+        gas, price = await copy_gas_quote(web3, tx, observation['chain_id'])
+        fee = await maximum_fee(web3, tx, observation['chain_id'], gas, price)
+        if fee > balance:
+            raise HTTPException(409, funding_note(observation['chain_id']))
+        return fee <= rule['fee_cap_wei']
 
     if await fits(ceiling):
         return ceiling
@@ -223,10 +287,15 @@ async def arm_event(db, event, rule, web3):
     if rule.budget_wei - rule.spent_wei - rule.reserved_wei < r['total_cap_wei']:
         event.status, event.note = 'skipped', 'Copy budget is exhausted or reserved by pending mints.'
         return
+    if await group_remaining(db, rule) < r['total_cap_wei']:
+        event.status, event.note = 'skipped', 'Total copy budget is used or reserved by pending mints.'
+        return
     await verify_source(web3, o)
     drop, stage = await drop_for(db, web3, o)
     mode = quantity_mode(r)
     quantity = await maximum_free_quantity(web3, o, r) if mode == 'max_free' else r['quantity']
+    if await web3.eth.get_balance(r['account'], 'pending') <= o['price_wei'] * quantity:
+        raise HTTPException(409, funding_note(o['chain_id'], o['price_wei'] > 0))
     req = SimpleNamespace(plan_id=None, grant_id=rule.grant_id, wallet_id=r['wallet_id'], drop_id=drop.id,
         stage_id=stage.id, quantity=quantity, price_cap_eth=format_wei_to_eth(r['price_cap_wei']),
         fee_cap_eth=format_wei_to_eth(r['fee_cap_wei']), total_cap_eth=format_wei_to_eth(r['total_cap_wei']),
@@ -238,6 +307,7 @@ async def arm_event(db, event, rule, web3):
         s['copy_quantity_mode'] = mode
     key = await no_duplicate(db, s)
     s['execution'] = await automatic.prepare_mint(web3, s)
+    await funding_check(web3, s['execution'], s)
     auth = MintAuthorization(id=str(uuid.uuid4()), wallet_id=r['wallet_id'], drop_id=drop.id, stage_id=stage.id,
         quantity=s['quantity'], max_price_per_token_wei=s['price_cap_wei'], max_fee_wei=s['fee_cap_wei'],
         total_spend_cap_wei=s['total_cap_wei'], recipient_address=s['account'],
