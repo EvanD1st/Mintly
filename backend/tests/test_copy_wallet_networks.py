@@ -203,6 +203,33 @@ async def test_balance_drained_after_arming_has_short_note_and_retry_reuses_unsi
         assert (await db.get(MintTask, tid)).signed_tx_raw
 
 
+async def test_funding_retry_never_rearms_a_signature_lost_from_the_database(copying, monkeypatch):
+    c = copying
+    lab = c['lab']
+    await c['approve']()
+    await c['mint'](1)
+    await c['scan']()
+    event = (await lab.client.get('/api/copy-mints/activity')).json()['events'][0]
+    tid = event['task_id']
+    await lab.sign(tid)
+    async with lab.factory() as db:
+        task = await db.get(MintTask, tid)
+        task.signed_tx_raw = task.transaction_hash = None
+        await automatic.release_reservation(db, task)
+        task.status, task.failure_reason = 'failed', copy_mints.funding_note(31337, True)
+        await db.commit()
+    async def unsigned(task_id):
+        response = await lab.signer_client.get(f'/tasks/{task_id}/unsigned')
+        assert response.json() == {'unsigned': False}
+        raise HTTPException(409, 'Independent journal contains a signature')
+    monkeypatch.setattr('app.api.copy_mints.confirm_unsigned', unsigned)
+    retry = await lab.client.post(f'/api/copy-mints/events/{event["id"]}/retry', json={})
+    assert retry.status_code == 409
+    async with lab.factory() as db:
+        assert (await db.get(MintTask, tid)).status == 'failed'
+        assert (await db.get(AutomaticGrant, lab.grant.id)).reserved_wei == 0
+
+
 @pytest.mark.parametrize('block', ['paused', 'unlinked', 'expired', 'foreign'])
 async def test_funding_retry_respects_current_owner_and_approval(copying, block):
     c = copying

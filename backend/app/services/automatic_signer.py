@@ -173,6 +173,7 @@ async def prepare_task(db, task_id, vault=None):
                     'JOIN copy_signed c ON c.task=s.task WHERE c.rule=?', (task.copy_rule_id,)).fetchone()[0]
                 if charged_copy + s['total_cap_wei'] > r['budget_wei']:
                     raise ValueError('Independent copy budget exhausted or reserved')
+            address = to_checksum_address(s['account'])
             if await web3.eth.get_balance(address, 'pending') <= s['price_wei'] * s['quantity']:
                 raise ValueError('Insufficient funds for mint value and gas')
             execution = s.get('execution')
@@ -180,7 +181,6 @@ async def prepare_task(db, task_id, vault=None):
                 await automatic.validate_mint(web3, s, {'to': execution['target'], 'value': execution['value'], 'data': execution['data']})
             else:
                 execution = await automatic.prepare_mint(web3, s)
-            address = to_checksum_address(s['account'])
             pending = await web3.eth.get_transaction_count(address, 'pending')
             stored = (await db.execute(select(func.max(AutomaticNonce.nonce)).where(
                 AutomaticNonce.address == address.lower(), AutomaticNonce.chain_id == s['chain_id']))).scalar()

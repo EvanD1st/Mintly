@@ -1391,6 +1391,7 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
                         ? null
                         : (id) => setState(() {
                             _policy = policies.firstWhere((p) => p['id'] == id);
+                            _consent = false;
                             _setExpiry();
                           }),
                     validator: (_) =>
