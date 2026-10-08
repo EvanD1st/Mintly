@@ -1,3 +1,4 @@
+import '../widgets/mintly_notice.dart';
 import '../theme/compatible_icons.dart';
 import 'dart:math';
 import 'package:flutter/material.dart';
@@ -161,7 +162,7 @@ class _AutomaticReviewState extends ConsumerState<AutomaticReviewScreen> {
           .armAutomaticTask(_request!);
       await ref.read(mintlyProvider.notifier).loadInitialData();
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
+      MintlyNotice.show(context, 
         SnackBar(
           content: Text(
             task.status == 'armed'

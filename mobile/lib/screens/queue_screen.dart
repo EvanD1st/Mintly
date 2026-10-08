@@ -1,3 +1,4 @@
+import '../widgets/mintly_notice.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -106,7 +107,7 @@ class QueueScreen extends ConsumerWidget {
                                 );
                               } catch (error) {
                                 if (context.mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
+                                  MintlyNotice.show(context, 
                                     SnackBar(content: Text('$error')),
                                   );
                                 }
@@ -127,7 +128,7 @@ class QueueScreen extends ConsumerWidget {
                                 }
                               } catch (error) {
                                 if (context.mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
+                                  MintlyNotice.show(context, 
                                     SnackBar(content: Text('$error')),
                                   );
                                 }
@@ -339,15 +340,13 @@ class QueueScreen extends ConsumerWidget {
                           try {
                             await notifier.disarmTask(task.id);
                             if (context.mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
+                              MintlyNotice.show(context, 
                                 const SnackBar(content: Text('Task disarmed.')),
                               );
                             }
                           } catch (error) {
                             if (context.mounted) {
-                              ScaffoldMessenger.of(
-                                context,
-                              ).showSnackBar(SnackBar(content: Text('$error')));
+                              MintlyNotice.show(context, SnackBar(content: Text('$error')));
                             }
                           }
                         },
@@ -358,7 +357,7 @@ class QueueScreen extends ConsumerWidget {
                         try {
                           final inFlight = await notifier.removeTask(task.id);
                           if (context.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
+                            MintlyNotice.show(context, 
                               SnackBar(
                                 content: Text(
                                   inFlight
@@ -370,9 +369,7 @@ class QueueScreen extends ConsumerWidget {
                           }
                         } catch (error) {
                           if (context.mounted) {
-                            ScaffoldMessenger.of(
-                              context,
-                            ).showSnackBar(SnackBar(content: Text('$error')));
+                            MintlyNotice.show(context, SnackBar(content: Text('$error')));
                           }
                         }
                       },
@@ -541,9 +538,7 @@ class QueueScreen extends ConsumerWidget {
                     await notifier.loadInitialData();
                   } catch (error) {
                     if (context.mounted) {
-                      ScaffoldMessenger.of(
-                        context,
-                      ).showSnackBar(SnackBar(content: Text('$error')));
+                      MintlyNotice.show(context, SnackBar(content: Text('$error')));
                     }
                   }
                 },
@@ -596,9 +591,7 @@ class QueueScreen extends ConsumerWidget {
                       );
                     } catch (error) {
                       if (context.mounted) {
-                        ScaffoldMessenger.of(
-                          context,
-                        ).showSnackBar(SnackBar(content: Text('$error')));
+                        MintlyNotice.show(context, SnackBar(content: Text('$error')));
                       }
                     }
                   },
@@ -610,9 +603,7 @@ class QueueScreen extends ConsumerWidget {
                       await notifier.refreshMintPlan(plan.id);
                     } catch (error) {
                       if (context.mounted) {
-                        ScaffoldMessenger.of(
-                          context,
-                        ).showSnackBar(SnackBar(content: Text('$error')));
+                        MintlyNotice.show(context, SnackBar(content: Text('$error')));
                       }
                     }
                   },
@@ -635,9 +626,7 @@ class QueueScreen extends ConsumerWidget {
                         }
                       } catch (error) {
                         if (context.mounted) {
-                          ScaffoldMessenger.of(
-                            context,
-                          ).showSnackBar(SnackBar(content: Text('$error')));
+                          MintlyNotice.show(context, SnackBar(content: Text('$error')));
                         }
                       }
                     },
@@ -648,7 +637,7 @@ class QueueScreen extends ConsumerWidget {
                     try {
                       final inFlight = await notifier.removeMintPlan(plan.id);
                       if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
+                        MintlyNotice.show(context, 
                           SnackBar(
                             content: Text(
                               inFlight
@@ -660,9 +649,7 @@ class QueueScreen extends ConsumerWidget {
                       }
                     } catch (error) {
                       if (context.mounted) {
-                        ScaffoldMessenger.of(
-                          context,
-                        ).showSnackBar(SnackBar(content: Text('$error')));
+                        MintlyNotice.show(context, SnackBar(content: Text('$error')));
                       }
                     }
                   },

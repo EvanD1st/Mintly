@@ -1,3 +1,4 @@
+import '../widgets/mintly_notice.dart';
 import 'dart:async';
 
 import 'package:firebase_core/firebase_core.dart';
@@ -44,7 +45,7 @@ class PushService {
         if (!acceptsMessage(message.data)) return;
         final notification = message.notification;
         if (notification == null) return;
-        messengerKey.currentState?.showSnackBar(
+        MintlyNotice.showGlobal(
           SnackBar(
             content: Text(
               '${notification.title ?? 'Mintly'}: ${notification.body ?? ''}',

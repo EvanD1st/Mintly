@@ -123,7 +123,7 @@ async def grant_for(db, grant_id, user_id):
     return grant
 
 
-async def make_snapshot(db, req, user_id):
+async def make_snapshot(db, req, user_id, *, presale_mint=None):
     enabled()
     if not req.grant_id:
         raise HTTPException(409, 'MetaMask connection is not automatic signing authority. Configure a custodial signer policy first.')
@@ -147,16 +147,26 @@ async def make_snapshot(db, req, user_id):
         raise HTTPException(409, 'Contract or mint method is outside the signer policy.')
     if req.mint_kind != 'public' and req.conditional_eligibility and req.onchain_stage_index is None:
         raise HTTPException(409, 'A conditional presale needs the verified on-chain stage index before arming; an ambiguous stage label is insufficient.')
-    if not stage.end_time_utc or not 1 <= req.quantity <= min(100, stage.limit_per_wallet):
+    stage_price, stage_limit = stage.price_wei, stage.limit_per_wallet
+    if presale_mint is not None:
+        p = presale_mint['params']
+        if (req.mint_kind == 'public' or presale_mint['kind'] != req.mint_kind
+                or presale_mint['wallet'].lower() != wallet.address.lower()
+                or presale_mint['contract'].lower() != drop.contract_address.lower()
+                or presale_mint['quantity'] != req.quantity or p[4] != req.onchain_stage_index
+                or p[2:4] != (int(aware(stage.start_time_utc).timestamp()), int(aware(stage.end_time_utc).timestamp()))):
+            raise HTTPException(409, 'Whitelist preparation differs from the receiving wallet or stage.')
+        stage_price, stage_limit = p[0], p[1]
+    if not stage.end_time_utc or not 1 <= req.quantity <= min(100, stage_limit):
         raise HTTPException(409, 'Stage needs an exact end time and sufficient quantity limit.')
     start, end = aware(stage.start_time_utc), aware(stage.end_time_utc)
     expiry = aware(req.expires_at) if req.expires_at else min(end, aware(grant.expires_at))
-    price = wei(req.price_cap_eth) if req.price_cap_eth is not None else stage.price_wei
+    price = wei(req.price_cap_eth) if req.price_cap_eth is not None else stage_price
     fee = wei(req.fee_cap_eth)
     total = wei(req.total_cap_eth) if req.total_cap_eth is not None else price * req.quantity + fee
     if not max(datetime.now(timezone.utc), start) < expiry <= min(end, aware(grant.expires_at)):
         raise HTTPException(409, 'Submission expiry must fall within the stage and policy validity.')
-    if price < stage.price_wei or fee <= 0 or total < stage.price_wei * req.quantity + fee:
+    if price < stage_price or fee <= 0 or total < stage_price * req.quantity + fee:
         raise HTTPException(409, 'Mint price, gas budget or total ceiling is insufficient.')
     if total > int(grant.scope['max_task_wei']) or total > grant.budget_wei - grant.spent_wei - grant.reserved_wei:
         raise HTTPException(409, 'Automatic policy budget is insufficient, including pending reservations.')
@@ -165,7 +175,7 @@ async def make_snapshot(db, req, user_id):
         'chain_id': drop.chain_id, 'chain': drop.chain, 'contract': to_checksum_address(drop.contract_address),
         'drop_id': drop.id, 'drop_name': drop.name, 'stage_id': stage.id, 'stage_name': stage.stage_name,
         'mint_kind': req.mint_kind, 'start': int(start.timestamp()), 'end': int(end.timestamp()),
-        'expiry': int(expiry.timestamp()), 'quantity': req.quantity, 'price_wei': stage.price_wei,
+        'expiry': int(expiry.timestamp()), 'quantity': req.quantity, 'price_wei': stage_price,
         'price_cap_wei': price, 'fee_cap_wei': fee, 'total_cap_wei': total,
         'recipient': to_checksum_address(wallet.address), 'mint_page_url': drop.mint_page_url,
         'conditional_eligibility': req.conditional_eligibility,

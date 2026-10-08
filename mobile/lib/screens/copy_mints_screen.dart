@@ -810,7 +810,7 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
         ),
         const SizedBox(height: 18),
         const Text(
-          'Supports direct public SeaDrop mints on Ethereum, Base and Robinhood. Allowlist mints, transfers and airdrops are excluded. Each public stage is copied once per receiving wallet.',
+          'Public mints and opted-in whitelist mints on Ethereum, Base and Robinhood. Unsupported mint methods, transfers and airdrops are skipped.',
           style: TextStyle(fontSize: 12),
         ),
       ],
@@ -874,7 +874,8 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
                     Wrap(
                       spacing: 7,
                       runSpacing: 7,
-                      children: [_Chip(label), _Chip('${o['chain']}')],
+                      children: [_Chip(label), _Chip('${o['chain']}'),
+                        _Chip(o['mint_kind'] == 'allowlist' || o['mint_kind'] == 'signed' ? 'Whitelist' : 'Public')],
                     ),
                     const SizedBox(height: 9),
                     Text('Followed ${event['wallet_label']}'),
@@ -912,6 +913,12 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
             OutlinedButton(
               onPressed: _busy ? null : () => _act(() => ref.read(apiServiceProvider).retryCopyMint('${event['id']}')),
               child: const Text('Retry'),
+            )
+          else if (event['task_id'] == null && (o['mint_kind'] == 'allowlist' || o['mint_kind'] == 'signed'))
+            OutlinedButton(
+              onPressed: _busy || !_watches.any((w) => w['id'] == event['watch_id'])
+                  ? null : () => _setup(_watches.firstWhere((w) => w['id'] == event['watch_id'])),
+              child: const Text('Whitelist settings'),
             )
           else if (event['task_id'] == null)
             OutlinedButton(
@@ -1013,7 +1020,7 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
             child: Padding(
               padding: EdgeInsets.symmetric(vertical: 18),
               child: Text(
-                'No public mints detected yet. New activity appears here after network confirmation.',
+                  'No supported mints detected yet. New activity appears after network confirmation.',
               ),
             ),
           ),
@@ -1181,6 +1188,7 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
   Map<String, dynamic>? _policy, _pending;
   DateTime? _expiry;
   bool _free = false, _consent = false, _busy = false, _customQuantity = false;
+  bool _includePresales = false;
   int _days = 7;
   String? _error;
 
@@ -1276,6 +1284,7 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
       'fee_cap_eth': _gas.text.trim(),
       'budget_eth': _budget.text.trim(),
       'free_only': _free,
+      'include_presales': _includePresales,
       'expires_at': _expiry!.toIso8601String(),
       'consent': true,
     };
@@ -1391,6 +1400,8 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
                         ? null
                         : (id) => setState(() {
                             _policy = policies.firstWhere((p) => p['id'] == id);
+                            final preferences = widget.watch['preferences'] as Map? ?? {};
+                            _includePresales = (preferences['presale_wallets'] as Map? ?? {})[id] == true;
                             _consent = false;
                             _setExpiry();
                           }),
@@ -1551,6 +1562,16 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
 
                           trailing: Text('Always on'),
                         ),
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('Include eligible whitelist mints'),
+                          subtitle: const Text('Checks your wallet. No public copy after a whitelist copy.'),
+                          value: _includePresales,
+                          onChanged: locked ? null : (value) => setState(() {
+                            _includePresales = value;
+                            _consent = false;
+                          }),
+                        ),
                         DropdownButtonFormField<int>(
                           icon: const CopyGlyph('down'),
                           initialValue: _days,
@@ -1596,8 +1617,8 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
                         : (v) => setState(() => _consent = v == true),
                     title: Text(
                       _free
-                          ? 'Approve maximum free minting (up to 100 NFTs) on the approved networks within these limits.'
-                          : 'Approve copying on the approved networks within these limits.',
+                          ? 'Approve maximum free minting (up to 100 NFTs) on the approved networks within these limits${_includePresales ? ', including eligible whitelist stages' : ''}.'
+                          : 'Approve copying on the approved networks within these limits${_includePresales ? ', including eligible whitelist stages' : ''}.',
                     ),
                   ),
                   if (_error != null)

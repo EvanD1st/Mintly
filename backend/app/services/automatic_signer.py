@@ -92,9 +92,11 @@ async def prepare_task(db, task_id, vault=None):
             copy_mints.enabled()
             copy_key = copy_mints.stage_key(s)
             source = s['copy_source']
-            if (task.copy_stage_key != copy_key or s['mint_kind'] != 'public'
+            if (task.copy_stage_key != copy_key or s['mint_kind'] != source.get('mint_kind', 'public')
                     or source['chain_id'] != s['chain_id'] or source['contract'].lower() != s['contract'].lower()
-                    or any(source[k] != s[k] for k in ('price_wei','start','end'))):
+                    or any(source[k] != s[k] for k in ('start','end'))
+                    or (s['mint_kind'] == 'public' and source['price_wei'] != s['price_wei'])
+                    or (s['mint_kind'] != 'public' and source['onchain_stage_index'] != s.get('onchain_stage_index'))):
                 raise ValueError('Copy source differs from the authorized public stage')
             await copy_mints.verify_source(web3, source)
             if task.copy_rule_id:
@@ -118,6 +120,7 @@ async def prepare_task(db, task_id, vault=None):
                     s.get('copy_quantity_mode') == mode and 1 <= s['quantity'] <= r['quantity']
                     and s['price_wei'] == 0 and s['price_cap_wei'] == 0))
                 if (automatic.digest(rule.snapshot) != pin['intent'] or s.get('copy_rule_id') != rule.id
+                        or s['mint_kind'] not in r.get('mint_kinds', ['public'])
                         or r['grant_id'] != grant.id or r['user_id'] != grant.user_id
                         or r['chain_id'] != s['chain_id'] or r['wallet_id'] != wallet.id
                         or r['source_address'].lower() != source['source_address'].lower()
@@ -176,6 +179,9 @@ async def prepare_task(db, task_id, vault=None):
             address = to_checksum_address(s['account'])
             if await web3.eth.get_balance(address, 'pending') <= s['price_wei'] * s['quantity']:
                 raise ValueError('Insufficient funds for mint value and gas')
+            if copy_key:
+                await copy_mints.no_mixed_stage_copy(db, s, task_id=task.id)
+                verify_collection_copy_journal(journal, s, task.id)
             execution = s.get('execution')
             if execution:
                 await automatic.validate_mint(web3, s, {'to': execution['target'], 'value': execution['value'], 'data': execution['data']})
@@ -221,6 +227,8 @@ async def prepare_task(db, task_id, vault=None):
                 (task.id, grant.id, intent, address.lower(), s['chain_id'], nonce, s['total_cap_wei'], raw, tx_hash))
             if copy_key:
                 journal.execute('INSERT INTO copy_signed(task,rule,stage) VALUES(?,?,?)', (task.id, task.copy_rule_id, copy_key))
+                journal.execute('INSERT INTO copy_collections(task,address,chain,contract,kind) VALUES(?,?,?,?,?)',
+                    (task.id, address.lower(), s['chain_id'], s['contract'].lower(), s['mint_kind']))
             journal.commit()  # fsync BEFORE returning or persisting anything broadcastable to the worker
         reservation = await db.get(AutomaticNonce, task.id)
         if not reservation:
@@ -249,7 +257,8 @@ async def prepare(task_id: str, db=Depends(get_db)):
         actionable = {'Insufficient funds for mint value and gas', 'Estimated gas or total debit exceeds task authorization',
                       'Task or signer policy expired', 'Public stage changed on chain',
                       'Independent signer budget exhausted or reserved by uncertain submissions',
-                      'Independent shared copy budget exhausted or reserved'}
+                      'Independent shared copy budget exhausted or reserved',
+                      'Whitelist copy already signed. Public mint skipped.', 'Public copy already signed. Whitelist mint skipped.'}
         detail = str(error) if str(error) in actionable else 'Independent signer rejected task policy, identity, budget or chain readiness.'
         raise HTTPException(409, detail) from None
     except Exception:
@@ -284,7 +293,9 @@ async def register_copy_rule(rule_id: str, db=Depends(get_db)):
             or watch.address.lower() == grant.account.lower() or r['watch_id'] != watch.id
             or r['expiry'] != int(aware(rule.expires_at).timestamp()) or r['expiry'] > policy['expires_at']
             or r['expiry'] <= int(datetime.now(timezone.utc).timestamp())
-            or 'public' not in policy['mint_kinds'] or not 1 <= r['quantity'] <= 100
+            or not set(r.get('mint_kinds', ['public'])) <= set(policy['mint_kinds'])
+            or r.get('mint_kinds', ['public']) not in (['public'], ['public','allowlist','signed'])
+            or not 1 <= r['quantity'] <= 100
             or not 0 <= r['price_cap_wei'] or not 0 < r['fee_cap_wei']
             or r['total_cap_wei'] != r['price_cap_wei'] * r['quantity'] + r['fee_cap_wei']
             or not r['total_cap_wei'] <= min(r['budget_wei'], policy['max_task_wei'])
@@ -333,6 +344,36 @@ async def reconcile_copy_group(journal, group, current_web3, current_chain):
         for chain, web3 in providers.items():
             if chain != current_chain:
                 await web3.provider.disconnect()
+
+
+def verify_collection_copy_journal(journal, snapshot, task_id):
+    """Recover old collection guards from signed bytes, never mutable task history."""
+    from eth_account import Account
+    from eth_account._utils.legacy_transactions import Transaction
+    from app.services.seadrop_mint import decode_mint
+    from eth_utils import keccak
+    address, chain, contract = snapshot['account'].lower(), snapshot['chain_id'], snapshot['contract'].lower()
+    entries = journal.execute('SELECT s.* FROM signed s JOIN copy_signed c ON c.task=s.task '
+        'LEFT JOIN copy_collections n ON n.task=s.task WHERE s.address=? AND s.chain=? AND n.task IS NULL',
+        (address, chain)).fetchall()
+    for entry in entries:
+        raw = bytes.fromhex(entry['raw'].removeprefix('0x'))
+        tx = Transaction.from_bytes(raw)
+        if (Account.recover_transaction(raw).lower() != address or '0x' + keccak(raw).hex() != entry['hash']
+                or tx.v < 35 or (tx.v - 35) // 2 != chain or len(tx.data) < 132):
+            raise ValueError('Stored copy signature could not be verified')
+        nft = to_checksum_address(tx.data[16:36])
+        count = int.from_bytes(tx.data[100:132], 'big')
+        mint = decode_mint({'to': '0x' + tx.to.hex(), 'data': '0x' + tx.data.hex(), 'value': str(tx.value)}, nft, address, count)
+        journal.execute('INSERT INTO copy_collections(task,address,chain,contract,kind) VALUES(?,?,?,?,?)',
+            (entry['task'], address, chain, nft.lower(), mint['kind']))
+    journal.commit()
+    opposite = ('allowlist','signed') if snapshot['mint_kind'] == 'public' else ('public',)
+    marks = ','.join('?' for _ in opposite)
+    if journal.execute('SELECT task FROM copy_collections WHERE address=? AND chain=? AND contract=? '
+            f'AND task<>? AND kind IN ({marks}) LIMIT 1', (address, chain, contract, task_id, *opposite)).fetchone():
+        raise ValueError('Whitelist copy already signed. Public mint skipped.' if snapshot['mint_kind'] == 'public'
+            else 'Public copy already signed. Whitelist mint skipped.')
 
 
 @app.get('/tasks/{task_id}/unsigned', dependencies=[Depends(authenticate)])

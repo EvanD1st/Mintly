@@ -1,3 +1,4 @@
+import '../widgets/mintly_notice.dart';
 import '../theme/compatible_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -82,7 +83,7 @@ class _AdminScreenState extends ConsumerState<AdminScreen> {
   }
 
   void _showError(Object error) {
-    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$error')));
+    if (mounted) MintlyNotice.show(context, SnackBar(content: Text('$error')));
   }
 
   @override

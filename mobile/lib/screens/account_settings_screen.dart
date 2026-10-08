@@ -1,3 +1,4 @@
+import '../widgets/mintly_notice.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../services/push_service.dart';
@@ -108,7 +109,7 @@ class _AccountSettingsState extends ConsumerState<AccountSettingsScreen> {
           );
         } catch (_) {
           if (context.mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
+            MintlyNotice.show(context, 
               const SnackBar(
                 content: Text(
                   'Could not update notifications. Allow notifications and retry.',

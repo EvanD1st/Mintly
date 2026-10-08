@@ -96,5 +96,7 @@ class CustodyVault:
             nonce INTEGER NOT NULL, raw TEXT NOT NULL, hash TEXT NOT NULL)''')
         conn.execute('CREATE TABLE IF NOT EXISTS copy_rules (id TEXT PRIMARY KEY, intent TEXT NOT NULL, snapshot TEXT NOT NULL)')
         conn.execute('CREATE TABLE IF NOT EXISTS copy_signed (task TEXT PRIMARY KEY, rule TEXT, stage TEXT NOT NULL UNIQUE)')
+        conn.execute('CREATE TABLE IF NOT EXISTS copy_collections (task TEXT PRIMARY KEY, address TEXT NOT NULL, chain INTEGER NOT NULL, contract TEXT NOT NULL, kind TEXT NOT NULL)')
+        conn.execute('CREATE INDEX IF NOT EXISTS copy_collections_wallet ON copy_collections(address,chain,contract)')
         conn.commit()
         return conn

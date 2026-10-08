@@ -14,6 +14,7 @@ class CopyWatch(Base):
     label: Mapped[str] = mapped_column(String(80))
     chains: Mapped[list] = mapped_column(JSON)
     cursors: Mapped[dict] = mapped_column(JSON, default=dict)
+    preferences: Mapped[dict] = mapped_column(JSON, default=dict)
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 

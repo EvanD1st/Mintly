@@ -5,6 +5,7 @@ import '../models/drop_model.dart';
 import '../models/task_model.dart';
 import '../models/activity_model.dart';
 import '../models/mint_plan_model.dart';
+import '../widgets/mintly_notice.dart';
 
 class ApiException implements Exception {
   final String message;
@@ -80,6 +81,7 @@ class ApiService extends ChangeNotifier {
     _sessionToken = result['token'] as String;
     _user = result['user'] as Map<String, dynamic>;
     _sessionRevision++;
+    MintlyNotice.dismissAll();
     _resetMetadata();
     notifyListeners();
   }
@@ -104,6 +106,7 @@ class ApiService extends ChangeNotifier {
     _sessionToken = '';
     _user = null;
     _sessionRevision++;
+    MintlyNotice.dismissAll();
     _resetMetadata();
     notifyListeners();
   }

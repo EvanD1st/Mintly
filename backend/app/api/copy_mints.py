@@ -35,6 +35,7 @@ class RuleRequest(BaseModel):
     fee_cap_eth: str = Field(pattern=r'^[0-9]+(\.[0-9]+)?$', max_length=40)
     budget_eth: str = Field(pattern=r'^[0-9]+(\.[0-9]+)?$', max_length=40)
     free_only: bool = False
+    include_presales: bool = False
     expires_at: datetime
     consent: bool
 
@@ -49,6 +50,7 @@ class WalletRuleRequest(BaseModel):
     fee_cap_eth: str = Field(pattern=r'^[0-9]+(\.[0-9]+)?$', max_length=40)
     budget_eth: str = Field(pattern=r'^[0-9]+(\.[0-9]+)?$', max_length=40)
     free_only: bool = False
+    include_presales: bool = False
     expires_at: datetime
     consent: bool
 
@@ -112,9 +114,10 @@ async def overview(user=Depends(get_current_user), db=Depends(get_db)):
         CopyRule.status.in_(['active','paused','registering'])).order_by(CopyRule.created_at.desc()))).scalars().all()
     return {'enabled': settings.ENABLE_COPY_MINTS, 'networks': copying.networks(),
         'watches': [{'id': w.id, 'address': w.address, 'label': w.label, 'chains': w.chains,
+            'preferences': w.preferences or {},
             'cursors': w.cursors, 'recent_mints': counts.get(w.id, 0),
             'rules': [public_rule(r) for r in rules if r.watch_id == w.id]} for w in watches],
-        'scope': 'Direct public SeaDrop NFT mints. Each collection’s public stage is copied once per receiving wallet.'}
+        'scope': 'Direct SeaDrop public mints; eligible allowlist/signed stages require explicit opt-in. No public copy after a whitelist copy.'}
 
 
 @router.post('/watches')
@@ -199,6 +202,8 @@ async def approve_wallet(watch_id: str, req: WalletRuleRequest, user=Depends(get
     ids = [str(req.request_id) if i == 0 else str(uuid.uuid5(req.request_id, f'copy-network:{g.chain_id}'))
         for i, g in enumerate(grants)]
     group = {'id': str(req.request_id), 'budget_wei': budget, 'members': ids}
+    watch.preferences = {**(watch.preferences or {}), 'presale_wallets': {
+        **(watch.preferences or {}).get('presale_wallets', {}), grants[0].wallet_id: req.include_presales}}
     # One explicit consent covers the displayed networks, even when an older watch monitored fewer.
     # No historical spending: each rule still pins its current chain head as after_block.
     watch.chains = sorted(set(watch.chains) | {g.chain_id for g in grants})
@@ -244,6 +249,8 @@ async def save_rule(watch_id, req, user, db, *, group=None):
         raise HTTPException(409, 'Choose a policy on a monitored network for a different receiving wallet.')
     if 'public' not in grant.scope['mint_kinds']:
         raise HTTPException(409, 'This policy cannot mint public stages.')
+    if req.include_presales and not {'allowlist','signed'} <= set(grant.scope['mint_kinds']):
+        raise HTTPException(409, 'This wallet approval cannot mint whitelist stages. Review its wallet permissions first.')
     expiry = aware(req.expires_at)
     if req.expires_at.tzinfo is None or not req.consent or not datetime.now(timezone.utc) < expiry <= min(
             aware(grant.expires_at), datetime.now(timezone.utc) + timedelta(days=30)):
@@ -262,11 +269,14 @@ async def save_rule(watch_id, req, user, db, *, group=None):
         free_only=req.free_only, expiry=int(expiry.timestamp()))
     if group is not None:
         request['budget_group'] = group
+    if req.include_presales:
+        request['mint_kinds'] = ['public','allowlist','signed']
     # Legacy approvals keep their exact pinned quantity; only new consent adds a mode.
     if req.quantity_mode != 'fixed':
         request['quantity_mode'] = req.quantity_mode
     if old:
-        if (old.snapshot.get('budget_group') != group or old.snapshot.get('quantity_mode', 'fixed') != req.quantity_mode
+        if (old.snapshot.get('mint_kinds', ['public']) != request.get('mint_kinds', ['public'])
+                or old.snapshot.get('budget_group') != group or old.snapshot.get('quantity_mode', 'fixed') != req.quantity_mode
                 or any(old.snapshot.get(k) != v for k, v in request.items())):
             raise HTTPException(409, 'Approval request changed. Open a new review.')
         if old.status != 'registering':
@@ -409,6 +419,7 @@ async def retry_funded(event_id: str, user=Depends(get_current_user), db=Depends
             if aware(task.expires_at_utc) <= datetime.now(timezone.utc) or s['user_id'] != user.id:
                 raise HTTPException(409, 'This mint has ended.')
             await copying.verify_source(web3, event.observation)
+            await copying.no_mixed_stage_copy(db, s, task_id=task.id)
             execution = await automatic.prepare_mint(web3, s)
             await copying.funding_check(web3, execution, s)
             total = auth.total_spend_cap_wei

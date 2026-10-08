@@ -1,3 +1,4 @@
+import '../widgets/mintly_notice.dart';
 import '../theme/compatible_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -72,7 +73,7 @@ class DropDetailScreen extends ConsumerWidget {
               }
             } catch (error) {
               if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$error')));
+                MintlyNotice.show(context, SnackBar(content: Text('$error')));
               }
             }
           }, icon: const Icon(MintlyIcons.openInNew), label: const Text('View on OpenSea'))

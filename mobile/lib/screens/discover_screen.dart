@@ -1,3 +1,4 @@
+import '../widgets/mintly_notice.dart';
 import '../theme/compatible_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -178,7 +179,7 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
                   try {
                     await notifier.removeDrop(drop.id);
                     if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
+                      MintlyNotice.show(context, 
                         const SnackBar(
                           content: Text('Drop removed from Today.'),
                         ),
@@ -186,9 +187,7 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
                     }
                   } catch (error) {
                     if (context.mounted) {
-                      ScaffoldMessenger.of(
-                        context,
-                      ).showSnackBar(SnackBar(content: Text('$error')));
+                      MintlyNotice.show(context, SnackBar(content: Text('$error')));
                     }
                   } finally {
                     if (mounted) setState(() => _removing.remove(drop.id));

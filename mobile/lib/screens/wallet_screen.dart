@@ -1,3 +1,4 @@
+import '../widgets/mintly_notice.dart';
 import 'account_settings_screen.dart';
 import '../theme/compatible_icons.dart';
 import 'package:flutter/material.dart';
@@ -69,9 +70,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
       return true;
     } catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('$error')));
+        MintlyNotice.show(context, SnackBar(content: Text('$error')));
       }
       return false;
     } finally {
@@ -106,7 +105,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
     );
     if (imported == true && mounted) {
       _refresh();
-      ScaffoldMessenger.of(context).showSnackBar(
+      MintlyNotice.show(context, 
         const SnackBar(
           content: Text(
             'Wallet imported. Select an NFT to review an automatic mint.',

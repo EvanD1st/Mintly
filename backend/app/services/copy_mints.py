@@ -5,13 +5,14 @@ import uuid
 from eth_abi import decode, encode
 from eth_utils import keccak, to_checksum_address
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import select, func
 from web3.exceptions import Web3RPCError
 from app.config import settings
 from app.models import CopyWatch, CopyRule, CopyEvent, MintTask, MintAuthorization, Drop, MintStage, ActivityEvent
 from app.services import automatic
 from app.services.mint_plans import aware
-from app.services.seadrop_mint import decode_mint
+from app.services.seadrop_mint import decode_mint, verify_presale, ALLOW_SELECTOR, SIGNED_SELECTOR
+from app.services.opensea import OpenSeaClient, OpenSeaUnavailable, CHAINS as OPENSEA_CHAINS
 from app.services.signer.base import SEADROP_V1_ADDRESS, MINT_PUBLIC_SELECTOR
 from app.services.parser import format_wei_to_eth
 from app.services.automatic_fees import quote_gas, maximum_fee
@@ -176,17 +177,20 @@ async def verify_source(web3, observation):
     data = data if isinstance(data, str) else hex_value(data)
     mint = decode_mint({'to': tx['to'], 'data': data, 'value': str(tx.value)},
         observation['contract'], source, observation['source_quantity'])
-    if mint['kind'] != 'public':
-        raise ValueError('Only direct public SeaDrop mints can be copied')
+    if mint['kind'] != observation.get('mint_kind', 'public'):
+        raise ValueError('Source mint method differs from the observed stage')
     topic = bytes.fromhex(source[2:].rjust(64, '0'))
     count = sum(1 for log in receipt.logs if log.address.lower() == observation['contract'].lower()
         and len(log.topics) == 4 and bytes(log.topics[0]) == bytes.fromhex(TRANSFER[2:])
         and bytes(log.topics[1]) == bytes(32) and bytes(log.topics[2]) == topic)
     if count != mint['quantity'] or tx.value != observation['price_wei'] * count:
-        raise ValueError('Source receipt does not prove the specified public NFT mint')
-    historical = await public_stage(web3, observation['contract'], receipt.blockNumber)
+        raise ValueError('Source receipt does not prove the specified NFT mint')
+    historical = await public_stage(web3, observation['contract'], receipt.blockNumber) if mint['kind'] == 'public' else {
+        'price_wei':mint['params'][0], 'start':mint['params'][2], 'end':mint['params'][3]}
     if any(historical[k] != observation[k] for k in ('price_wei', 'start', 'end')):
         raise ValueError('Source stage differs from the observed public stage')
+    if mint['kind'] != 'public' and mint['params'][4] != observation.get('onchain_stage_index'):
+        raise ValueError('Source whitelist stage index differs')
     return mint
 
 
@@ -194,16 +198,18 @@ async def observe(web3, chain, tx_hash, source, contract):
     tx = await web3.eth.get_transaction(tx_hash)
     data = tx.get('input', tx.get('data'))
     raw = bytes.fromhex(data.removeprefix('0x')) if isinstance(data, str) else bytes(data)
-    if raw[:4].hex() != MINT_PUBLIC_SELECTOR:
-        raise ValueError('Not a public mint')
+    if raw[:4].hex() not in (MINT_PUBLIC_SELECTOR, ALLOW_SELECTOR, SIGNED_SELECTOR):
+        raise ValueError('Not a supported direct SeaDrop mint')
     values = decode(['address','address','address','uint256'], raw[4:132])
     if values[0].lower() != contract.lower():
         raise ValueError('NFT differs from mint calldata')
     if tx['from'].lower() != source.lower():
         raise ValueError('Transaction was not sent by the followed wallet')
-    decode_mint({'to': tx['to'], 'value': str(tx.value), 'data': '0x' + raw.hex()}, contract, source, values[3])
+    mint = decode_mint({'to': tx['to'], 'value': str(tx.value), 'data': '0x' + raw.hex()}, contract, source, values[3])
     receipt = await web3.eth.get_transaction_receipt(tx_hash)
-    stage = await public_stage(web3, contract, receipt.blockNumber)
+    stage = await public_stage(web3, contract, receipt.blockNumber) if mint['kind'] == 'public' else {
+        'price_wei':mint['params'][0], 'start':mint['params'][2], 'end':mint['params'][3],
+        'limit':mint['params'][1], 'onchain_stage_index':mint['params'][4], 'mint_kind':mint['kind']}
     block = await web3.eth.get_block(receipt.blockNumber)
     observation = dict(chain_id=chain, chain=CHAINS[chain], contract=to_checksum_address(contract),
         source_hash=tx_hash, source_address=source, source_quantity=values[3],
@@ -220,24 +226,68 @@ async def observe(web3, chain, tx_hash, source, contract):
     return observation
 
 
-async def drop_for(db, web3, observation):
-    current = await public_stage(web3, observation['contract'])
+async def prepare_presale_copy(web3, observation, rule):
+    """Acquire the receiving wallet's proof/signature, never the followed wallet's."""
+    if await web3.eth.get_balance(rule['account'], 'pending') <= 0:
+        raise HTTPException(409, funding_note(observation['chain_id']))
+    client = OpenSeaClient()
+    try:
+        slug = await client.collection_for_contract(observation['chain_id'], observation['contract'])
+        async def build(quantity):
+            status, transaction = await client.build_mint(slug, rule['account'], quantity)
+            if status != 200 or transaction is None:
+                raise HTTPException(409, 'Your wallet cannot mint this whitelist stage.')
+            if OPENSEA_CHAINS.get(transaction.get('chain'), (None,))[0] != observation['chain_id']:
+                raise HTTPException(409, 'Whitelist mint network could not be verified.')
+            mint = decode_mint(transaction, observation['contract'], rule['account'], quantity)
+            if (mint['kind'] != observation['mint_kind'] or mint['params'] is None
+                    or mint['params'][2:5] != (observation['start'], observation['end'], observation['onchain_stage_index'])):
+                raise HTTPException(409, 'Whitelist mint unavailable. Public mint fallback is disabled.')
+            await verify_presale(web3, mint)
+            return mint
+        mode = quantity_mode(rule)
+        mint = await build(1 if mode == 'max_free' else rule['quantity'])
+        if mode == 'max_free' and mint['params'][0] == 0:
+            minted, supply, maximum = decode(['uint256'] * 3, await web3.eth.call({
+                'to': observation['contract'], 'data': keccak(text='getMintStats(address)')[:4]
+                    + encode(['address'], [rule['account']])}))
+            count = min(rule['quantity'], mint['params'][1] - minted, mint['params'][5] - supply, maximum - supply)
+            if count < 1:
+                raise HTTPException(409, 'No whitelist mint allowance or supply remains.')
+            if count != 1:
+                mint = await build(count)
+        return mint, slug
+    except OpenSeaUnavailable as error:
+        if error.status in (400,404,409,422):
+            raise HTTPException(409, 'Whitelist eligibility or mint data could not be verified for your wallet.') from None
+        raise
+
+
+async def drop_for(db, web3, observation, *, presale=None, slug=None):
+    kind = observation.get('mint_kind', 'public')
+    if kind != 'public' and presale is None:
+        raise HTTPException(409, 'Enable eligible whitelist copying in Copy settings first.')
+    current = await public_stage(web3, observation['contract']) if kind == 'public' else {
+        'price_wei':observation['price_wei'], 'start':observation['start'], 'end':observation['end'], 'limit':observation['limit']}
     if any(current[k] != observation[k] for k in ('price_wei', 'start', 'end')):
         raise HTTPException(409, 'The observed public stage has changed. This mint cannot be copied.')
     block = await web3.eth.get_block('latest')
     if not current['start'] <= max(block.timestamp, int(datetime.now(timezone.utc).timestamp())) < current['end']:
         raise HTTPException(409, 'This public stage is no longer open.')
-    key = automatic.digest([observation['chain_id'], observation['contract'].lower(), current['start'], current['end']])
+    parts = [observation['chain_id'], observation['contract'].lower(), current['start'], current['end']]
+    if kind != 'public':
+        parts += [kind, observation['onchain_stage_index']]
+    key = automatic.digest(parts)
     drop = await db.get(Drop, key)
     if not drop:
-        slug = {1:'ethereum',8453:'base',4663:'robinhood',11155111:'sepolia',31337:'local'}[observation['chain_id']]
+        chain_slug = {1:'ethereum',8453:'base',4663:'robinhood',11155111:'sepolia',31337:'local'}[observation['chain_id']]
         drop = Drop(id=key, name=observation['name'], chain=observation['chain'], chain_id=observation['chain_id'],
-            contract_address=observation['contract'], mint_page_url=f'https://opensea.io/assets/{slug}/{observation["contract"]}',
+            contract_address=observation['contract'], mint_page_url=f'https://opensea.io/collection/{slug}' if slug else f'https://opensea.io/assets/{chain_slug}/{observation["contract"]}',
             site_label='Public SeaDrop', icon_name='gem', status_label='Public stage verified', status_kind='unknown',
             is_supported_integration=True, is_demo=False)
         db.add(drop)
         await db.flush()
-        stage = MintStage(id=key, drop_id=key, stage_name='Public',
+        stage = MintStage(id=key, drop_id=key, stage_name='Public' if kind == 'public' else 'Whitelist',
             start_time_utc=datetime.fromtimestamp(current['start'], timezone.utc),
             end_time_utc=datetime.fromtimestamp(current['end'], timezone.utc), price_wei=current['price_wei'],
             price_eth_str=format_wei_to_eth(current['price_wei']), limit_per_wallet=current['limit'], eligibility_status='unknown')
@@ -250,10 +300,34 @@ async def drop_for(db, web3, observation):
 
 
 def stage_key(snapshot):
-    return automatic.digest([snapshot['chain_id'], snapshot['account'].lower(), snapshot['contract'].lower(), snapshot['start'], snapshot['end']])
+    parts = [snapshot['chain_id'], snapshot['account'].lower(), snapshot['contract'].lower(), snapshot['start'], snapshot['end']]
+    if snapshot.get('mint_kind', 'public') != 'public':
+        parts += [snapshot['mint_kind'], snapshot['onchain_stage_index']]
+    return automatic.digest(parts)
+
+
+async def no_mixed_stage_copy(db, snapshot, *, task_id=None):
+    """Block queued/finished presale-public duplicates by address, network and collection."""
+    rows = (await db.execute(select(MintTask, MintAuthorization).join(MintAuthorization,
+        MintTask.authorization_id == MintAuthorization.id).where(MintTask.copy_stage_key.is_not(None),
+            MintAuthorization.snapshot['chain_id'].as_integer() == snapshot['chain_id'],
+            func.lower(MintAuthorization.snapshot['account'].as_string()) == snapshot['account'].lower(),
+            func.lower(MintAuthorization.snapshot['contract'].as_string()) == snapshot['contract'].lower()))).all()
+    for task, auth in rows:
+        other = auth.snapshot
+        if task.id == task_id or not other:
+            continue
+        if task.status in ('failed','expired','disarmed') and not task.signed_tx_raw:
+            continue
+        if (other['chain_id'] == snapshot['chain_id'] and other['account'].lower() == snapshot['account'].lower()
+                and other['contract'].lower() == snapshot['contract'].lower()
+                and (other['mint_kind'] == 'public') != (snapshot['mint_kind'] == 'public')):
+            raise HTTPException(409, 'Whitelist copy already exists. Public mint skipped.' if snapshot['mint_kind'] == 'public'
+                else 'Public copy already exists. Whitelist mint skipped.')
 
 
 async def no_duplicate(db, snapshot):
+    await no_mixed_stage_copy(db, snapshot)
     key = stage_key(snapshot)
     if await db.scalar(select(MintTask.id).where(MintTask.copy_stage_key == key).limit(1)):
         raise HTTPException(409, 'This receiving wallet already has a copy for this collection’s public stage.')
@@ -281,7 +355,12 @@ async def arm_event(db, event, rule, web3):
         return
     if o['block_number'] <= rule.resume_after_block:
         return  # Recent history and paused intervals are never spent automatically.
-    if o['price_wei'] > r['price_cap_wei'] or (r['free_only'] and o['price_wei'] != 0):
+    kind = o.get('mint_kind', 'public')
+    if kind not in r.get('mint_kinds', ['public']):
+        event.status, event.note = 'skipped', 'Whitelist copying is off. Enable it in Copy settings.'
+        return
+    await no_mixed_stage_copy(db, {'chain_id':o['chain_id'], 'account':r['account'], 'contract':o['contract'], 'mint_kind':kind})
+    if kind == 'public' and (o['price_wei'] > r['price_cap_wei'] or (r['free_only'] and o['price_wei'] != 0)):
         event.status, event.note = 'skipped', 'Mint price is outside your copy limits.'
         return
     if rule.budget_wei - rule.spent_wei - rule.reserved_wei < r['total_cap_wei']:
@@ -291,22 +370,32 @@ async def arm_event(db, event, rule, web3):
         event.status, event.note = 'skipped', 'Total copy budget is used or reserved by pending mints.'
         return
     await verify_source(web3, o)
-    drop, stage = await drop_for(db, web3, o)
     mode = quantity_mode(r)
-    quantity = await maximum_free_quantity(web3, o, r) if mode == 'max_free' else r['quantity']
-    if await web3.eth.get_balance(r['account'], 'pending') <= o['price_wei'] * quantity:
-        raise HTTPException(409, funding_note(o['chain_id'], o['price_wei'] > 0))
+    presale, slug = None, None
+    if kind == 'public':
+        drop, stage = await drop_for(db, web3, o)
+        quantity = await maximum_free_quantity(web3, o, r) if mode == 'max_free' else r['quantity']
+        price = o['price_wei']
+    else:
+        presale, slug = await prepare_presale_copy(web3, o, r)
+        quantity, price = presale['quantity'], presale['params'][0]
+        drop, stage = await drop_for(db, web3, o, presale=presale, slug=slug)
+        if price > r['price_cap_wei'] or (r['free_only'] and price != 0):
+            event.status, event.note = 'skipped', 'Your whitelist price is outside your copy limits.'
+            return
+    if await web3.eth.get_balance(r['account'], 'pending') <= price * quantity:
+        raise HTTPException(409, funding_note(o['chain_id'], price > 0))
     req = SimpleNamespace(plan_id=None, grant_id=rule.grant_id, wallet_id=r['wallet_id'], drop_id=drop.id,
         stage_id=stage.id, quantity=quantity, price_cap_eth=format_wei_to_eth(r['price_cap_wei']),
         fee_cap_eth=format_wei_to_eth(r['fee_cap_wei']), total_cap_eth=format_wei_to_eth(r['total_cap_wei']),
-        expires_at=min(aware(rule.expires_at), aware(stage.end_time_utc)), mint_kind='public',
-        conditional_eligibility=False, onchain_stage_index=None)
-    grant, s = await automatic.make_snapshot(db, req, rule.user_id)
+        expires_at=min(aware(rule.expires_at), aware(stage.end_time_utc)), mint_kind=kind,
+        conditional_eligibility=False, onchain_stage_index=o.get('onchain_stage_index'))
+    grant, s = await automatic.make_snapshot(db, req, rule.user_id, presale_mint=presale)
     s['copy_rule_id'], s['copy_source'] = rule.id, o
     if mode == 'max_free':
         s['copy_quantity_mode'] = mode
     key = await no_duplicate(db, s)
-    s['execution'] = await automatic.prepare_mint(web3, s)
+    s['execution'] = presale['execution'] if presale else await automatic.prepare_mint(web3, s)
     await funding_check(web3, s['execution'], s)
     auth = MintAuthorization(id=str(uuid.uuid4()), wallet_id=r['wallet_id'], drop_id=drop.id, stage_id=stage.id,
         quantity=s['quantity'], max_price_per_token_wei=s['price_cap_wei'], max_fee_wei=s['fee_cap_wei'],

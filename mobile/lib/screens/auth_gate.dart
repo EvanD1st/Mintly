@@ -1,3 +1,4 @@
+import '../widgets/mintly_notice.dart';
 import '../theme/compatible_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -105,7 +106,7 @@ class _ChangePasswordScreenState extends ConsumerState<_ChangePasswordScreen> {
     try {
       await ref.read(apiServiceProvider).changePassword(_current.text, _next.text);
       _current.clear(); _next.clear();
-      PushService.instance.messengerKey.currentState?.showSnackBar(
+      MintlyNotice.showGlobal(
         const SnackBar(content: Text('Password changed. Sign in with your new password.')));
     } catch (error) {
       if (mounted) setState(() => _error = '$error');
