@@ -32,8 +32,12 @@ async def presale(copying, monkeypatch):
         a, b = leaf(c['source'].address, source_params), leaf(lab.owner.address, own_params())
         root = keccak(min(a,b) + max(a,b))
         bounds = (0, 20, lab.start, lab.end, 50, 500, 500)
-        lab.w.eth.wait_for_transaction_receipt(lab.nft.functions.configure(root, lab.w.eth.accounts[1],
-            issuer.address, bounds).transact({'from':lab.w.eth.accounts[0]}))
+        lab.w.eth.wait_for_transaction_receipt(lab.nft.functions.replaceRoot(root).transact({'from':lab.w.eth.accounts[0]}))
+        lab.w.provider.make_request('hardhat_impersonateAccount',[lab.nft.address])
+        lab.w.provider.make_request('hardhat_setBalance',[lab.nft.address,hex(10**18)])
+        lab.w.eth.wait_for_transaction_receipt(lab.sea.functions.updateSignedMintValidationParams(issuer.address,bounds)
+            .transact({'from':lab.nft.address}))
+        lab.w.provider.make_request('hardhat_stopImpersonatingAccount',[lab.nft.address])
     configure()
     def transaction(address, quantity, source=False):
         params = source_params if source else own_params()

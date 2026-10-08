@@ -107,7 +107,7 @@ class QueueScreen extends ConsumerWidget {
                                 );
                               } catch (error) {
                                 if (context.mounted) {
-                                  MintlyNotice.show(context, 
+                                  MintlyNotice.show(context,
                                     SnackBar(content: Text('$error')),
                                   );
                                 }
@@ -128,7 +128,7 @@ class QueueScreen extends ConsumerWidget {
                                 }
                               } catch (error) {
                                 if (context.mounted) {
-                                  MintlyNotice.show(context, 
+                                  MintlyNotice.show(context,
                                     SnackBar(content: Text('$error')),
                                   );
                                 }
@@ -340,7 +340,7 @@ class QueueScreen extends ConsumerWidget {
                           try {
                             await notifier.disarmTask(task.id);
                             if (context.mounted) {
-                              MintlyNotice.show(context, 
+                              MintlyNotice.show(context,
                                 const SnackBar(content: Text('Task disarmed.')),
                               );
                             }
@@ -357,7 +357,7 @@ class QueueScreen extends ConsumerWidget {
                         try {
                           final inFlight = await notifier.removeTask(task.id);
                           if (context.mounted) {
-                            MintlyNotice.show(context, 
+                            MintlyNotice.show(context,
                               SnackBar(
                                 content: Text(
                                   inFlight
@@ -637,7 +637,7 @@ class QueueScreen extends ConsumerWidget {
                     try {
                       final inFlight = await notifier.removeMintPlan(plan.id);
                       if (context.mounted) {
-                        MintlyNotice.show(context, 
+                        MintlyNotice.show(context,
                           SnackBar(
                             content: Text(
                               inFlight

@@ -107,7 +107,7 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
             onPressed: _isImporting ? null : () async {
               final text = _textController.text.trim();
               if (text.isEmpty) {
-                MintlyNotice.show(context, 
+                MintlyNotice.show(context,
                   const SnackBar(
                     content: Text('Paste an OpenSea link or list first.'),
                     duration: Duration(seconds: 2),

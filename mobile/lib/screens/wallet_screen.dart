@@ -105,7 +105,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
     );
     if (imported == true && mounted) {
       _refresh();
-      MintlyNotice.show(context, 
+      MintlyNotice.show(context,
         const SnackBar(
           content: Text(
             'Wallet imported. Select an NFT to review an automatic mint.',

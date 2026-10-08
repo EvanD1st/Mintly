@@ -109,7 +109,7 @@ class _AccountSettingsState extends ConsumerState<AccountSettingsScreen> {
           );
         } catch (_) {
           if (context.mounted) {
-            MintlyNotice.show(context, 
+            MintlyNotice.show(context,
               const SnackBar(
                 content: Text(
                   'Could not update notifications. Allow notifications and retry.',

@@ -162,7 +162,7 @@ class _AutomaticReviewState extends ConsumerState<AutomaticReviewScreen> {
           .armAutomaticTask(_request!);
       await ref.read(mintlyProvider.notifier).loadInitialData();
       if (!mounted) return;
-      MintlyNotice.show(context, 
+      MintlyNotice.show(context,
         SnackBar(
           content: Text(
             task.status == 'armed'

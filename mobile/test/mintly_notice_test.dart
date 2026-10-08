@@ -5,6 +5,7 @@ import 'package:mintly/theme/app_theme.dart';
 import 'package:mintly/services/api_service.dart';
 
 Future<void> harness(WidgetTester tester, {bool dark = false, bool reduceMotion = false, double keyboard = 0}) async {
+  tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
   tester.view.physicalSize = const Size(390,844);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.resetPhysicalSize);
@@ -87,10 +88,13 @@ void main() {
     await harness(tester);
     await tester.tap(find.text('Show notice'));
     await tester.pumpAndSettle();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    await tester.pump();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     await tester.pump();
     expect(find.text('Settings saved'),findsNothing);
-    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     await tester.pump(const Duration(seconds:2));
     expect(tester.takeException(),isNull);
   });

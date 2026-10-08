@@ -179,7 +179,7 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
                   try {
                     await notifier.removeDrop(drop.id);
                     if (context.mounted) {
-                      MintlyNotice.show(context, 
+                      MintlyNotice.show(context,
                         const SnackBar(
                           content: Text('Drop removed from Today.'),
                         ),
