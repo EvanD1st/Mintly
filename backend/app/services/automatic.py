@@ -63,7 +63,7 @@ async def provider(chain_id=None):
         if await web3.eth.chain_id != chain_id:
             raise ValueError('RPC chain mismatch')
         return web3
-    except Exception:
+    except BaseException:
         await web3.provider.disconnect()
         raise
 

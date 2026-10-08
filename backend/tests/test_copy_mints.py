@@ -138,6 +138,8 @@ async def test_failed_network_discovery_preserves_other_network_monitoring(copyi
     c = copying; lab = c['lab']
     async with lab.factory() as db:
         watch = await db.get(CopyWatch, c['watch_id'])
+        watch.chains = [31337, 1]
+        await db.commit()
         with monkeypatch.context() as patch:
             patch.setattr(automatic, 'provider_for', AsyncMock(side_effect=ValueError('RPC unavailable')))
             await copy_mints.scan_watch(db, watch, 1)

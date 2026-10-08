@@ -39,7 +39,9 @@ class _AutomationControlState extends ConsumerState<AutomationControl> {
       }
       await ref.read(mintlyProvider.notifier).loadInitialData();
     } catch (error) {
-      if (mounted) MintlyNotice.show(context, SnackBar(content: Text('$error')));
+      if (mounted) {
+        MintlyNotice.show(context, SnackBar(content: Text('$error')));
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }

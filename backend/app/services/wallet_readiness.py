@@ -31,7 +31,8 @@ async def readiness(db, user):
             upcoming = [task for task, auth in tasks if task.wallet_id == wallet.id and auth.snapshot['chain_id'] == chain]
             next_task = min(upcoming, key=lambda task: aware(task.scheduled_for_utc)) if upcoming else None
             card = {'chain_id':chain, 'network':name, 'balance_wei':None,
-                'balance_status':'unavailable', 'approval_status':'active' if active else ('expired' if own else 'needed'),
+                'balance_status':'unavailable', 'approval_status':'active' if active else
+                    ('expired' if any(g.status == 'enabled' for g in own) else 'disabled' if own else 'needed'),
                 'approved_remaining_wei':str(sum(max(0,g.budget_wei-g.spent_wei-g.reserved_wei) for g in active)),
                 'approval_expires_at':min((aware(g.expires_at) for g in active), default=None),
                 'pending_maximum_wei':str(required), 'gas_status':'Network check unavailable',

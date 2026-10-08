@@ -3,7 +3,6 @@
 Run as a separate user/container with vault mounts unavailable to API/worker.
 """
 import hmac
-import asyncio
 import copy
 import time
 from datetime import datetime, timezone
@@ -47,6 +46,8 @@ async def reconcile_policy(journal, web3, grant):
                 break
     journal.commit()
     _reconciled[grant.context_hash] = time.monotonic()
+    if len(_reconciled) > 256:
+        _reconciled.pop(next(iter(_reconciled)))
 
 
 async def preflight_task(db, task_id, vault=None):

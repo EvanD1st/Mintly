@@ -268,6 +268,13 @@ async def preflight_step(session_factory=AsyncSessionLocal, check=None, *, now=N
                     response.raise_for_status()
         except Exception:
             log.info('Advance check deferred; mint-time validation retained.')
+            async with session_factory() as db:
+                await automatic.lock_execution(db)
+                task = await db.get(MintTask, task_id)
+                if task and task.status == 'armed' and not task.signed_tx_raw:
+                    task.preflight_checked_at = datetime.now(timezone.utc)
+                    task.preflight_note = 'Advance checks unavailable. Mint-time checks are still required.'
+                await db.commit()
     return len(ids)
 
 
