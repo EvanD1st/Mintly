@@ -1,5 +1,6 @@
 """Fresh cross-account ownership, isolated history and atomic network consent."""
 import uuid
+from datetime import datetime, timezone
 from eth_account import Account
 from httpx import AsyncClient, ASGITransport
 from sqlalchemy import select
@@ -207,3 +208,19 @@ async def test_signature_lost_from_database_still_blocks_new_owner_in_independen
     unauthenticated = await lab.signer_client.get(f'/accounts/{lab.owner.address}/relink-ready',
         headers={'Authorization': ''})
     assert unauthenticated.status_code == 401
+
+
+async def test_old_archived_row_cannot_create_second_active_link_for_same_owner(lab, importer):
+    client, base = importer
+    async with lab.factory() as db:
+        archived = Wallet(id=str(uuid.uuid4()), user_id=lab.user.id, address=lab.owner.address,
+            label='Historical link', archived_at=datetime.now(timezone.utc))
+        db.add(archived)
+        await db.commit()
+    before = set(lab.tmp.glob('*.json'))
+    result = await client.post('/api/automatic/import', json={**base, 'wallet_id': archived.id})
+    assert result.status_code == 409 and 'already linked' in result.text
+    assert set(lab.tmp.glob('*.json')) == before
+    async with lab.factory() as db:
+        assert (await db.get(Wallet, archived.id)).archived_at is not None
+        assert (await db.get(Wallet, lab.wallet.id)).archived_at is None
