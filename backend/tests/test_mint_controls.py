@@ -37,11 +37,32 @@ def chain_open(lab):
     lab.w.provider.make_request('evm_mine',[])
 
 
+async def add_wallet(lab):
+    from eth_account import Account
+    from app.services.custody import private_read,private_write
+    owner=Account.create()
+    lab.w.provider.make_request('hardhat_setBalance',[owner.address,hex(10**18)])
+    wallet=Wallet(id=str(uuid.uuid4()),user_id=lab.user.id,address=owner.address,label='Second receiving wallet',signing_capability='custodial',is_demo=False)
+    gid,key_id=str(uuid.uuid4()),str(uuid.uuid4())
+    policy=json.loads(private_read(lab.tmp/f'{lab.grant.id}.policy.json'))
+    policy.update(grant_id=gid,key_id=key_id,wallet_id=wallet.id,account=owner.address)
+    private_write(lab.tmp/f'{key_id}.keystore.json',json.dumps(Account.encrypt(owner.key,private_read(lab.tmp/'password'),kdf='scrypt',iterations=1024)))
+    private_write(lab.tmp/f'{gid}.policy.json',json.dumps(policy))
+    grant=AutomaticGrant(id=gid,user_id=lab.user.id,wallet_id=wallet.id,chain_id=31337,account=owner.address,
+        context_hash=automatic.digest(policy),scope=lab.grant.scope,expires_at=lab.grant.expires_at,
+        status='enabled',budget_wei=lab.grant.budget_wei,reserved_wei=0,spent_wei=0)
+    async with lab.factory() as db:
+        db.add(wallet);await db.flush();db.add(grant);await db.commit()
+    return owner,wallet,grant
+
+
 async def test_daily_cap_reserves_both_bots_and_does_not_reset_on_updates(copying,limits):
     c=copying;lab=c['lab']
     await limits('0.0006')
     armed=await lab.client.post('/api/tasks/arm',json=lab.request)
     assert armed.status_code==200
+    _,_,receiver=await add_wallet(lab)
+    c['request']['grant_id']=receiver.id
     await c['approve']();await c['mint']();await c['scan']()
     async with lab.factory() as db:
         assert len((await db.scalars(select(MintTask))).all())==1
@@ -239,6 +260,27 @@ def test_inclusion_is_not_confirmation(outcome):
     assert 'waiting for confirmations' in value['label'] and value['steps'][-1]['state']=='pending'
 
 
+async def test_real_receipt_progress_waits_for_confirmations_and_reorg_clears_inclusion(lab,monkeypatch):
+    from app.config import settings
+    monkeypatch.setattr(settings,'AUTOMATIC_CONFIRMATIONS',12)
+    tid=(await lab.client.post('/api/tasks/arm',json=lab.request)).json()['id']
+    chain_open(lab);await lab.sign(tid)
+    checkpoint=lab.w.provider.make_request('evm_snapshot',[])['result']
+    await lab.due();await lab.tick()
+    await lab.due();await lab.tick()
+    async with lab.factory() as db:
+        task=await db.get(MintTask,tid)
+        assert task.included_at is not None and task.confirmed_at is None
+        assert progress(task)['label']=='Included — waiting for confirmations'
+    assert lab.w.provider.make_request('evm_revert',[checkpoint])['result']
+    await lab.client.post('/api/automatic/pause',json={'paused':True})
+    await lab.due();await lab.tick()
+    async with lab.factory() as db:
+        task=await db.get(MintTask,tid)
+        assert task.included_at is None and task.confirmed_at is None
+        assert progress(task)['steps'][-1]['state']=='pending'
+
+
 @pytest.fixture
 async def checks(copying):
     c=copying;lab=c['lab']
@@ -258,7 +300,7 @@ async def test_check_only_has_no_authorization_reservation_nonce_signature_or_sp
     monkeypatch.setattr(CustodyVault,'account',forbidden)
     await enable();await c['mint'](1);await c['scan']()
     results=(await lab.client.get('/api/copy-mints/check-results')).json()['results']
-    assert len(results)==1 and results[0]['status']=='would_copy',results
+    assert len(results)==1 and results[0]['status']=='would_copy',results[0]['note'] if results else results
     assert results[0]['transaction_sent'] is False
     async with lab.factory() as db:
         assert await db.scalar(select(func.count()).select_from(MintTask))==0

@@ -14,8 +14,9 @@ async def evaluate(web3,observation,snapshot,*,now=None):
     kind=o.get('mint_kind','public')
     if o['block_number'] <= r['after_blocks'].get(str(o['chain_id']),0):
         return {'status':'would_skip','note':'Earlier mint. New copy approvals do not spend on past activity.'}
-    if not o['start'] <= int(now.timestamp()) < o['end']:
-        return {'status':'would_skip','note':'This mint stage is no longer open.'}
+    latest=await web3.eth.get_block('latest')
+    if not o['start'] <= max(int(now.timestamp()),latest.timestamp) < o['end']:
+        return {'status':'would_skip','note':'This mint stage is not open.'}
     if kind not in r['mint_kinds']:
         return {'status':'would_skip','note':'Whitelist copying is off in these settings.'}
     await copy_mints.verify_source(web3,o)

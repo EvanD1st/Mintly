@@ -551,7 +551,7 @@ class ApiService extends ChangeNotifier {
       'daily_list': dailyList,
       'mint_status': mintStatus,
       'source_health': true,
-      if (walletAlerts != null) 'wallet_alerts': walletAlerts,
+      'wallet_alerts': ?walletAlerts,
     });
   }
 

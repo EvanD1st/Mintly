@@ -1246,7 +1246,9 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
     }
     for (final policy in all) {
       if (policy['status'] != 'enabled' || '${policy['account']}'.toLowerCase() == '${widget.watch['address']}'.toLowerCase()
-          || !((policy['scope'] as Map)['mint_kinds'] as List).contains('public')) continue;
+          || !((policy['scope'] as Map)['mint_kinds'] as List).contains('public')) {
+        continue;
+      }
       final wallet = wallets.putIfAbsent('${policy['wallet_id']}', () => {
         'id': policy['wallet_id'], 'account': policy['account'], 'label': 'Wallet',
         'policies': <Map<String, dynamic>>[],
