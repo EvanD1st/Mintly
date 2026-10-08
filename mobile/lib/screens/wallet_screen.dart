@@ -245,10 +245,13 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
             ),
           ),
           TextButton(
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const AccountSettingsScreen()),
-            ),
+            onPressed: () async {
+              await Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const AccountSettingsScreen()),
+              );
+              if (mounted) _refresh();
+            },
             child: const Text('Settings'),
           ),
         ],

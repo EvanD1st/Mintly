@@ -53,10 +53,12 @@ class _AutomationControlState extends ConsumerState<AutomationControl> {
   Widget build(BuildContext context) => FutureBuilder<Map<String, dynamic>>(
     future: _status,
     builder: (context, snapshot) {
-      if (snapshot.hasError) return ListTile(
+      if (snapshot.hasError) {
+        return ListTile(
         title: const Text('Automation status unavailable'),
         trailing: TextButton(onPressed: () => setState(() => _status = ref.read(apiServiceProvider).fetchAutomationStatus()), child: const Text('Retry')),
-      );
+        );
+      }
       final paused = snapshot.data?['paused'] == true;
       return ListTile(
         title: Text(paused ? 'All automation paused' : 'Automatic minting & copying', style: const TextStyle(fontWeight: FontWeight.w600)),
