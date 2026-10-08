@@ -32,8 +32,9 @@ class _EyePainter extends CustomPainter {
       paint,
     );
     canvas.drawCircle(const Offset(12, 12), 3, paint);
-    if (!visible)
+    if (!visible) {
       canvas.drawLine(const Offset(3, 3), const Offset(21, 21), paint);
+    }
   }
 
   @override
