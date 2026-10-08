@@ -17,7 +17,7 @@ no action. Okay archives the selected wallet, disables all its network policies,
 revokes its copying rules, disarms unsigned tasks and releases their reservations,
 and archives its plans. Other receiving wallets and public followed wallets are
 retained. History and encrypted custody records remain; unlinking is not key
- erasure or an on-chain revocation.
+erasure or an on-chain revocation.
 
 Already signed tasks keep their bytes, hashes, nonce reservations and receipt
 accounting, but further Mintly broadcasts are permanently disabled. The worker

@@ -1,0 +1,46 @@
+{
+  "checked_at": "2026-10-08T00:04:08.422551+00:00",
+  "release": "wallet-management-a02f3ac",
+  "source_commit": "a02f3ac9e8793456f2eb4f96d28a41bb79b80892",
+  "migration": "012_wallet_unlink",
+  "public_health": {
+    "status": "ok",
+    "env": "production"
+  },
+  "existing_wallet_records_retained": true,
+  "existing_policy_contexts_preserved": true,
+  "existing_copy_approvals_preserved": true,
+  "wallet_count": 3,
+  "owner_probe_count": 3,
+  "wallet_owner_scope": "passed",
+  "web_connect_status": 410,
+  "anonymous_wallet_status": 401,
+  "phrase_wallet_setup": true,
+  "networks": [
+    {
+      "chain_id": 1,
+      "name": "Ethereum"
+    },
+    {
+      "chain_id": 8453,
+      "name": "Base"
+    },
+    {
+      "chain_id": 4663,
+      "name": "Robinhood"
+    }
+  ],
+  "unlink": "Selected wallet archives, disables policies and copies, releases unsigned reservations; signed receipts stay tracked without further broadcasting",
+  "phrase_privacy": "Device derivation; only the selected account key is sent to isolated custody ingress",
+  "ci_url": "https://github.com/EvanD1st/Mintly/actions/runs/37703756855",
+  "validation": {
+    "backend_tests": 233,
+    "postgresql_execution_tests": 56,
+    "flutter_normal": 41,
+    "flutter_legacy_icons": 41,
+    "flutter_analyze": "No issues found",
+    "clean_production_smoke": "passed"
+  },
+  "production_verification": "Read-only capability, preservation and owner-scope checks. No customer wallet was unlinked, imported or minted by verification.",
+  "local_validation_limit": "Local memory and temporary disk exhaustion; stale-cache removal blocked by automatic approval review. Full checks completed in isolated CI."
+}
