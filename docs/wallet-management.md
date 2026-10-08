@@ -91,3 +91,38 @@ Signed, submitted, uncertain, unlinked, paused or expired mints cannot use this
 funding retry. Skips before task creation remain unsigned records in Copy activity;
 funding failures after task creation also use the existing personal notification
 outbox with a short reason. No request changes old spending consent automatically.
+
+Whitelist copying is an explicit per-receiving-wallet opt-in saved in the
+followed wallet's preferences. Migration 013 initializes existing preferences to
+an empty object; old immutable copy approvals retain public-only scope. A new
+approved rule can include direct SeaDrop allowlist and signed stages. The source
+receipt identifies the exact stage, while OpenSea prepares a separate transaction
+for the receiving address. Its proof/signature, stage index, price, limits,
+recipient, supply and fees are independently checked on chain. Public fallback
+from the provider is rejected. Free maximum quantity uses the receiving wallet's
+own verified presale allowance, including wallet and supply already consumed.
+
+Queued copy tasks and the isolated signing journal block mixing public and
+whitelist copies of the same collection/address/network. The journal records
+collection and method alongside each copy signature, and can reconstruct older
+public-copy guards from verified signed transaction bytes without trusting
+mutable task history. Separate collections, receiving addresses and networks
+remain independent. No existing signer policy is broadened, and unsupported
+token-gated, proxy or non-SeaDrop methods remain excluded.
+
+In-app notices use one branded floating card with opacity transitions only.
+Existing message text and actions remain available; a later notice replaces an
+earlier one. Notices respect reduced motion, stay above the keyboard/navigation,
+and clear on account changes, logout and backgrounding. Icons are painted instead
+of adding glyphs to installed icon fonts.
+
+Automatic review now selects a date and time in WAT (UTC+1), independent of the
+phone timezone, before Set automatic. Stage opening is the default for upcoming
+mints; an already open stage defaults to the next minute. Users can enter a
+different WAT time, including optional seconds. The reviewed authorization pins
+the UTC execute_at timestamp; the saved task uses it and the independent signer
+holds signing until that instant, rejecting a changed database schedule. Times
+must be future, within the selected stage and before submission/policy expiry.
+The app refuses to confirm scheduling if an older server ignores the selected
+time. Existing tasks and automatic copy timing retain their previous behavior.
+This starts an attempt at the chosen time, not a promise of block inclusion then.

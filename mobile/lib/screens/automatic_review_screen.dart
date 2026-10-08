@@ -101,6 +101,7 @@ class _AutomaticReviewState extends ConsumerState<AutomaticReviewScreen> {
       setState(() => _error = 'This mint or wallet approval has ended.');
       return;
     }
+    final deadline = end;
     final selected = WatTime.wall(_mintAt.isBefore(now) ? now : (_mintAt.isAfter(end) ? end : _mintAt));
     final label = WatTime.label(selected.subtract(const Duration(hours:1))).split(' ');
     final date = TextEditingController(text:label[0]);
@@ -120,7 +121,7 @@ class _AutomaticReviewState extends ConsumerState<AutomaticReviewScreen> {
             if (value == null) return 'Use HH:MM, for example 12:05';
             if (!value.isAfter(DateTime.now().toUtc())) return 'Choose a future WAT time';
             if (value.isBefore(_stage.startTimeUtc.toUtc())) return 'Stage opens ${WatTime.label(_stage.startTimeUtc)}';
-            if (!value.isBefore(end)) return 'Choose a time before ${WatTime.label(end)}';
+            if (!value.isBefore(deadline)) return 'Choose a time before ${WatTime.label(deadline)}';
             return null;
           }),
       ])),
