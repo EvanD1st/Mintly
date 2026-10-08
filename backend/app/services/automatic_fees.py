@@ -48,8 +48,8 @@ async def receipt_cost(web3, receipt, chain_id, value=0):
 
 
 async def quote_gas(web3, tx, chain_id):
-    price = await web3.eth.gas_price
-    standard = await web3.eth.estimate_gas(tx)
+    import asyncio
+    price, standard = await asyncio.gather(web3.eth.gas_price, web3.eth.estimate_gas(tx))
     total = standard
     if chain_id == 4663:
         data = tx['data']

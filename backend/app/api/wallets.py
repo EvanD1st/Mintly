@@ -26,6 +26,12 @@ async def list_wallets(user=Depends(get_current_user), db=Depends(get_db)):
 async def start_pairing(user=Depends(get_current_user)):
     raise HTTPException(410, 'Add your wallet using its recovery phrase in the Mintly app.')
 
+
+@router.get('/readiness')
+async def wallet_readiness(user=Depends(get_current_user), db=Depends(get_db)):
+    from app.services.wallet_readiness import readiness
+    return await readiness(db, user)
+
 @router.get('/pairings/{pairing_id}')
 async def pairing_status(pairing_id: str, user=Depends(get_current_user), db=Depends(get_db)):
     pairing = await db.scalar(select(WalletPairing).where(WalletPairing.id == pairing_id, WalletPairing.user_id == user.id))

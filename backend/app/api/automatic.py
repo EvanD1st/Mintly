@@ -1,11 +1,50 @@
 """Public metadata for explicitly provisioned custody. No key import over HTTP."""
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
+from pydantic import BaseModel
 from app.api.deps import get_current_user, get_db
-from app.models import AutomaticGrant, MintTask, MintAuthorization, CopyRule
+from app.models import AutomaticGrant, MintTask, MintAuthorization, CopyRule, Wallet, User, ActivityEvent, MintPermission
 from app.services import automatic
 
 router = APIRouter(prefix='/automatic', tags=['automatic'])
+
+
+class PauseRequest(BaseModel):
+    paused: bool
+
+
+@router.get('/status')
+async def status(user=Depends(get_current_user)):
+    return {'paused': user.automation_paused}
+
+
+@router.post('/pause')
+async def pause(req: PauseRequest, user=Depends(get_current_user), db=Depends(get_db)):
+    await automatic.lock_execution(db)
+    user = await db.get(User, user.id, populate_existing=True)
+    user.automation_paused = req.paused
+    if req.paused:
+        tasks = (await db.scalars(select(MintTask).join(Wallet, Wallet.id == MintTask.wallet_id).where(
+            Wallet.user_id == user.id, MintTask.status.in_(['armed', 'preparing']),
+            MintTask.signed_tx_raw.is_(None)))).all()
+        for task in tasks:
+            task.status, task.failure_reason = 'disarmed', 'Paused in Settings. Review this mint to set it up again.'
+            if task.execution_mode == automatic.MODE:
+                await automatic.release_reservation(db, task)
+        rules = (await db.scalars(select(CopyRule).where(CopyRule.user_id == user.id,
+            CopyRule.status.in_(['active', 'registering'])))).all()
+        for rule in rules:
+            rule.status = 'paused'
+        permissions = (await db.scalars(select(MintPermission).where(MintPermission.user_id == user.id,
+            MintPermission.status.in_(['awaiting_signature','armed'])))).all()
+        for permission in permissions:
+            permission.status, permission.note = 'cancelled', 'Automation paused in Settings.'
+    db.add(ActivityEvent(user_id=user.id, event_type='automation_paused' if req.paused else 'automation_resumed',
+        label='All automation paused' if req.paused else 'Automation available',
+        detail='Signed transactions remain tracked. Resume paused copy rules and review mint plans separately.',
+        is_demo=False, icon_name='gem'))
+    await db.commit()
+    return {'paused': user.automation_paused, 'note': 'Paused plans and copy rules need to be enabled again.'}
 
 
 @router.get('/policies')

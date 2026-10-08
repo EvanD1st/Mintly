@@ -63,6 +63,8 @@ class MintTask(Base):
     
     # Transaction lifecycle
     prepared_calldata: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    preflight_checked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    preflight_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     signed_tx_raw: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     transaction_hash: Mapped[Optional[str]] = mapped_column(String(66), nullable=True, index=True)
     broadcast_attempts: Mapped[int] = mapped_column(Integer, default=0)

@@ -10,13 +10,13 @@ import time
 import tempfile
 
 import httpx
-from sqlalchemy import select, or_
+from sqlalchemy import select, or_, case
 from eth_utils import keccak
 from web3.exceptions import TransactionNotFound
 
 from app.config import settings
 from app.database import AsyncSessionLocal
-from app.models import MintTask, MintAuthorization, ActivityEvent, MintRecovery
+from app.models import MintTask, MintAuthorization, ActivityEvent, MintRecovery, Wallet, User
 from app.services import automatic
 from app.services.automatic_signer import final_receipt
 from app.services.automatic_fees import receipt_cost, additional_fee
@@ -57,12 +57,15 @@ async def step(session_factory=AsyncSessionLocal, sign=request_signature, *, now
     now = now or datetime.now(timezone.utc)
     async with session_factory() as db:
         await automatic.lock_execution(db)
-        task = (await db.execute(select(MintTask).where(
+        task = (await db.execute(select(MintTask).join(Wallet, Wallet.id == MintTask.wallet_id)
+            .join(User, User.id == Wallet.user_id).where(
             MintTask.execution_mode == automatic.MODE,
             MintTask.status.in_(['armed','preparing','prepared','submitted','uncertain']),
             or_(MintTask.next_attempt_at.is_(None), MintTask.next_attempt_at <= now),
             MintTask.scheduled_for_utc <= now,
-        ).order_by(MintTask.expires_at_utc, MintTask.id).limit(1))).scalar_one_or_none()
+            or_(User.automation_paused.is_(False), MintTask.signed_tx_raw.is_not(None)),
+        ).order_by(case((MintTask.status.in_(['armed','preparing','prepared']), 0), else_=1),
+            MintTask.expires_at_utc, MintTask.id).limit(1))).scalar_one_or_none()
         if not task:
             await db.commit()
             return False
@@ -122,6 +125,12 @@ async def step(session_factory=AsyncSessionLocal, sign=request_signature, *, now
                     if active_recovery:
                         recovery.status = 'submitted'
                     task.failure_reason = 'Receipt observed; waiting for canonical confirmations.'
+                    await db.commit()
+                    return True
+                owner = await db.get(User, auth.snapshot['user_id'], populate_existing=True)
+                if not owner or owner.automation_paused or not owner.is_active or owner.deleted_at:
+                    task.failure_reason = 'Automation paused. Saved transaction held; receipt tracking continues.'
+                    task.next_attempt_at = now + timedelta(seconds=15)
                     await db.commit()
                     return True
                 expiry = active_recovery.expires_at if active_recovery else task.expires_at_utc
@@ -226,6 +235,52 @@ def explorer_url(tx_hash, chain_id=None):
 
 async def run():
     automatic.enabled()
+    advance = asyncio.create_task(preflight_loop())
+    try:
+        await execution_loop()
+    finally:
+        advance.cancel()
+        await asyncio.gather(advance, return_exceptions=True)
+
+
+async def preflight_step(session_factory=AsyncSessionLocal, check=None, *, now=None):
+    now = now or datetime.now(timezone.utc)
+    async with session_factory() as db:
+        ids = (await db.scalars(select(MintTask.id).join(Wallet, Wallet.id == MintTask.wallet_id)
+            .join(User, User.id == Wallet.user_id).where(MintTask.execution_mode == automatic.MODE,
+                MintTask.status == 'armed', MintTask.copy_rule_id.is_(None), MintTask.signed_tx_raw.is_(None),
+                User.automation_paused.is_(False), User.is_active.is_(True), User.deleted_at.is_(None),
+                MintTask.scheduled_for_utc > now + timedelta(seconds=10),
+                MintTask.scheduled_for_utc <= now + timedelta(seconds=180),
+                or_(MintTask.preflight_checked_at.is_(None), MintTask.preflight_checked_at < now - timedelta(seconds=30)))
+            .order_by(MintTask.scheduled_for_utc).limit(8))).all()
+    for task_id in ids:
+        try:
+            if check:
+                await check(task_id)
+            else:
+                token = Path(settings.AUTOMATIC_SIGNER_TOKEN_FILE).read_text().strip()
+                if len(token) < 32:
+                    raise ValueError('Signer authentication is not configured')
+                async with httpx.AsyncClient(timeout=15, trust_env=False) as client:
+                    response = await client.post(settings.AUTOMATIC_SIGNER_URL + f'/tasks/{task_id}/preflight',
+                        headers={'Authorization':'Bearer ' + token})
+                    response.raise_for_status()
+        except Exception:
+            log.info('Advance check deferred; mint-time validation retained.')
+    return len(ids)
+
+
+async def preflight_loop():
+    while True:
+        try:
+            await preflight_step()
+        except Exception:
+            log.info('Advance checks temporarily unavailable.')
+        await asyncio.sleep(5)
+
+
+async def execution_loop():
     while True:
         started = time.monotonic()
         try:

@@ -36,10 +36,11 @@ class MintlyWorker:
         """
         now = datetime.now(timezone.utc)
         stmt = (
-            select(MintTask)
+            select(MintTask).join(Wallet, Wallet.id == MintTask.wallet_id).join(User, User.id == Wallet.user_id)
             .where(
                 and_(
                     MintTask.status == "armed",
+                    User.automation_paused.is_(False),
                     MintTask.execution_mode.is_(None),
                     MintTask.scheduled_for_utc <= now,
                     MintTask.expires_at_utc > now,
@@ -132,6 +133,13 @@ class MintlyWorker:
             task.prepared_calldata = calldata
 
             # 4. Prepare and Sign Transaction
+            from app.services import automatic
+            await automatic.lock_execution(session)
+            await session.refresh(task)
+            if task.status != 'preparing':
+                await session.commit()
+                return
+            await automatic.require_running(session, wallet.user_id)
             nonce = task.assigned_nonce if task.assigned_nonce is not None else 0
             signed_res = self.executor.prepare_and_sign(
                 policy=policy,

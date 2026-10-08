@@ -3,6 +3,9 @@
 Run as a separate user/container with vault mounts unavailable to API/worker.
 """
 import hmac
+import asyncio
+import copy
+import time
 from datetime import datetime, timezone
 import json
 
@@ -21,6 +24,97 @@ from app.services.mint_plans import aware
 from app.services.opensea import OpenSeaUnavailable
 
 app = FastAPI(title='Mintly isolated custody signer', docs_url=None, redoc_url=None, openapi_url=None)
+
+# Unsigned execution data only. Restart/expiry falls back to full preparation.
+_preflights = {}
+_reconciled = {}
+
+
+def intent_for(snapshot, grant):
+    return automatic.digest({'snapshot': snapshot, 'policy': grant.context_hash})
+
+
+async def reconcile_policy(journal, web3, grant):
+    for entry in journal.execute('SELECT * FROM signed WHERE policy=? AND actual IS NULL', (grant.id,)).fetchall():
+        hashes = [entry['hash']] + [row['hash'] for row in journal.execute(
+            'SELECT hash FROM recoveries WHERE task=?', (entry['task'],)).fetchall()]
+        for tx_hash in hashes:
+            receipt = await final_receipt(web3, tx_hash, grant.chain_id)
+            if receipt:
+                tx = await web3.eth.get_transaction(tx_hash)
+                actual = await receipt_cost(web3, receipt, grant.chain_id, tx.value)
+                journal.execute('UPDATE signed SET actual=? WHERE task=?', (actual, entry['task']))
+                break
+    journal.commit()
+    _reconciled[grant.context_hash] = time.monotonic()
+
+
+async def preflight_task(db, task_id, vault=None):
+    """Advance checks never decrypt a key, allocate a nonce or return a signature."""
+    task = await db.get(MintTask, task_id)
+    if not task or task.status != 'armed' or task.signed_tx_raw or task.copy_rule_id:
+        raise ValueError('Task is not available for advance checks')
+    auth = await db.get(MintAuthorization, task.authorization_id)
+    s = copy.deepcopy(auth.snapshot)
+    grant = await automatic.grant_for(db, auth.grant_id, s['user_id'])
+    if auth.is_revoked or aware(task.expires_at_utc) <= datetime.now(timezone.utc):
+        raise ValueError('Task expired or was cancelled')
+    intent = intent_for(s, grant)
+    vault = vault or CustodyVault()
+    policy = vault.policy(grant)
+    await db.commit()  # No execution lock is held during advance RPC checks.
+    web3 = await automatic.provider_for(grant.chain_id)
+    journal = vault.journal()
+    execution = None
+    note = 'Advance checks passed. Gas and eligibility are checked again at mint time.'
+    try:
+        await verify_account(web3, policy)
+        await reconcile_policy(journal, web3, grant)
+        try:
+            if s.get('execution'):
+                execution = await automatic.validate_mint(web3, s, {'to':s['execution']['target'],
+                    'value':s['execution']['value'], 'data':s['execution']['data']})
+            else:
+                execution = await automatic.prepare_mint(web3, s)
+            balance = await web3.eth.get_balance(to_checksum_address(s['account']), 'pending')
+            if balance < s['total_cap_wei']:
+                note = 'Balance is below the approved maximum. Add ETH before mint time.'
+        except OpenSeaUnavailable:
+            note = 'Checking whitelist access. Another check will run at mint time.'
+        except Exception:
+            note = 'Advance checks unavailable. Mint-time checks are still required.'
+    finally:
+        journal.close()
+        await web3.provider.disconnect()
+    await automatic.lock_execution(db)
+    await db.refresh(task)
+    await db.refresh(auth)
+    await db.refresh(grant)
+    await automatic.require_running(db, grant.user_id)
+    if task.status != 'armed' or task.signed_tx_raw or auth.is_revoked or intent_for(auth.snapshot, grant) != intent:
+        raise ValueError('Task changed during advance checks')
+    checked = time.monotonic()
+    # Bounded, signer-private, short-lived cache; never trust API-supplied readiness.
+    for key, value in list(_preflights.items()):
+        if checked - value[0] > 90:
+            _preflights.pop(key, None)
+    if len(_preflights) >= 256:
+        _preflights.pop(next(iter(_preflights)))
+    if execution is not None:
+        _preflights[task.id] = (checked, intent, execution)
+    task.preflight_checked_at, task.preflight_note = datetime.now(timezone.utc), note
+    await db.commit()
+    return {'status':'checked', 'note':note}
+
+
+@app.post('/tasks/{task_id}/preflight')
+async def advance_checks(task_id: str, authorization: str | None = Header(default=None), db=Depends(get_db)):
+    authenticate(authorization)
+    try:
+        return await preflight_task(db, task_id)
+    except Exception:
+        await db.rollback()
+        raise HTTPException(503, 'Advance checks unavailable; no transaction was signed.') from None
 
 
 def authenticate(authorization: str | None = Header(default=None)):
@@ -146,7 +240,7 @@ async def prepare_task(db, task_id, vault=None):
         if block.timestamp < s['start']:
             return {'task_id': task.id, 'status': 'armed', 'note': 'Waiting for chain time.'}
         await verify_account(web3, policy)
-        intent = automatic.digest({'snapshot': s, 'policy': grant.context_hash})
+        intent = intent_for(s, grant)
         previous = journal.execute('SELECT * FROM signed WHERE task=?', (task.id,)).fetchone()
         if previous:
             if previous['intent'] != intent:
@@ -154,17 +248,10 @@ async def prepare_task(db, task_id, vault=None):
             raw, tx_hash, nonce = previous['raw'], previous['hash'], previous['nonce']
         else:
             # Independently reconcile the signer's lifetime budget; API DB edits cannot reset it.
-            for entry in journal.execute('SELECT * FROM signed WHERE policy=? AND actual IS NULL', (grant.id,)).fetchall():
-                hashes = [entry['hash']] + [row['hash'] for row in journal.execute(
-                    'SELECT hash FROM recoveries WHERE task=?', (entry['task'],)).fetchall()]
-                for tx_hash in hashes:
-                    receipt = await final_receipt(web3, tx_hash, grant.chain_id)
-                    if receipt:
-                        tx = await web3.eth.get_transaction(tx_hash)
-                        actual = await receipt_cost(web3, receipt, grant.chain_id, tx.value)
-                        journal.execute('UPDATE signed SET actual=? WHERE task=?', (actual, entry['task']))
-                        break  # same account/nonce can settle only once
-            journal.commit()
+            advance = _preflights.get(task.id)
+            if (not advance or advance[1] != intent or time.monotonic() - advance[0] > 90
+                    or time.monotonic() - _reconciled.get(grant.context_hash, -1000) > 30):
+                await reconcile_policy(journal, web3, grant)
             charged = journal.execute('SELECT COALESCE(SUM(COALESCE(actual,liability)),0) FROM signed WHERE policy=?', (grant.id,)).fetchone()[0]
             if charged + s['total_cap_wei'] > policy['budget_wei']:
                 raise ValueError('Independent signer budget exhausted or reserved by uncertain submissions')
@@ -188,6 +275,9 @@ async def prepare_task(db, task_id, vault=None):
                 await copy_mints.no_mixed_stage_copy(db, s, task_id=task.id)
                 verify_collection_copy_journal(journal, s, task.id)
             execution = s.get('execution')
+            cached = _preflights.pop(task.id, None)
+            if not execution and cached and cached[1] == intent and time.monotonic() - cached[0] <= 90:
+                execution = cached[2]
             if execution:
                 await automatic.validate_mint(web3, s, {'to': execution['target'], 'value': execution['value'], 'data': execution['data']})
             else:
@@ -242,6 +332,7 @@ async def prepare_task(db, task_id, vault=None):
             db.add(AutomaticNonce(task_id=task.id, chain_id=s['chain_id'], address=s['account'].lower(), nonce=nonce))
         task.signed_tx_raw, task.transaction_hash, task.assigned_nonce = raw, tx_hash, nonce
         task.status = 'prepared'
+        task.next_attempt_at = None
         task.failure_reason = None
         task.prepared_calldata = json.dumps(s.get('execution')) if s.get('execution') else None
         await db.commit()  # signed payload and hash durable before scheduler may broadcast

@@ -1,4 +1,5 @@
 import '../widgets/mintly_notice.dart';
+import '../widgets/automation_control.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../services/push_service.dart';
@@ -193,6 +194,7 @@ class _AccountSettingsState extends ConsumerState<AccountSettingsScreen> {
                 const CopyMintsScreen(),
               ),
             ]),
+            _section('Automation', [const AutomationControl()]),
             _section('Notifications', [
               _notification(true),
               _notification(false),

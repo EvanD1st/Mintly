@@ -107,6 +107,7 @@ def wei(value):
 
 
 async def grant_for(db, grant_id, user_id):
+    await require_running(db, user_id)
     grant = (await db.execute(select(AutomaticGrant).where(
         AutomaticGrant.id == grant_id, AutomaticGrant.user_id == user_id
     ).execution_options(populate_existing=True))).scalar_one_or_none()
@@ -121,6 +122,13 @@ async def grant_for(db, grant_id, user_id):
     if grant.status != 'enabled' or aware(grant.expires_at) <= datetime.now(timezone.utc):
         raise HTTPException(409, 'Automatic policy is disabled or expired. Renew it in the signer before arming.')
     return grant
+
+
+async def require_running(db, user_id):
+    from app.models import User
+    user = await db.scalar(select(User).where(User.id == user_id).execution_options(populate_existing=True))
+    if not user or not user.is_active or user.deleted_at or user.automation_paused:
+        raise HTTPException(409, 'Automation is paused. Resume it in Settings before setting up a mint.')
 
 
 async def make_snapshot(db, req, user_id, *, presale_mint=None):

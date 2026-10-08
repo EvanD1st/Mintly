@@ -178,6 +178,7 @@ async def approve(watch_id: str, req: RuleRequest, user=Depends(get_current_user
     await db.refresh(rule)
     watch = await own_watch(db, user, watch_id)
     if rule.status == 'registering' and not watch.archived_at:
+        await automatic.require_running(db, user.id)
         rule.status = 'active'
     await db.commit()
     return public_rule(rule)

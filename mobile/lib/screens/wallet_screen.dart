@@ -1,4 +1,6 @@
 import '../widgets/mintly_notice.dart';
+import '../widgets/wallet_readiness_panel.dart';
+import '../services/wat_time.dart';
 import 'account_settings_screen.dart';
 import '../theme/compatible_icons.dart';
 import 'package:flutter/material.dart';
@@ -16,17 +18,20 @@ class WalletScreen extends ConsumerStatefulWidget {
 class _WalletScreenState extends ConsumerState<WalletScreen> {
   late Future<List<Map<String, dynamic>>> _wallets;
   late Future<List<Map<String, dynamic>>> _policies;
+  late Future<Map<String, dynamic>> _readiness;
 
   @override
   void initState() {
     super.initState();
     _wallets = ref.read(apiServiceProvider).fetchWallets();
     _policies = ref.read(apiServiceProvider).fetchAutomaticPolicies();
+    _readiness = ref.read(apiServiceProvider).fetchWalletReadiness().catchError((_) => <String, dynamic>{'unavailable': true});
   }
 
   void _refresh() => setState(() {
     _wallets = ref.read(apiServiceProvider).fetchWallets();
     _policies = ref.read(apiServiceProvider).fetchAutomaticPolicies();
+    _readiness = ref.read(apiServiceProvider).fetchWalletReadiness().catchError((_) => <String, dynamic>{'unavailable': true});
   });
 
   final Set<String> _unlinking = {};
@@ -158,7 +163,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
                           'Pending mints: ${_eth(policy['reserved_wei'])} ETH reserved',
                         ),
                         Text(
-                          'Expires: ${DateTime.tryParse('${policy['expires_at']}')?.toLocal().toString().split('.').first ?? policy['expires_at']}',
+                          'Expires: ${DateTime.tryParse('${policy['expires_at']}') == null ? policy['expires_at'] : WatTime.label(DateTime.parse('${policy['expires_at']}'))}',
                         ),
                         const SizedBox(height: 8),
                         Text(
@@ -271,7 +276,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
                 for (final wallet in wallets.data!)
                   Card(
                     key: ValueKey('wallet-${wallet['id']}'),
-                    child: ListTile(
+                    child: Column(children: [ListTile(
                       contentPadding: const EdgeInsets.symmetric(
                         horizontal: 16,
                         vertical: 10,
@@ -302,7 +307,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
                               : 'Unlink',
                         ),
                       ),
-                    ),
+                    ), WalletReadinessPanel(walletId: wallet['id'] as String, readiness: _readiness)]),
                   ),
               ],
             ),

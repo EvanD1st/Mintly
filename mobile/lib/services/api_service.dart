@@ -182,6 +182,15 @@ class ApiService extends ChangeNotifier {
   Future<Map<String, dynamic>> fetchSourceStatus() async =>
       (await _get('/source/status')) as Map<String, dynamic>;
 
+  Future<Map<String, dynamic>> fetchWalletReadiness() async =>
+      (await _get('/wallets/readiness')) as Map<String, dynamic>;
+
+  Future<Map<String, dynamic>> fetchAutomationStatus() async =>
+      (await _get('/automatic/status')) as Map<String, dynamic>;
+
+  Future<Map<String, dynamic>> setAutomationPaused(bool paused) async =>
+      (await _post('/automatic/pause', {'paused': paused})) as Map<String, dynamic>;
+
   Future<void> removeDrop(String id) async {
     await _delete('/drops/${Uri.encodeComponent(id)}');
   }
