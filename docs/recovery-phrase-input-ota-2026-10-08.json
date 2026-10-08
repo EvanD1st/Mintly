@@ -1,0 +1,241 @@
+{
+  "checked_at": "2026-10-08T05:53:10.176659+00:00",
+  "status": "published",
+  "platform": "android",
+  "source_commit": "bd9909fba5573fbb3a0cdbc0f72cc94e8cb0606d",
+  "workflow_url": "https://github.com/EvanD1st/Mintly/actions/runs/37733544492",
+  "workflow_conclusion": "success",
+  "patches": [
+    {
+      "release_version": "1.1.1+4",
+      "patch_id": 703895,
+      "patch_number": 9,
+      "track": "stable",
+      "rolled_back": false,
+      "compatibility_audit": {
+        "changed_assets": [
+          "base/assets/flutter_assets/fonts/MaterialIcons-Regular.otf"
+        ],
+        "font_compatibility": {
+          "installed_glyphs": 34,
+          "required_glyphs": 30
+        },
+        "installed_sha256": "40180a4e181a25c9194ee50e58d3487040bc48c09e079fefb8e74841fa034e9b",
+        "built_sha256": "0d8218316ea5561c5d855befecdb455a840ed6051aa640655df24731a8664490",
+        "release_version": "1.1.1+4",
+        "track": "stable",
+        "legacy_icons": false,
+        "browser_links": "native launcher",
+        "preserved_installed_launcher": false,
+        "native_checks": "Shorebird enabled; no override"
+      },
+      "artifacts": [
+        {
+          "id": 1604928,
+          "patch_id": 703895,
+          "arch": "arm",
+          "platform": "android",
+          "hash": "87b4ea77b4f2abbff4747c571c86a539c42e9872f5d33ba3ea4297f18b349ff6",
+          "size": 1284344,
+          "created_at": "2026-10-08T05:47:07.295397Z"
+        },
+        {
+          "id": 1604929,
+          "patch_id": 703895,
+          "arch": "aarch64",
+          "platform": "android",
+          "hash": "038cd93580af60f1057405127d8830ac7dbdb7a07a79c4ec83a13d60a485f509",
+          "size": 1207196,
+          "created_at": "2026-10-08T05:47:07.943926Z"
+        },
+        {
+          "id": 1604930,
+          "patch_id": 703895,
+          "arch": "x86_64",
+          "platform": "android",
+          "hash": "db03dc2f299b296e7aa3076ac50210f61fd330bb0518a8d6ce614db366f3c184",
+          "size": 1212090,
+          "created_at": "2026-10-08T05:47:08.585265Z"
+        }
+      ]
+    },
+    {
+      "release_version": "1.1.0+3",
+      "patch_id": 703897,
+      "patch_number": 19,
+      "track": "stable",
+      "rolled_back": false,
+      "compatibility_audit": {
+        "changed_assets": [
+          "base/assets/flutter_assets/NOTICES.Z",
+          "base/assets/flutter_assets/fonts/MaterialIcons-Regular.otf"
+        ],
+        "font_compatibility": {
+          "installed_glyphs": 33,
+          "required_glyphs": 30
+        },
+        "installed_sha256": "a0cb1f84d3a50b55983285ff1ea762d51fc4b5b3d0a048a4d0b718e84970d28c",
+        "built_sha256": "0d8218316ea5561c5d855befecdb455a840ed6051aa640655df24731a8664490",
+        "release_version": "1.1.0+3",
+        "track": "stable",
+        "legacy_icons": false,
+        "browser_links": "native launcher",
+        "preserved_installed_launcher": false,
+        "native_checks": "Shorebird enabled; no override"
+      },
+      "artifacts": [
+        {
+          "id": 1604932,
+          "patch_id": 703897,
+          "arch": "arm",
+          "platform": "android",
+          "hash": "87b4ea77b4f2abbff4747c571c86a539c42e9872f5d33ba3ea4297f18b349ff6",
+          "size": 1842892,
+          "created_at": "2026-10-08T05:47:55.699033Z"
+        },
+        {
+          "id": 1604933,
+          "patch_id": 703897,
+          "arch": "aarch64",
+          "platform": "android",
+          "hash": "038cd93580af60f1057405127d8830ac7dbdb7a07a79c4ec83a13d60a485f509",
+          "size": 1686886,
+          "created_at": "2026-10-08T05:47:56.400861Z"
+        },
+        {
+          "id": 1604934,
+          "patch_id": 703897,
+          "arch": "x86_64",
+          "platform": "android",
+          "hash": "db03dc2f299b296e7aa3076ac50210f61fd330bb0518a8d6ce614db366f3c184",
+          "size": 1712188,
+          "created_at": "2026-10-08T05:47:57.044890Z"
+        }
+      ]
+    },
+    {
+      "release_version": "1.0.1+2",
+      "patch_id": 703901,
+      "patch_number": 9,
+      "track": "stable",
+      "rolled_back": false,
+      "compatibility_audit": {
+        "changed_assets": [
+          "base/assets/flutter_assets/NOTICES.Z",
+          "base/assets/flutter_assets/fonts/MaterialIcons-Regular.otf"
+        ],
+        "font_compatibility": {
+          "installed_glyphs": 28,
+          "required_glyphs": 22
+        },
+        "installed_sha256": "ce1aa4d6e315d2ac28630c82f3e6c6f74b671558d388008a436528f9fd29cb76",
+        "built_sha256": "f8bee93f5cdb2d3eed7afe070d453484e8b90358ff3eb12491f17423042799f7",
+        "release_version": "1.0.1+2",
+        "track": "stable",
+        "legacy_icons": true,
+        "browser_links": "copy and paste",
+        "preserved_installed_launcher": false,
+        "native_checks": "Shorebird enabled; no override"
+      },
+      "artifacts": [
+        {
+          "id": 1604940,
+          "patch_id": 703901,
+          "arch": "arm",
+          "platform": "android",
+          "hash": "4e0b372dd7b65bb09aba4eb62c1e51f6716e4d82c49426b6e2a77c309a3b652d",
+          "size": 1946426,
+          "created_at": "2026-10-08T05:49:48.896402Z"
+        },
+        {
+          "id": 1604941,
+          "patch_id": 703901,
+          "arch": "aarch64",
+          "platform": "android",
+          "hash": "e8a0dd6ffb6b790f018c7a35d9aa23f6a6489af1201fd3eb2bc3773f76a98981",
+          "size": 1812317,
+          "created_at": "2026-10-08T05:49:49.589222Z"
+        },
+        {
+          "id": 1604942,
+          "patch_id": 703901,
+          "arch": "x86_64",
+          "platform": "android",
+          "hash": "514d5dd775b11533c0acb6c85ee56603e337d7db9d3ff0c0f415c2d770ebb6d5",
+          "size": 1812328,
+          "created_at": "2026-10-08T05:49:50.240709Z"
+        }
+      ]
+    },
+    {
+      "release_version": "1.0.0+1",
+      "patch_id": 703906,
+      "patch_number": 9,
+      "track": "stable",
+      "rolled_back": false,
+      "compatibility_audit": {
+        "changed_assets": [
+          "base/assets/flutter_assets/NOTICES.Z",
+          "base/assets/flutter_assets/fonts/MaterialIcons-Regular.otf"
+        ],
+        "font_compatibility": {
+          "installed_glyphs": 28,
+          "required_glyphs": 22
+        },
+        "installed_sha256": "74b532a2c2eea51fd585a2dd9ab65d366cb722d0613642ddeb2823bccd4efff8",
+        "built_sha256": "ec4017eef143c938e43f36ba05ea3359f5c844a7c6deff11e32a459ae37909d1",
+        "release_version": "1.0.0+1",
+        "track": "stable",
+        "legacy_icons": true,
+        "browser_links": "copy and paste",
+        "preserved_installed_launcher": true,
+        "native_checks": "Shorebird enabled; no override"
+      },
+      "artifacts": [
+        {
+          "id": 1604953,
+          "patch_id": 703906,
+          "arch": "arm",
+          "platform": "android",
+          "hash": "4e0b372dd7b65bb09aba4eb62c1e51f6716e4d82c49426b6e2a77c309a3b652d",
+          "size": 1947808,
+          "created_at": "2026-10-08T05:51:32.531588Z"
+        },
+        {
+          "id": 1604954,
+          "patch_id": 703906,
+          "arch": "aarch64",
+          "platform": "android",
+          "hash": "e8a0dd6ffb6b790f018c7a35d9aa23f6a6489af1201fd3eb2bc3773f76a98981",
+          "size": 1813450,
+          "created_at": "2026-10-08T05:51:33.245252Z"
+        },
+        {
+          "id": 1604955,
+          "patch_id": 703906,
+          "arch": "x86_64",
+          "platform": "android",
+          "hash": "514d5dd775b11533c0acb6c85ee56603e337d7db9d3ff0c0f415c2d770ebb6d5",
+          "size": 1812711,
+          "created_at": "2026-10-08T05:51:33.972920Z"
+        }
+      ]
+    }
+  ],
+  "phone_activation": "Not observed; installed apps download the stable patch online and apply on a subsequent restart.",
+  "ci_url": "https://github.com/EvanD1st/Mintly/actions/runs/37733177960",
+  "validation": {
+    "flutter_normal": 44,
+    "flutter_legacy_icons": 44,
+    "flutter_analyze": "No issues found",
+    "backend_regression": 233,
+    "postgresql_execution_checks": 56
+  },
+  "behavior": {
+    "numbering": "Complete ordered 1-12 or 1-24 lists; dot, parenthesis, colon, hyphen or bracket markers and whitespace separators accepted. Words are never reordered.",
+    "validation": "Mnemonic word list and checksum still checked.",
+    "visibility": "Hidden by default; eye toggles visibility without editing text; continuing and backgrounding hide and clear the input.",
+    "privacy": "Phrase stays on device; only the selected account key is imported through existing isolated custody ingress."
+  },
+  "server_changes": "None; existing phrase-only wallet setup service retained."
+}
