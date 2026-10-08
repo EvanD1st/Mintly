@@ -7,6 +7,7 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 import json
 import uuid
+import httpx
 
 from eth_account import Account
 from eth_utils import to_checksum_address
@@ -19,7 +20,7 @@ from sqlalchemy import select, func
 
 from app.api.deps import get_current_user, get_db
 from app.config import settings
-from app.models import AutomaticGrant, Wallet, LoginAttempt
+from app.models import AutomaticGrant, Wallet, LoginAttempt, User, MintTask, MintPlan, MintPermission
 from app.services import automatic
 from app.services.auth import verify_password
 from app.services.custody import CustodyVault, private_read, private_write
@@ -29,6 +30,13 @@ app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 app.add_middleware(CORSMiddleware, allow_origins=settings.CORS_ORIGINS,
     allow_methods=['GET', 'POST'], allow_headers=['Authorization', 'Content-Type'])
 _capacity = asyncio.Semaphore(1)
+
+
+class NetworkApproval(BaseModel):
+    model_config = ConfigDict(extra='forbid', hide_input_in_errors=True)
+    chain_id: int
+    budget_eth: str = Field(max_length=40)
+    max_task_eth: str = Field(max_length=40)
 
 
 class ImportRequest(BaseModel):
@@ -42,8 +50,9 @@ class ImportRequest(BaseModel):
     password: SecretStr
     contract: str | None = Field(default=None, min_length=42, max_length=42)
     collection_scope: Literal['reviewed_mints'] | None = None
-    budget_eth: str = Field(max_length=40)
-    max_task_eth: str = Field(max_length=40)
+    budget_eth: str | None = Field(default=None, max_length=40)
+    max_task_eth: str | None = Field(default=None, max_length=40)
+    networks: list[NetworkApproval] | None = Field(default=None, min_length=1, max_length=4)
     expires_at: datetime
     consent: bool
 
@@ -51,6 +60,12 @@ class ImportRequest(BaseModel):
     def collection_selection(self):
         if (self.contract is None) == (self.collection_scope is None):
             raise ValueError('Select exactly one collection scope')
+        if self.networks is not None:
+            if (self.chain_id is not None or self.budget_eth is not None or self.max_task_eth is not None
+                    or self.contract is not None or len({n.chain_id for n in self.networks}) != len(self.networks)):
+                raise ValueError('Select distinct network approvals without single-network fields')
+        elif self.budget_eth is None or self.max_task_eth is None:
+            raise ValueError('Finite single-network limits are required')
         return self
 
 
@@ -84,6 +99,7 @@ async def config(user=Depends(get_current_user)):
     await web3.provider.disconnect()
     return {'chain_id':settings.AUTOMATIC_CHAIN_ID, 'max_expiry_days':30,
         'phrase_wallet_setup': True,
+        'multi_network_import': True,
         'automatic_collection_selection': True,
         'networks': [{'chain_id': c, 'name': n} for c, n, flag in (
             (1, 'Ethereum', settings.ENABLE_ETHEREUM_AUTOMATIC),
@@ -133,8 +149,16 @@ async def import_wallet(request: Request, user=Depends(get_current_user), db=Dep
 
 
 async def store_import(req, user, db):
-    chain_id = req.chain_id if req.chain_id is not None else settings.AUTOMATIC_CHAIN_ID
-    automatic.enabled(chain_id)
+    approvals = sorted(req.networks, key=lambda n: n.chain_id) if req.networks is not None else [NetworkApproval(
+        chain_id=req.chain_id if req.chain_id is not None else settings.AUTOMATIC_CHAIN_ID,
+        budget_eth=req.budget_eth, max_task_eth=req.max_task_eth)]
+    limits = {}
+    for approval in approvals:
+        automatic.enabled(approval.chain_id)
+        budget, maximum = automatic.wei(approval.budget_eth), automatic.wei(approval.max_task_eth)
+        if not 0 < maximum <= budget < 2**63:
+            raise ValueError('Invalid finite network budget')
+        limits[approval.chain_id] = (budget, maximum)
     await automatic.lock_execution(db)
     wallet = await db.get(Wallet, str(req.wallet_id)) if req.wallet_id else None
     if req.wallet_id and (not wallet or wallet.user_id != user.id or wallet.is_demo):
@@ -142,38 +166,57 @@ async def store_import(req, user, db):
     now = datetime.now(timezone.utc)
     if not req.consent or req.expires_at.tzinfo is None or not now < req.expires_at <= now + timedelta(days=30):
         raise ValueError('Invalid consent or expiry')
-    budget, maximum = automatic.wei(req.budget_eth), automatic.wei(req.max_task_eth)
-    if not 0 < maximum <= budget < 2**63:
-        raise ValueError('Invalid finite budget')
     account = Account.from_key(req.private_key.get_secret_value().strip())
     req.private_key = SecretStr('')
     if ((wallet and account.address.lower() != wallet.address.lower())
             or (req.account_address and account.address.lower() != req.account_address.lower())):
         raise HTTPException(409, 'Private key does not match the linked wallet. Nothing was imported.')
     contracts = [to_checksum_address(req.contract)] if req.contract else []
-    grant_id = str(req.request_id)
+    grant_ids = [str(req.request_id) if i == 0 else str(uuid.uuid5(req.request_id, f'mintly-network:{n.chain_id}'))
+        for i, n in enumerate(approvals)]
+    # Pin the whole bundle in every independent signer policy, including retry after a DB failure.
+    bundle = [{'chain_id': n.chain_id, 'budget_wei': limits[n.chain_id][0],
+        'max_task_wei': limits[n.chain_id][1]} for n in approvals] if req.networks is not None else None
     vault = CustodyVault()
-    old = await db.get(AutomaticGrant, grant_id)
-    if old:
+    old_grants = [await db.get(AutomaticGrant, grant_id) for grant_id in grant_ids]
+    if any(old_grants):
+        if not all(old_grants):
+            raise ValueError('Incomplete existing import')
+        old = old_grants[0]
         if wallet is None:
             wallet = await db.get(Wallet, old.wallet_id)
         if (old.user_id != user.id or not wallet or old.wallet_id != wallet.id
                 or account.address.lower() != wallet.address.lower() or wallet.archived_at):
             raise ValueError('Request owner mismatch')
-        policy = vault.policy(old)
-        if (policy['chain_id'] != chain_id or policy['contracts'] != contracts or policy.get('collection_scope') != req.collection_scope or policy['budget_wei'] != budget or
-                policy['max_task_wei'] != maximum or policy['expires_at'] != int(req.expires_at.timestamp())):
-            raise ValueError('Request changed')
-        return automatic.public_grant(old)  # Never renew/reactivate or reset a budget on retry.
+        for old, approval in zip(old_grants, approvals):
+            policy = vault.policy(old)
+            budget, maximum = limits[approval.chain_id]
+            if (old.user_id != user.id or old.wallet_id != wallet.id or policy['chain_id'] != approval.chain_id
+                    or policy['contracts'] != contracts or policy.get('collection_scope') != req.collection_scope
+                    or policy['budget_wei'] != budget or policy['max_task_wei'] != maximum
+                    or policy['expires_at'] != int(req.expires_at.timestamp()) or policy.get('network_approvals') != bundle):
+                raise ValueError('Request changed')
+        return import_result(req, wallet, old_grants)  # Never renew/reactivate or reset a budget on retry.
+    matches = (await db.scalars(select(Wallet).join(User, User.id == Wallet.user_id).where(
+        func.lower(Wallet.address) == account.address.lower(), User.is_active.is_(True), User.deleted_at.is_(None)))).all()
+    if any(w.user_id != user.id and w.archived_at is None for w in matches):
+        raise HTTPException(409, 'This wallet is still linked to another Mintly account. Unlink it there first.')
+    # Address-level check includes archived/deleted owners and all networks. Signed raw transactions
+    # can remain valid after software cancellation/expiry; only a settled receipt clears the hold.
+    address_wallets = select(Wallet.id).where(func.lower(Wallet.address) == account.address.lower())
+    pending = await db.scalar(select(MintTask.id).where(MintTask.wallet_id.in_(address_wallets),
+        MintTask.signed_tx_raw.is_not(None), MintTask.status.not_in(('confirmed', 'reverted'))).limit(1))
+    legacy_pending = await db.scalar(select(MintPermission.id).join(MintPlan, MintPlan.id == MintPermission.plan_id)
+        .where(MintPlan.wallet_id.in_(address_wallets), MintPermission.raw_transaction.is_not(None),
+            MintPermission.status.not_in(('confirmed', 'reverted'))).limit(1))
+    if (wallet is None or wallet.archived_at) and (pending or legacy_pending):
+        raise HTTPException(409, 'A previously signed mint for this wallet is unresolved. Wait for settlement before relinking.')
+    if wallet is None or wallet.archived_at:
+        await signer_relink_ready(account.address)
     if wallet is None:
         if not req.account_address:
             raise HTTPException(422, 'Confirm the account selected from your phrase.')
-        from app.models import User
-        matches = (await db.scalars(select(Wallet).join(User, User.id == Wallet.user_id).where(
-            func.lower(Wallet.address) == account.address.lower(), User.is_active.is_(True), User.deleted_at.is_(None)))).all()
-        if any(w.user_id != user.id for w in matches):
-            raise HTTPException(409, 'This wallet belongs to another Mintly account.')
-        wallet = next(iter(matches), None)
+        wallet = next((w for w in matches if w.user_id == user.id), None)
         if wallet is not None and wallet.archived_at is None:
             raise HTTPException(409, 'This account is already linked. Choose another account or open its wallet details.')
         if wallet is None:
@@ -187,25 +230,30 @@ async def store_import(req, user, db):
                 is_default=active_count == 0, is_demo=False)
             db.add(wallet)
             await db.flush()
-    web3 = await automatic.provider_for(chain_id)
-    try:
-        code = await web3.eth.get_code(account.address, 'pending')
-        adapter = await inspect_account(web3, account.address, 'eip7702-direct' if code else 'eoa')
-        if contracts and not await web3.eth.get_code(contracts[0]):
-            raise ValueError('Collection has no deployed code')
-    finally:
-        await web3.provider.disconnect()
-    policy = dict(grant_id=grant_id,key_id=grant_id,user_id=user.id,wallet_id=wallet.id,
-        account=account.address,chain_id=chain_id,contracts=contracts,
-        mint_kinds=['public','allowlist','signed'],account_adapter=adapter,budget_wei=budget,
-        max_task_wei=maximum,expires_at=int(req.expires_at.timestamp()))
-    if req.collection_scope:
-        policy['collection_scope'] = req.collection_scope
+    policies = []
+    for grant_id, approval in zip(grant_ids, approvals):
+        web3 = await automatic.provider_for(approval.chain_id)
+        try:
+            code = await web3.eth.get_code(account.address, 'pending')
+            adapter = await inspect_account(web3, account.address, 'eip7702-direct' if code else 'eoa')
+            if contracts and not await web3.eth.get_code(contracts[0]):
+                raise ValueError('Collection has no deployed code')
+        finally:
+            await web3.provider.disconnect()
+        budget, maximum = limits[approval.chain_id]
+        policy = dict(grant_id=grant_id,key_id=str(req.request_id),user_id=user.id,wallet_id=wallet.id,
+            account=account.address,chain_id=approval.chain_id,contracts=contracts,
+            mint_kinds=['public','allowlist','signed'],account_adapter=adapter,budget_wei=budget,
+            max_task_wei=maximum,expires_at=int(req.expires_at.timestamp()))
+        if req.collection_scope:
+            policy['collection_scope'] = req.collection_scope
+        if bundle is not None:
+            policy['network_approvals'] = bundle
+        policies.append(policy)
     password = private_read(settings.CUSTODY_PASSWORD_FILE)
     if len(password) < 32:
         raise ValueError('Weak vault password')
-    key_path = vault.root / f'{grant_id}.keystore.json'
-    policy_path = vault.root / f'{grant_id}.policy.json'
+    key_path = vault.root / f'{req.request_id}.keystore.json'
     if key_path.exists():
         # Recover a response/DB failure without creating another key or allowance.
         recovered = await asyncio.to_thread(Account.decrypt, json.loads(private_read(key_path)), password)
@@ -216,16 +264,20 @@ async def store_import(req, user, db):
         encrypted = await asyncio.to_thread(Account.encrypt, account.key, password, kdf='scrypt', iterations=262144)
         private_write(key_path, json.dumps(encrypted))
     del account, password
-    if policy_path.exists():
-        if json.loads(private_read(policy_path)) != policy:
-            raise ValueError('Conflicting policy file')
-    else:
-        private_write(policy_path, json.dumps(policy, sort_keys=True))
-    grant = AutomaticGrant(id=grant_id,user_id=user.id,wallet_id=wallet.id,
-        chain_id=chain_id,account=wallet.address,context_hash=automatic.digest(policy),
-        expires_at=req.expires_at,scope={k:policy[k] for k in ('contracts','mint_kinds','max_task_wei','collection_scope') if k in policy},
-        budget_wei=budget,reserved_wei=0,spent_wei=0,status='enabled')
-    db.add(grant)
+    grants = []
+    for policy in policies:
+        policy_path = vault.root / f'{policy["grant_id"]}.policy.json'
+        if policy_path.exists():
+            if json.loads(private_read(policy_path)) != policy:
+                raise ValueError('Conflicting policy file')
+        else:
+            private_write(policy_path, json.dumps(policy, sort_keys=True))
+        grant = AutomaticGrant(id=policy['grant_id'],user_id=user.id,wallet_id=wallet.id,
+            chain_id=policy['chain_id'],account=wallet.address,context_hash=automatic.digest(policy),
+            expires_at=req.expires_at,scope={k:policy[k] for k in ('contracts','mint_kinds','max_task_wei','collection_scope') if k in policy},
+            budget_wei=policy['budget_wei'],reserved_wei=0,spent_wei=0,status='enabled')
+        db.add(grant)
+        grants.append(grant)
     if wallet.archived_at:
         active = await db.scalar(select(func.count()).select_from(Wallet).where(
             Wallet.user_id == user.id, Wallet.archived_at.is_(None), Wallet.id != wallet.id))
@@ -238,4 +290,26 @@ async def store_import(req, user, db):
     if req.wallet_id is None:
         wallet.label = req.wallet_label.strip() or 'Wallet'
     await db.commit()
-    return automatic.public_grant(grant)
+    return import_result(req, wallet, grants)
+
+
+def import_result(req, wallet, grants):
+    if req.networks is None:
+        return automatic.public_grant(grants[0])
+    return {'id': str(req.request_id), 'wallet_id': wallet.id, 'account': wallet.address,
+        'grants': [automatic.public_grant(grant) for grant in grants]}
+
+
+async def signer_relink_ready(address):
+    try:
+        token = private_read(settings.AUTOMATIC_SIGNER_TOKEN_FILE)
+        if len(token) < 32:
+            raise ValueError('Signer control unavailable')
+        async with httpx.AsyncClient(timeout=30, trust_env=False) as client:
+            result = await client.get(settings.AUTOMATIC_SIGNER_URL + f'/accounts/{address}/relink-ready',
+                headers={'Authorization': 'Bearer ' + token})
+            result.raise_for_status()
+            if result.json() != {'ready': True}:
+                raise ValueError('Outstanding signature')
+    except Exception:
+        raise HTTPException(409, 'The signer has not confirmed this wallet is clear of unresolved signed mints. No wallet was linked.') from None

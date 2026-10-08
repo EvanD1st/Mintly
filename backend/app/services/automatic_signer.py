@@ -286,6 +286,41 @@ async def ready():
     return {'status': 'ready', 'chain_id': settings.AUTOMATIC_CHAIN_ID, 'custodial': True}
 
 
+@app.get('/accounts/{address}/relink-ready', dependencies=[Depends(authenticate)])
+async def relink_ready(address: str):
+    """Read-only check of signatures durable before a possibly failed database commit.
+
+    Import holds the execution lock while calling this; do not acquire it again here.
+    Never expose signatures or let database cancellation imply on-chain settlement.
+    """
+    providers = {}
+    journal = CustodyVault().journal()
+    try:
+        address = to_checksum_address(address).lower()
+        entries = journal.execute('SELECT task,chain,hash FROM signed WHERE address=? AND actual IS NULL',
+            (address,)).fetchall()
+        for entry in entries:
+            chain = entry['chain']
+            if chain not in providers:
+                providers[chain] = await automatic.provider_for(chain)
+            hashes = [entry['hash']] + [row['hash'] for row in journal.execute(
+                'SELECT hash FROM recoveries WHERE task=?', (entry['task'],)).fetchall()]
+            settled = False
+            for tx_hash in hashes:
+                if await final_receipt(providers[chain], tx_hash, chain):
+                    settled = True
+                    break
+            if not settled:
+                return {'ready': False}
+        return {'ready': True}
+    except Exception:
+        return {'ready': False}
+    finally:
+        journal.close()
+        for web3 in providers.values():
+            await web3.provider.disconnect()
+
+
 @app.get('/policies/{grant_id}/ready', dependencies=[Depends(authenticate)])
 async def policy_ready(grant_id: str, db=Depends(get_db)):
     automatic.enabled()

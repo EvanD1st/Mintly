@@ -24,6 +24,36 @@ accounting, but further Mintly broadcasts are permanently disabled. The worker
 still reconciles a transaction that was already mined or sent elsewhere. Re-linking
 creates a fresh, explicitly approved policy and never resumes stopped actions.
 
+An archived wallet no longer reserves an address for its previous account. The
+new account must prove possession of the selected phrase-derived key and confirm
+its own password. It receives its own wallet record and fresh approvals. The
+previous wallet, mint history and disabled policies keep their original owner.
+An active link to another non-deleted account still blocks import, including an
+attempt to reopen the previous account's archived wallet by ID.
+
+Relinking waits for unresolved signed transactions on any network. Database
+checks include legacy signed permissions. The isolated signer independently
+checks its durable journal and canonical finalized receipts, including recovery
+hashes, so a signature written before a failed database commit also blocks a new
+owner. The authenticated internal check returns only a boolean and does not sign,
+broadcast, reset spending or modify the journal. Ingress holds the execution lock
+throughout ownership checks and atomic activation; the signer check must not
+acquire that same lock again. Ingress receives the existing read-only control
+token mount, with no signer journal mount.
+
+New clients import a wallet once for every network advertised by ingress. Network
+selection is removed from the phrase step. Users explicitly enter a finite ETH
+budget for each available network, see the combined authorized amount, choose a
+common expiry and consent before import. Budgets include NFT prices and fees and
+remain independent; balances are separate on Ethereum, Base and Robinhood.
+Import checks the account adapter on each chain before storing one encrypted key
+and independently pinned policies. All grants and the wallet commit atomically.
+The complete network/limit bundle is pinned in every policy, preventing a retry
+from changing, adding or dropping allowances after storage or a lost DB commit.
+Existing installed clients can still use the single-network request format.
+Existing approvals are never expanded automatically. Existing wallets can approve
+additional network access through their details screen using the same import flow.
+
 Following a distinct public address retains a separate per-user watch. The add
 button stays visible in the top bar. Editing is named Edit name / networks; it
 cannot change the address. Adding clears search/activity filters, uses stable row

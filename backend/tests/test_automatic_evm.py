@@ -385,6 +385,13 @@ async def test_future_api_mint_runs_unattended_with_real_receipt(lab,kind,delega
 async def importer(lab, monkeypatch):
     from app.custody_import import app as import_app
     monkeypatch.setattr(settings, 'ENABLE_CUSTODY_IMPORT', True)
+    async def signer_relink_ready(address):
+        response = await lab.signer_client.get(f'/accounts/{address}/relink-ready')
+        assert response.status_code == 200
+        if response.json() != {'ready': True}:
+            from fastapi import HTTPException
+            raise HTTPException(409, 'Independent signer has an unresolved signature.')
+    monkeypatch.setattr('app.custody_import.signer_relink_ready', signer_relink_ready)
     async def dependency():
         async with lab.factory() as db:
             yield db

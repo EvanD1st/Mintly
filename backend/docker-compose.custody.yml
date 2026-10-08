@@ -123,6 +123,7 @@ services:
     volumes:
       - ${CUSTODY_VAULT_HOST_DIR:?Set signer vault directory}:/run/custody-vault:rw
       - ${CUSTODY_PASSWORD_DIR:?Set independent password secret directory}:/run/custody-password:ro
+      - ${CUSTODY_TOKEN_DIR:?Set protected token directory}:/run/custody-token:ro
 
 networks:
   custody-control:

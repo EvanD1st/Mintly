@@ -309,6 +309,27 @@ class ApiService extends ChangeNotifier {
                         '${payload['account_address']}'.toLowerCase())) {
         throw const ApiException('Import response could not be verified.');
       }
+      if (payload['networks'] is List) {
+        final requested = (payload['networks'] as List).cast<Map>();
+        final grants = result['grants'];
+        if (grants is! List ||
+            grants.length != requested.length ||
+            grants.any(
+              (g) =>
+                  g is! Map ||
+                  g['wallet_id'] != result['wallet_id'] ||
+                  '${g['account']}'.toLowerCase() !=
+                      '${payload['account_address']}'.toLowerCase(),
+            ) ||
+            grants.map((g) => g['id']).toSet().length != requested.length ||
+            grants.map((g) => g['chain_id']).toSet().length !=
+                requested.length ||
+            requested.any(
+              (n) => !grants.any((g) => g['chain_id'] == n['chain_id']),
+            )) {
+          throw const ApiException('Network approvals could not be verified.');
+        }
+      }
     } catch (_) {
       // Never render a server/proxy response or exception containing a secret.
       throw const ApiException(

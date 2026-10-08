@@ -33,12 +33,15 @@ class _CustodyImportScreenState extends ConsumerState<CustodyImportScreen>
   final _password = TextEditingController();
   final _budget = TextEditingController();
   final _maximum = TextEditingController();
+  final _networkBudgets = <int, TextEditingController>{};
+  final _networkMaximums = <int, TextEditingController>{};
+  List<Map<String, dynamic>> _networks = [];
+  bool _multiNetwork = false;
   late final Future<Map<String, dynamic>> _config;
   late final String _requestId;
   late DateTime _expiry;
   Uint8List? _walletKey;
   int _days = 7, _generation = 0;
-  int? _chainId;
   bool _limits = false,
       _moreLimits = false,
       _consent = false,
@@ -50,7 +53,7 @@ class _CustodyImportScreenState extends ConsumerState<CustodyImportScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _config = ref.read(apiServiceProvider).custodyImportConfig();
+    _config = _loadConfig();
     final random = Random.secure();
     final bytes = List.generate(16, (_) => random.nextInt(256));
     bytes[6] = (bytes[6] & 15) | 64;
@@ -59,6 +62,43 @@ class _CustodyImportScreenState extends ConsumerState<CustodyImportScreen>
     _requestId =
         '${hex.substring(0, 8)}-${hex.substring(8, 12)}-${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20)}';
     _expiry = DateTime.now().toUtc().add(Duration(days: _days));
+  }
+
+  Future<Map<String, dynamic>> _loadConfig() async {
+    final config = await ref.read(apiServiceProvider).custodyImportConfig();
+    if (!mounted) return config;
+    _multiNetwork = config['multi_network_import'] == true;
+    _networks = (config['networks'] as List? ?? [])
+        .cast<Map<String, dynamic>>();
+    if (_multiNetwork && _networks.isEmpty) {
+      throw StateError('No automatic networks available');
+    }
+    for (final network in _networks) {
+      final chain = network['chain_id'] as int;
+      _networkBudgets[chain] = TextEditingController();
+      _networkMaximums[chain] = TextEditingController();
+    }
+    return config;
+  }
+
+  String _combinedBudget() {
+    final scale = BigInt.from(10).pow(18);
+    var total = BigInt.zero;
+    for (final controller in _networkBudgets.values) {
+      final value = controller.text.trim();
+      if (!RegExp(r'^\d+(\.\d{1,18})?$').hasMatch(value)) continue;
+      final parts = value.split('.');
+      total +=
+          BigInt.parse(parts[0]) * scale +
+          BigInt.parse((parts.length == 2 ? parts[1] : '').padRight(18, '0'));
+    }
+    final fraction = (total % scale)
+        .toString()
+        .padLeft(18, '0')
+        .replaceFirst(RegExp(r'0+$'), '');
+    return fraction.isEmpty
+        ? '${total ~/ scale}'
+        : '${total ~/ scale}.$fraction';
   }
 
   void _clearKey() {
@@ -92,6 +132,8 @@ class _CustodyImportScreenState extends ConsumerState<CustodyImportScreen>
       _maximum,
       _accountNumber,
       _label,
+      ..._networkBudgets.values,
+      ..._networkMaximums.values,
     ]) {
       c.clear();
       c.dispose();
@@ -182,16 +224,29 @@ class _CustodyImportScreenState extends ConsumerState<CustodyImportScreen>
       'wallet_label': _label.text.trim().isEmpty
           ? 'Wallet'
           : _label.text.trim(),
-      if (_chainId != null) 'chain_id': _chainId,
       'private_key': _walletKey!
           .map((v) => v.toRadixString(16).padLeft(2, '0'))
           .join(),
       'password': _password.text,
       'collection_scope': 'reviewed_mints',
-      'budget_eth': _budget.text.trim(),
-      'max_task_eth': _maximum.text.trim().isEmpty
-          ? _budget.text.trim()
-          : _maximum.text.trim(),
+      if (_multiNetwork)
+        'networks': [
+          for (final network in _networks)
+            {
+              'chain_id': network['chain_id'],
+              'budget_eth': _networkBudgets[network['chain_id']]!.text.trim(),
+              'max_task_eth':
+                  _networkMaximums[network['chain_id']]!.text.trim().isEmpty
+                  ? _networkBudgets[network['chain_id']]!.text.trim()
+                  : _networkMaximums[network['chain_id']]!.text.trim(),
+            },
+        ]
+      else ...{
+        'budget_eth': _budget.text.trim(),
+        'max_task_eth': _maximum.text.trim().isEmpty
+            ? _budget.text.trim()
+            : _maximum.text.trim(),
+      },
       'expires_at': _expiry.toIso8601String(),
       'consent': true,
     };
@@ -251,8 +306,6 @@ class _CustodyImportScreenState extends ConsumerState<CustodyImportScreen>
           if (!snapshot.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
-          final networks = (snapshot.data!['networks'] as List? ?? [])
-              .cast<Map<String, dynamic>>();
           return Form(
             key: _form,
             child: ListView(
@@ -265,35 +318,13 @@ class _CustodyImportScreenState extends ConsumerState<CustodyImportScreen>
                   style: Theme.of(context).textTheme.headlineSmall,
                 ),
                 const SizedBox(height: 8),
-                if (networks.length > 1)
-                  DropdownButtonFormField<int>(
-                    initialValue: _chainId ?? snapshot.data!['chain_id'] as int,
-                    icon: const RotatedBox(
-                      quarterTurns: 1,
-                      child: Icon(MintlyIcons.chevronRight),
-                    ),
-                    decoration: const InputDecoration(
-                      labelText: 'Network for this wallet policy',
-                    ),
-                    items: networks
-                        .map(
-                          (n) => DropdownMenuItem(
-                            value: n['chain_id'] as int,
-                            child: Text('${n['name']}'),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: _busy || _attempted
-                        ? null
-                        : (value) => setState(() => _chainId = value),
+                if (_multiNetwork)
+                  Text(
+                    'One wallet · ${_networks.map((n) => n['name']).join(' · ')}',
                   )
                 else
                   Text(
                     'Network: ${snapshot.data!['chain_id'] == 4663 ? 'Robinhood mainnet' : 'Chain ${snapshot.data!['chain_id']}'}',
-                  ),
-                if (_chainId == 8453)
-                  const Text(
-                    'Base parent-chain fees can change until inclusion. Limits are checked before submission.',
                   ),
                 const SizedBox(height: 8),
                 if (_selectedAddress != null || widget.address != null)
@@ -366,21 +397,48 @@ class _CustodyImportScreenState extends ConsumerState<CustodyImportScreen>
                     child: Text(_busy ? 'Checking wallet…' : 'Continue'),
                   ),
                 ] else ...[
-                  const Text('Approve access for this selected account.'),
-                  const SizedBox(height: 20),
-                  TextFormField(
-                    key: const Key('custody-budget'),
-                    controller: _budget,
-                    enabled: !_busy && !_attempted,
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
-                    ),
-                    decoration: const InputDecoration(
-                      labelText: 'Total budget (ETH)',
-                      helperText: 'Includes NFT prices and network fees',
-                    ),
-                    validator: _amount,
+                  Text(
+                    _multiNetwork
+                        ? 'Set a separate budget for each network. Each includes NFT prices and network fees.'
+                        : 'Approve access for this selected account.',
                   ),
+                  const SizedBox(height: 20),
+                  if (_multiNetwork) ...[
+                    for (final network in _networks) ...[
+                      TextFormField(
+                        key: Key('custody-budget-${network['chain_id']}'),
+                        controller: _networkBudgets[network['chain_id']],
+                        enabled: !_busy && !_attempted,
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        decoration: InputDecoration(
+                          labelText: '${network['name']} budget (ETH)',
+                        ),
+                        validator: _amount,
+                        onChanged: (_) => setState(() {}),
+                      ),
+                      const SizedBox(height: 16),
+                    ],
+                    Text(
+                      'Combined authorized budget: ${_combinedBudget()} ETH',
+                      key: const Key('custody-combined-budget'),
+                    ),
+                    const SizedBox(height: 16),
+                  ] else
+                    TextFormField(
+                      key: const Key('custody-budget'),
+                      controller: _budget,
+                      enabled: !_busy && !_attempted,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      decoration: const InputDecoration(
+                        labelText: 'Total budget (ETH)',
+                        helperText: 'Includes NFT prices and network fees',
+                      ),
+                      validator: _amount,
+                    ),
                   const SizedBox(height: 16),
                   DropdownButtonFormField<int>(
                     initialValue: _days,
@@ -464,22 +522,53 @@ class _CustodyImportScreenState extends ConsumerState<CustodyImportScreen>
                       padding: const EdgeInsets.all(16),
                       child: Column(
                         children: [
-                          TextFormField(
-                            controller: _maximum,
-                            enabled: !_busy && !_attempted,
-                            decoration: const InputDecoration(
-                              labelText: 'Maximum per mint (ETH, optional)',
-                              helperText: 'Blank uses your total budget',
+                          if (_multiNetwork)
+                            for (final network in _networks)
+                              TextFormField(
+                                controller:
+                                    _networkMaximums[network['chain_id']],
+                                enabled: !_busy && !_attempted,
+                                keyboardType:
+                                    const TextInputType.numberWithOptions(
+                                      decimal: true,
+                                    ),
+                                decoration: InputDecoration(
+                                  labelText:
+                                      '${network['name']} maximum per mint (ETH, optional)',
+                                  helperText:
+                                      'Blank uses this network’s budget',
+                                ),
+                                validator: (v) => (v ?? '').trim().isEmpty
+                                    ? null
+                                    : _amount(v) ??
+                                          ((double.tryParse(v ?? '') ?? 0) >
+                                                  (double.tryParse(
+                                                        _networkBudgets[network['chain_id']]!
+                                                            .text,
+                                                      ) ??
+                                                      0)
+                                              ? 'Must fit this network’s budget'
+                                              : null),
+                              )
+                          else
+                            TextFormField(
+                              controller: _maximum,
+                              enabled: !_busy && !_attempted,
+                              decoration: const InputDecoration(
+                                labelText: 'Maximum per mint (ETH, optional)',
+                                helperText: 'Blank uses your total budget',
+                              ),
+                              validator: (v) => (v ?? '').trim().isEmpty
+                                  ? null
+                                  : _amount(v) ??
+                                        ((double.tryParse(v ?? '') ?? 0) >
+                                                (double.tryParse(
+                                                      _budget.text,
+                                                    ) ??
+                                                    0)
+                                            ? 'Must fit the total budget'
+                                            : null),
                             ),
-                            validator: (v) => (v ?? '').trim().isEmpty
-                                ? null
-                                : _amount(v) ??
-                                      ((double.tryParse(v ?? '') ?? 0) >
-                                              (double.tryParse(_budget.text) ??
-                                                  0)
-                                          ? 'Must fit the total budget'
-                                          : null),
-                          ),
                           const SizedBox(height: 12),
                           const Text(
                             'Importing does not submit a mint. Review each automatic mint in Mintly. Disabling stops future signing; it cannot erase the key or cancel signed transactions. ETH limits are not a guaranteed USD limit.',
