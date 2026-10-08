@@ -330,8 +330,18 @@ class ApiService extends ChangeNotifier {
           throw const ApiException('Network approvals could not be verified.');
         }
       }
-    } catch (_) {
+    } catch (error) {
       // Never render a server/proxy response or exception containing a secret.
+      const safeMessages = {
+        'This wallet is still linked to another Mintly account. Unlink it there first.',
+        'A previously signed mint for this wallet is unresolved. Wait for settlement before relinking.',
+        'The signer has not confirmed this wallet is clear of unresolved signed mints. No wallet was linked.',
+        'Mintly password is incorrect.',
+        'Too many import attempts. Try again in 15 minutes.',
+      };
+      if (error is ApiException && safeMessages.contains(error.message)) {
+        throw ApiException(error.message);
+      }
       throw const ApiException(
         'Import not confirmed. Check your password, matching wallet key and limits, then retry. Refresh wallet policies first if the connection was interrupted.',
       );

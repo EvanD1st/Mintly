@@ -255,12 +255,12 @@ class _CustodyImportScreenState extends ConsumerState<CustodyImportScreen>
     try {
       await ref.read(apiServiceProvider).importCustodyWallet(payload);
       if (mounted) Navigator.pop(context, true);
-    } catch (_) {
+    } catch (error) {
       if (mounted) {
         setState(() {
           _limits = false;
           _error =
-              'Import not confirmed. Refresh your wallet status if the connection was interrupted. Re-enter your secret and Mintly password to retry with the same limits.';
+              '$error'; // ApiService returns only fixed, secret-safe import messages.
         });
       }
     } finally {

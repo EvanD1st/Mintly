@@ -32,6 +32,36 @@ Map<String, dynamic> importResponse(Map<String, dynamic> sent) => {
 };
 
 void main() {
+  test(
+    'known relink hold explains the block without echoing arbitrary responses',
+    () async {
+      const message =
+          'A previously signed mint for this wallet is unresolved. Wait for settlement before relinking.';
+      final api = ApiService(
+        client: MockClient(
+          (request) async => request.url.path.endsWith('/auth/login')
+              ? http.Response(
+                  '{"token":"token","user":{"username":"member"}}',
+                  200,
+                )
+              : http.Response(jsonEncode({'detail': message}), 409),
+        ),
+      );
+      await api.login('member', 'password');
+      final payload = <String, dynamic>{
+        'private_key': 'test-secret',
+        'password': 'password',
+      };
+      await expectLater(
+        api.importCustodyWallet(payload),
+        throwsA(
+          isA<ApiException>().having((e) => e.message, 'message', message),
+        ),
+      );
+      expect(payload.containsKey('private_key'), isFalse);
+      expect(payload.containsKey('password'), isFalse);
+    },
+  );
   testWidgets(
     'one phrase import explicitly approves all network budgets and shows their sum',
     (tester) async {
@@ -60,8 +90,9 @@ void main() {
               200,
             );
           }
-          if (request.url.path.endsWith('/wallets'))
+          if (request.url.path.endsWith('/wallets')) {
             return http.Response('[]', 200);
+          }
           expect(request.body.contains(phrase), isFalse);
           sent = jsonDecode(request.body) as Map<String, dynamic>;
           return http.Response(jsonEncode(importResponse(sent!)), 200);
@@ -155,13 +186,16 @@ void main() {
         final response = importResponse(payload);
         final grants = response['grants'] as List;
         if (failure == 'missing') grants.removeLast();
-        if (failure == 'duplicate_chain')
+        if (failure == 'duplicate_chain') {
           grants[1]['chain_id'] = grants[0]['chain_id'];
+        }
         if (failure == 'duplicate_grant') grants[1]['id'] = grants[0]['id'];
-        if (failure == 'foreign_wallet')
+        if (failure == 'foreign_wallet') {
           grants[1]['wallet_id'] = 'other-wallet';
-        if (failure == 'foreign_account')
+        }
+        if (failure == 'foreign_account') {
           grants[1]['account'] = 'other-account';
+        }
         final api = ApiService(
           client: MockClient(
             (request) async => request.url.path.endsWith('/auth/login')
