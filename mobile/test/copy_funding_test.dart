@@ -47,6 +47,8 @@ void main() {
     await tester.pumpAndSettle();
     await tester.scrollUntilVisible(find.text('Retry'), 150,
         scrollable: find.byWidgetPredicate((w) => w is Scrollable && w.axisDirection == AxisDirection.down).first);
+    await Scrollable.ensureVisible(tester.element(find.text('Retry')), alignment: 0.5);
+    await tester.pumpAndSettle();
     expect(find.text('Not enough ETH on Base for gas.'), findsOneWidget);
     expect(find.text('Review & copy this mint'), findsNothing);
     await tester.tap(find.text('Retry'));

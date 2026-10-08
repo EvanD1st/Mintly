@@ -206,10 +206,17 @@ async def approve_wallet(watch_id: str, req: WalletRuleRequest, user=Depends(get
     for gid, grant in zip(ids, grants):
         old = await db.get(CopyRule, gid)
         child_budget = old.budget_wei if old else min(budget, grant.budget_wei - grant.spent_wei - grant.reserved_wei)
+        if child_budget <= 0:
+            raise HTTPException(409, f'No approved wallet budget remains on {copying.CHAINS.get(grant.chain_id, "this network")}. Review its wallet limits.')
         child = RuleRequest(**{k:v for k,v in req.model_dump().items() if k != 'grant_ids'}, grant_id=grant.id)
         child.request_id = uuid.UUID(gid)
         child.budget_eth = str(child_budget // 10**18) + '.' + str(child_budget % 10**18).zfill(18)
-        rules.append(await save_rule(watch_id, child, user, db, group=group))
+        try:
+            rules.append(await save_rule(watch_id, child, user, db, group=group))
+        except HTTPException as error:
+            if error.detail == 'Copy limits exceed the wallet’s available budget or per-mint allowance.':
+                raise HTTPException(409, f'Copy limits exceed your wallet allowance on {copying.CHAINS.get(grant.chain_id, "this network")}. Review its wallet limits.') from None
+            raise
     await db.commit()  # All siblings exist before any independent journal pin; none is active yet.
     if all(rule.status == 'registering' for rule in rules):
         for rule in rules:

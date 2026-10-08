@@ -192,6 +192,16 @@ async def test_balance_drained_after_arming_has_short_note_and_retry_reuses_unsi
     await lab.tick()
     event = (await lab.client.get('/api/copy-mints/activity')).json()['events'][0]
     assert event['status'] == 'skipped' and event['retryable'] and event['note'] == copy_mints.funding_note(31337, True)
+    from app import automatic_notifications
+    from app.services.notifier import NotificationService
+    notifications = []
+    async def send(title, body, **kwargs):
+        notifications.append((title, body, kwargs['user_id']))
+        return True
+    monkeypatch.setattr(automatic_notifications, 'AsyncSessionLocal', lab.factory)
+    monkeypatch.setattr(NotificationService, 'send_notification', send)
+    await automatic_notifications.deliver_one()
+    assert notifications == [('Copy mint skipped', copy_mints.funding_note(31337, True), lab.user.id)]
     async def confirm_unsigned(task_id):
         assert (await lab.signer_client.get(f'/tasks/{task_id}/unsigned')).json() == {'unsigned': True}
     monkeypatch.setattr('app.api.copy_mints.confirm_unsigned', confirm_unsigned)
@@ -228,6 +238,33 @@ async def test_funding_retry_never_rearms_a_signature_lost_from_the_database(cop
     async with lab.factory() as db:
         assert (await db.get(MintTask, tid)).status == 'failed'
         assert (await db.get(AutomaticGrant, lab.grant.id)).reserved_wei == 0
+
+
+@pytest.mark.parametrize('invalid', ['mixed_wallets', 'duplicate_chain', 'duplicate_grant', 'foreign', 'zero_allowance'])
+async def test_wallet_approval_rejects_mixed_or_unavailable_authority_without_partial_rules(wallet_networks, invalid):
+    c, request = wallet_networks
+    lab = c['lab']
+    from app.models import Wallet, User
+    async with lab.factory() as db:
+        other = await db.get(AutomaticGrant, request['grant_ids'][1])
+        if invalid == 'mixed_wallets':
+            wallet = Wallet(id=str(uuid.uuid4()), user_id=lab.user.id, address=lab.w.eth.accounts[3], label='Other wallet')
+            db.add(wallet)
+            await db.flush()
+            other.wallet_id = wallet.id
+        if invalid == 'duplicate_chain':
+            other.chain_id = 31337
+        if invalid == 'foreign':
+            other.user_id = await db.scalar(select(User.id).where(User.username == 'admin'))
+        if invalid == 'zero_allowance':
+            other.spent_wei = other.budget_wei
+        await db.commit()
+    if invalid == 'duplicate_grant':
+        request['grant_ids'][1] = request['grant_ids'][0]
+    result = await lab.client.post(f'/api/copy-mints/watches/{c["watch_id"]}/wallet-rules', json=request)
+    assert result.status_code in (404, 409, 422), result.text
+    async with lab.factory() as db:
+        assert (await db.scalars(select(CopyRule))).all() == []
 
 
 @pytest.mark.parametrize('block', ['paused', 'unlinked', 'expired', 'foreign'])
