@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../services/wallet_secret.dart';
+import '../widgets/phrase_visibility_icon.dart';
 import '../state/app_state.dart';
 
 final walletSecretResolverProvider =
@@ -28,6 +29,7 @@ class _CustodyImportScreenState extends ConsumerState<CustodyImportScreen>
   final _accountNumber = TextEditingController(text: '1');
   final _label = TextEditingController(text: 'Wallet');
   String? _selectedAddress;
+  bool _showPhrase = false;
   final _password = TextEditingController();
   final _budget = TextEditingController();
   final _maximum = TextEditingController();
@@ -71,6 +73,7 @@ class _CustodyImportScreenState extends ConsumerState<CustodyImportScreen>
         state == AppLifecycleState.hidden) {
       _generation++;
       _key.clear();
+      _showPhrase = false;
       _password.clear();
       _clearKey();
       if (mounted) setState(() => _limits = false);
@@ -109,6 +112,7 @@ class _CustodyImportScreenState extends ConsumerState<CustodyImportScreen>
     _key.clear();
     setState(() {
       _busy = true;
+      _showPhrase = false;
       _error = null;
     });
     Uint8List? derived;
@@ -333,21 +337,28 @@ class _CustodyImportScreenState extends ConsumerState<CustodyImportScreen>
                     key: const Key('custody-recovery-phrase'),
                     controller: _key,
                     enabled: !_busy,
-                    obscureText: true,
+                    obscureText: !_showPhrase,
+                    maxLines: _showPhrase ? 3 : 1,
                     autocorrect: false,
                     enableSuggestions: false,
                     autofillHints: const [],
                     keyboardType: TextInputType.visiblePassword,
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       labelText: 'Secret recovery phrase',
-                      helperText: '12 or 24 words, in order',
+                      helperText: '12 or 24 words; numbered lists are accepted',
+                      suffixIcon: IconButton(
+                        tooltip: _showPhrase
+                            ? 'Hide recovery phrase'
+                            : 'Show recovery phrase',
+                        onPressed: _busy
+                            ? null
+                            : () => setState(() => _showPhrase = !_showPhrase),
+                        icon: PhraseVisibilityIcon(visible: _showPhrase),
+                      ),
                     ),
-                    validator: (v) =>
-                        [12, 24].contains(
-                          (v ?? '').trim().split(RegExp(r'\s+')).length,
-                        )
+                    validator: (v) => normalizeRecoveryPhrase(v ?? '') != null
                         ? null
-                        : 'Enter 12 or 24 words',
+                        : 'Enter 12 or 24 words in order (numbered 1 onward if used)',
                   ),
                   const SizedBox(height: 24),
                   FilledButton(

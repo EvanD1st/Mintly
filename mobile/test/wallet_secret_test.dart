@@ -9,6 +9,69 @@ const firstKey =
 
 void main() {
   test(
+    'numbered phrases preserve order and derive the same selected account',
+    () {
+      final words = phrase.split(' ');
+      for (final (separator, label) in [
+        (' ', (int n) => '$n. '),
+        ('\n', (int n) => '$n) '),
+        (', ', (int n) => '[$n] '),
+        ('\t', (int n) => '$n '),
+      ]) {
+        final numbered = [
+          for (var i = 0; i < words.length; i++) '${label(i + 1)}${words[i]}',
+        ].join(separator);
+        expect(normalizeRecoveryPhrase(numbered), phrase);
+        final input = {
+          'kind': 'phrase',
+          'secret': numbered,
+          'address': firstAddress,
+        };
+        final key = resolveWalletSecret(input);
+        expect(
+          key?.map((v) => v.toRadixString(16).padLeft(2, '0')).join(),
+          firstKey,
+        );
+        key?.fillRange(0, key.length, 0);
+        expect(input, isEmpty);
+      }
+      final words24 = [...List.filled(23, 'abandon'), 'art'];
+      expect(
+        normalizeRecoveryPhrase(
+          [for (var i = 0; i < 24; i++) '${i + 1}: ${words24[i]}'].join('\n'),
+        ),
+        words24.join(' '),
+      );
+    },
+  );
+  test(
+    'missing, duplicated, reversed or mixed numbering is rejected without reordering',
+    () {
+      final words = phrase.split(' ');
+      for (final order in [
+        [for (var i = 0; i < 12; i++) i + 2],
+        [1, 2, 2, ...List.generate(9, (i) => i + 4)],
+        [for (var i = 12; i > 0; i--) i],
+      ]) {
+        expect(
+          normalizeRecoveryPhrase(
+            [for (var i = 0; i < 12; i++) '${order[i]}. ${words[i]}'].join(' '),
+          ),
+          isNull,
+        );
+      }
+      expect(
+        normalizeRecoveryPhrase('1. test ${words.skip(1).join(' ')}'),
+        isNull,
+      );
+      expect(
+        normalizeRecoveryPhrase('1. test2 ${words.skip(1).join(' ')}'),
+        isNull,
+      );
+      expect(normalizeRecoveryPhrase('Wallet phrase: $phrase'), isNull);
+    },
+  );
+  test(
     'phrase selects exact MetaMask accounts against independent eth-account vectors',
     () {
       for (final vector in [

@@ -90,11 +90,42 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.textContaining('Allowed NFT collection'), findsNothing);
       final phraseField = find.byKey(const Key('custody-recovery-phrase'));
-      await tester.enterText(phraseField, phrase);
+      final words = phrase.split(' ');
+      final numbered = [
+        for (var i = 0; i < words.length; i++) '${i + 1}. ${words[i]}',
+      ].join(' ');
+      await tester.enterText(phraseField, numbered);
       final input = tester.widget<EditableText>(
         find.descendant(of: phraseField, matching: find.byType(EditableText)),
       );
       expect(input.obscureText, isTrue);
+      await tester.tap(find.byTooltip('Show recovery phrase'));
+      await tester.pump();
+      expect(
+        tester
+            .widget<EditableText>(
+              find.descendant(
+                of: phraseField,
+                matching: find.byType(EditableText),
+              ),
+            )
+            .obscureText,
+        isFalse,
+      );
+      expect(input.controller.text, numbered);
+      await tester.tap(find.byTooltip('Hide recovery phrase'));
+      await tester.pump();
+      expect(
+        tester
+            .widget<EditableText>(
+              find.descendant(
+                of: phraseField,
+                matching: find.byType(EditableText),
+              ),
+            )
+            .obscureText,
+        isTrue,
+      );
       await tester.tap(find.text('Continue'));
       await tester.pumpAndSettle();
       expect(input.controller.text, isEmpty);
@@ -115,6 +146,7 @@ void main() {
       await tester.tap(find.text('Import wallet'));
       await tester.pump();
       expect(requests.length, 1);
+      expect(jsonEncode(requests.single).contains(numbered), isFalse);
       expect(requests.single['private_key'], firstKey);
       expect(requests.single['collection_scope'], 'reviewed_mints');
       expect(requests.single.containsKey('contract'), isFalse);
@@ -195,6 +227,58 @@ void main() {
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     },
   );
+
+  testWidgets('backgrounding clears and remasks a revealed phrase', (
+    tester,
+  ) async {
+    final api = ApiService(
+      client: MockClient(
+        (r) async => r.url.path.endsWith('/auth/login')
+            ? http.Response(
+                '{"token":"token","user":{"username":"member"}}',
+                200,
+              )
+            : http.Response(
+                '{"chain_id":4663,"automatic_collection_selection":true}',
+                200,
+              ),
+      ),
+    );
+    await api.login('member', 'test');
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [apiServiceProvider.overrideWith((ref) => api)],
+        child: const MaterialApp(
+          home: CustodyImportScreen(walletId: 'wallet', address: firstAddress),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final field = find.byKey(const Key('custody-recovery-phrase'));
+    await tester.enterText(field, phrase);
+    await tester.tap(find.byTooltip('Show recovery phrase'));
+    await tester.pump();
+    expect(
+      tester
+          .widget<EditableText>(
+            find.descendant(of: field, matching: find.byType(EditableText)),
+          )
+          .obscureText,
+      isFalse,
+    );
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    await tester.pump();
+    final input = tester.widget<EditableText>(
+      find.descendant(of: field, matching: find.byType(EditableText)),
+    );
+    expect(input.controller.text, isEmpty);
+    expect(input.obscureText, isTrue);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+  });
   testWidgets('unavailable or old ingress never presents a secret field', (
     tester,
   ) async {

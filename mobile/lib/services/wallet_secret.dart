@@ -4,6 +4,35 @@ import 'package:bip39/bip39.dart' as bip39;
 import 'package:pointycastle/ecc/api.dart';
 import 'package:pointycastle/digests/keccak.dart';
 
+/// Accept plain words or a complete, ordered numbered list; never reorder words.
+String? normalizeRecoveryPhrase(String input) {
+  final text = input.trim().toLowerCase();
+  List<String> words;
+  if (RegExp(r'\d').hasMatch(text)) {
+    final entries = RegExp(
+      r'(?:\[\s*(\d{1,2})\s*\]|(\d{1,2}))\s*[.):\-]?\s*([a-z]+)',
+    ).allMatches(text);
+    words = [];
+    var end = 0;
+    for (final entry in entries) {
+      if (!RegExp(r'^[\s,;]*$').hasMatch(text.substring(end, entry.start)) ||
+          int.parse(entry.group(1) ?? entry.group(2)!) != words.length + 1) {
+        return null;
+      }
+      words.add(entry.group(3)!);
+      end = entry.end;
+    }
+    if (!RegExp(r'^[\s,;]*$').hasMatch(text.substring(end))) return null;
+  } else {
+    words = text.split(RegExp(r'[\s,;]+'));
+  }
+  if (![12, 24].contains(words.length) ||
+      words.any((word) => !RegExp(r'^[a-z]+$').hasMatch(word))) {
+    return null;
+  }
+  return words.join(' ');
+}
+
 /// Runs in a short-lived device isolate. Only the linked account's key returns.
 Uint8List? resolveWalletSecret(Map<String, String> input) {
   final curve = ECDomainParameters('secp256k1');
@@ -33,13 +62,8 @@ Uint8List? resolveWalletSecret(Map<String, String> input) {
       return address(raw) == expected ? Uint8List.fromList(raw) : null;
     }
     if (input['kind'] != 'phrase') return null;
-    final phrase = input['secret']!
-        .trim()
-        .toLowerCase()
-        .split(RegExp(r'\s+'))
-        .join(' ');
-    if (![12, 24].contains(phrase.split(' ').length) ||
-        !bip39.validateMnemonic(phrase)) {
+    final phrase = normalizeRecoveryPhrase(input['secret']!);
+    if (phrase == null || !bip39.validateMnemonic(phrase)) {
       return null;
     }
     seed = bip39.mnemonicToSeed(phrase);
