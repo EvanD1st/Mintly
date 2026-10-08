@@ -76,6 +76,7 @@ class TaskSchema(BaseModel):
     actual_total_cost_wei: Optional[int] = None
     execution_mode: Optional[str] = None
     wallet_address: Optional[str] = None
+    progress: dict | None = None
 
 
 class QueueResponse(BaseModel):

@@ -2,8 +2,12 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from pydantic import BaseModel
+from pydantic import Field
+from pathlib import Path
+import httpx
+from app.config import settings
 from app.api.deps import get_current_user, get_db
-from app.models import AutomaticGrant, MintTask, MintAuthorization, CopyRule, Wallet, User, ActivityEvent, MintPermission
+from app.models import AutomaticGrant, MintTask, MintAuthorization, CopyRule, Wallet, User, ActivityEvent, MintPermission, DailyDebit
 from app.services import automatic
 
 router = APIRouter(prefix='/automatic', tags=['automatic'])
@@ -11,6 +15,77 @@ router = APIRouter(prefix='/automatic', tags=['automatic'])
 
 class PauseRequest(BaseModel):
     paused: bool
+
+
+class DailyLimitRequest(BaseModel):
+    limit_eth: str | None = Field(default=None, pattern=r'^[0-9]+(\.[0-9]+)?$',max_length=40)
+    consent: bool
+
+
+async def signer_limit(user_id,operation):
+    token = Path(settings.AUTOMATIC_SIGNER_TOKEN_FILE).read_text().strip()
+    if len(token) < 32:
+        raise ValueError('Signer control authentication unavailable')
+    async with httpx.AsyncClient(timeout=40,trust_env=False) as client:
+        url=settings.AUTOMATIC_SIGNER_URL + f'/account-limits/{user_id}/{operation}'
+        method=client.post if operation == 'register' else client.get
+        response=await method(url,headers={'Authorization':'Bearer '+token})
+        response.raise_for_status()
+        return response.json()
+
+
+@router.get('/daily-limit')
+async def daily_limit(user=Depends(get_current_user),db=Depends(get_db)):
+    from app.services import daily_budget
+    used=await daily_budget.usage(db,user.id)
+    verified=True
+    if user.daily_limit_wei is not None:
+        try:
+            signed=await signer_limit(user.id,'usage')
+            unsigned=(await db.scalars(select(DailyDebit).where(DailyDebit.user_id==user.id,
+                DailyDebit.actual_wei.is_(None),DailyDebit.day<=daily_budget.day_key()))).all()
+            signed_ids=set(signed['signed_tasks'])
+            used['spent_wei']=int(signed['spent_wei'])
+            used['reserved_wei']=int(signed['reserved_wei'])+sum(r.maximum_wei for r in unsigned if r.task_id not in signed_ids)
+        except Exception:
+            verified=False
+    return {'limit_wei':str(user.daily_limit_wei) if user.daily_limit_wei is not None else None,
+        **{k:str(v) for k,v in used.items()},'day_wat':daily_budget.day_key(),
+        'remaining_wei':str(max(0,user.daily_limit_wei-used['spent_wei']-used['reserved_wei'])) if user.daily_limit_wei is not None and verified else None,
+        'status':user.daily_limit_status,'usage_verified':verified,'timezone':'WAT'}
+
+
+@router.post('/daily-limit')
+async def set_daily_limit(req:DailyLimitRequest,user=Depends(get_current_user),db=Depends(get_db)):
+    from app.services import daily_budget
+    if not req.consent:
+        raise HTTPException(422,'Confirm the account-wide daily limit.')
+    amount=automatic.wei(req.limit_eth) if req.limit_eth is not None else None
+    if amount == 0:
+        raise HTTPException(422,'Enter a positive daily amount or turn off the additional daily cap.')
+    await automatic.lock_execution(db)
+    user=await db.get(User,user.id,populate_existing=True)
+    await daily_budget.seed_existing(db,user.id)
+    if user.daily_limit_status != 'registering' or user.daily_limit_wei != amount:
+        user.daily_limit_revision += 1
+    revision=user.daily_limit_revision
+    user.daily_limit_wei,user.daily_limit_status=amount,'registering'
+    await db.commit()
+    try:
+        registered=await signer_limit(user.id,'register')
+        if registered.get('revision') != revision:
+            raise ValueError('Daily limit revision differs')
+    except Exception:
+        raise HTTPException(503,'Daily limit saved, but signer confirmation is pending. Retry this setting; future signing is blocked.') from None
+    await automatic.lock_execution(db)
+    await db.refresh(user)
+    if user.daily_limit_revision != revision or user.daily_limit_wei != amount:
+        raise HTTPException(409,'The daily limit changed. Reload Settings.')
+    user.daily_limit_status='active'
+    db.add(ActivityEvent(user_id=user.id,event_type='daily_limit_changed',label='Daily spending limit updated',
+        detail='One WAT-day limit across scheduled and copy mints. Existing signed transactions remain tracked.',is_demo=False,icon_name='gem'))
+    await db.commit()
+    return await daily_limit(user,db)
 
 
 @router.get('/status')

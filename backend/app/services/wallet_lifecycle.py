@@ -1,7 +1,7 @@
 """Owner-scoped unlinking preserves history and permanently stops old actions."""
 from datetime import datetime, timezone
 from sqlalchemy import select
-from app.models import Wallet, AutomaticGrant, CopyRule, MintTask, MintPlan, MintPermission, ActivityEvent
+from app.models import Wallet, AutomaticGrant, CopyRule, MintTask, MintPlan, MintPermission, ActivityEvent, CopyCheck
 from app.services import automatic
 from app.services.copy_mints import pause_rule
 
@@ -11,6 +11,8 @@ async def unlink(db, wallet):
     if wallet.archived_at:
         return
     now = datetime.now(timezone.utc)
+    for check in (await db.scalars(select(CopyCheck).where(CopyCheck.wallet_id==wallet.id,CopyCheck.user_id==wallet.user_id))).all():
+        check.active=False
     grants = (await db.scalars(select(AutomaticGrant).where(AutomaticGrant.wallet_id == wallet.id))).all()
     for grant in grants:
         grant.status = 'disabled'

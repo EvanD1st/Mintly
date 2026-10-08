@@ -1,4 +1,5 @@
 import '../widgets/mintly_notice.dart';
+import '../widgets/mint_progress.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -310,7 +311,10 @@ class QueueScreen extends ConsumerWidget {
                       ],
                     ),
                     const SizedBox(height: 12),
-                    Text('Status: ${task.status}'),
+                    if (task.progress != null)
+                      MintProgress(progress: task.progress!)
+                    else
+                      Text('Status: ${task.status}'),
                     if (task.failureReason != null) Text(task.failureReason!),
                     if (task.transactionHash != null)
                       SelectableText(task.transactionHash!),

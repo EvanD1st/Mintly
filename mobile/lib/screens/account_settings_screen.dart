@@ -1,5 +1,6 @@
 import '../widgets/mintly_notice.dart';
 import '../widgets/automation_control.dart';
+import '../widgets/daily_budget_control.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../services/push_service.dart';
@@ -194,10 +195,27 @@ class _AccountSettingsState extends ConsumerState<AccountSettingsScreen> {
                 const CopyMintsScreen(),
               ),
             ]),
-            _section('Automation', [const AutomationControl()]),
+            _section('Automation', [const AutomationControl(), const DailyBudgetControl()]),
             _section('Notifications', [
               _notification(true),
               _notification(false),
+              ValueListenableBuilder<PushPreferences>(
+                valueListenable: PushService.instance.preferences,
+                builder: (context, prefs, _) => SwitchListTile(
+                  title: const Text('Gas and approval alerts'),
+                  subtitle: const Text('Funding needs and approvals ending soon.'),
+                  value: prefs.walletAlerts,
+                  onChanged: (value) async {
+                    try {
+                      await PushService.instance.setPreferences(walletAlerts: value);
+                    } catch (error) {
+                      if (context.mounted) {
+                        MintlyNotice.show(context, SnackBar(content: Text('$error')));
+                      }
+                    }
+                  },
+                ),
+              ),
             ]),
             if (api.isAdmin)
               _section('Administration', [

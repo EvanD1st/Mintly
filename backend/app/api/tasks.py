@@ -97,6 +97,9 @@ async def arm_mint_task(req: ArmTaskRequest, user: User = Depends(get_current_us
     db.add(auth)
     await db.flush()
     db.add(task)
+    await db.flush()
+    from app.services.daily_budget import reserve
+    await reserve(db,task,auth,user.id)
     if req.copy_event_id:
         from app.models import CopyEvent
         await db.flush()
@@ -109,6 +112,7 @@ async def arm_mint_task(req: ArmTaskRequest, user: User = Depends(get_current_us
 
 
 async def task_response(db, task):
+    from app.services.mint_progress import progress
     auth = await db.get(MintAuthorization, task.authorization_id)
     s = auth.snapshot
     recovery = await db.scalar(select(MintRecovery).where(MintRecovery.task_id == task.id))
@@ -122,7 +126,7 @@ async def task_response(db, task):
         time_wat_label=aware(task.scheduled_for_utc).astimezone(ZoneInfo('Africa/Lagos')).strftime('%d %b · %H:%M WAT'),
         transaction_hash=task.transaction_hash, explorer_url=task.explorer_url, failure_reason=task.failure_reason,
         submitted_at=task.submitted_at, confirmed_at=task.confirmed_at, actual_total_cost_wei=task.actual_total_cost_wei,
-        execution_mode=task.execution_mode, wallet_address=s['account'])
+        execution_mode=task.execution_mode, wallet_address=s['account'],progress=progress(task))
 
 
 @router.post("/{task_id}/disarm")

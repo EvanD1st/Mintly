@@ -8,7 +8,7 @@ from fastapi import HTTPException
 from sqlalchemy import select, func
 from web3.exceptions import Web3RPCError
 from app.config import settings
-from app.models import CopyWatch, CopyRule, CopyEvent, MintTask, MintAuthorization, Drop, MintStage, ActivityEvent
+from app.models import CopyWatch, CopyRule, CopyEvent, MintTask, MintAuthorization, Drop, MintStage, ActivityEvent, CopyCheck
 from app.services import automatic
 from app.services.mint_plans import aware
 from app.services.seadrop_mint import decode_mint, verify_presale, ALLOW_SELECTOR, SIGNED_SELECTOR
@@ -351,6 +351,9 @@ async def pause_rule(db, rule):
 
 async def arm_event(db, event, rule, web3):
     await automatic.require_running(db, rule.user_id)
+    check=await db.get(CopyCheck,rule.watch_id)
+    if check and check.active:
+        return
     o, r = event.observation, rule.snapshot
     if rule.status != 'active' or aware(rule.expires_at) <= datetime.now(timezone.utc):
         return
@@ -414,6 +417,8 @@ async def arm_event(db, event, rule, web3):
     await db.flush()
     rule.reserved_wei += s['total_cap_wei']
     grant.reserved_wei += s['total_cap_wei']
+    from app.services.daily_budget import reserve
+    await reserve(db,task,auth,rule.user_id)
     event.task_id, event.status, event.note = task.id, 'armed', None
     db.add(ActivityEvent(user_id=rule.user_id, event_type='copy_armed', label='Copied mint armed',
         detail=f'{rule.id}: {task.id}', icon_name='gem', is_demo=False))
@@ -499,6 +504,9 @@ async def scan_watch(db, watch, chain):
     await db.commit()
     if previous['status'] == 'unavailable':
         return
+    from app.services.copy_checks import process
+    await process(db,watch,chain)
+    await db.commit()
     await automatic.lock_execution(db)
     await db.refresh(watch)
     if watch.archived_at or chain not in watch.chains:

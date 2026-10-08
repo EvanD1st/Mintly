@@ -8,9 +8,10 @@ import 'package:flutter/material.dart';
 import 'api_service.dart';
 
 class PushPreferences {
-  const PushPreferences({this.dailyList = true, this.mintStatus = true});
+  const PushPreferences({this.dailyList = true, this.mintStatus = true, this.walletAlerts = true});
   final bool dailyList;
   final bool mintStatus;
+  final bool walletAlerts;
 }
 
 class PushService {
@@ -28,7 +29,7 @@ class PushService {
     final api = _api;
     if (api == null || !api.isLiveBackendConnected) return false;
     final owner = data['user_id'];
-    if (data['category'] == 'mint_status' && owner == null) return false;
+    if (['mint_status', 'wallet_alerts'].contains(data['category']) && owner == null) return false;
     if (owner != null && (api.userId.isEmpty || owner != api.userId)) {
       return false;
     }
@@ -75,6 +76,7 @@ class PushService {
               token,
               dailyList: preferences.value.dailyList,
               mintStatus: preferences.value.mintStatus,
+              walletAlerts: preferences.value.walletAlerts,
             );
           }
         } catch (error) {
@@ -115,6 +117,7 @@ class PushService {
       preferences.value = PushPreferences(
         dailyList: saved['daily_list'] == true,
         mintStatus: saved['mint_status'] == true,
+        walletAlerts: saved['wallet_alerts'] == null ? saved['mint_status'] == true : saved['wallet_alerts'] == true,
       );
     }
     return true;
@@ -135,13 +138,14 @@ class PushService {
     }
   }
 
-  Future<void> setPreferences({bool? dailyList, bool? mintStatus}) async {
+  Future<void> setPreferences({bool? dailyList, bool? mintStatus, bool? walletAlerts}) async {
     final generation = _generation;
     final api = _api;
     final revision = api?.sessionRevision;
     final next = PushPreferences(
       dailyList: dailyList ?? preferences.value.dailyList,
       mintStatus: mintStatus ?? preferences.value.mintStatus,
+      walletAlerts: walletAlerts ?? preferences.value.walletAlerts,
     );
     if (_api == null || _token == null) {
       throw Exception('Connect to Mintly and allow notifications first.');
@@ -150,6 +154,7 @@ class PushService {
       _token!,
       dailyList: next.dailyList,
       mintStatus: next.mintStatus,
+      walletAlerts: next.walletAlerts,
     );
     if (generation == _generation && revision == api.sessionRevision) {
       preferences.value = next;

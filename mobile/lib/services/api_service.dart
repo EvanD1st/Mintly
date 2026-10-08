@@ -188,6 +188,24 @@ class ApiService extends ChangeNotifier {
   Future<Map<String, dynamic>> fetchAutomationStatus() async =>
       (await _get('/automatic/status')) as Map<String, dynamic>;
 
+  Future<Map<String, dynamic>> fetchDailyLimit() async =>
+      (await _get('/automatic/daily-limit')) as Map<String, dynamic>;
+
+  Future<Map<String, dynamic>> setDailyLimit(String? eth) async =>
+      (await _post('/automatic/daily-limit', {'limit_eth': eth, 'consent': true},
+        timeout: const Duration(seconds: 50))) as Map<String, dynamic>;
+
+  Future<Map<String, dynamic>> startCopyChecks(String watch, Map<String, dynamic> limits) async =>
+      (await _post('/copy-mints/watches/${Uri.encodeComponent(watch)}/checks', limits,
+        timeout: const Duration(seconds: 40))) as Map<String, dynamic>;
+
+  Future<void> stopCopyChecks(String watch) async {
+    await _delete('/copy-mints/watches/${Uri.encodeComponent(watch)}/checks');
+  }
+
+  Future<Map<String, dynamic>> fetchCopyCheckResults() async =>
+      (await _get('/copy-mints/check-results')) as Map<String, dynamic>;
+
   Future<Map<String, dynamic>> setAutomationPaused(bool paused) async =>
       (await _post('/automatic/pause', {'paused': paused})) as Map<String, dynamic>;
 
@@ -526,12 +544,14 @@ class ApiService extends ChangeNotifier {
     String token, {
     required bool dailyList,
     required bool mintStatus,
+    bool? walletAlerts,
   }) async {
     await _post('/notifications/preferences', {
       'token': token,
       'daily_list': dailyList,
       'mint_status': mintStatus,
       'source_health': true,
+      if (walletAlerts != null) 'wallet_alerts': walletAlerts,
     });
   }
 

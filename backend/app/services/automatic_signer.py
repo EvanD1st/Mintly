@@ -14,7 +14,7 @@ from eth_utils import to_checksum_address
 
 from app.api.deps import get_db
 from app.config import settings
-from app.models import MintTask, MintAuthorization, AutomaticGrant, AutomaticNonce, Wallet, User, CopyRule, CopyWatch
+from app.models import MintTask, MintAuthorization, AutomaticGrant, AutomaticNonce, Wallet, User, CopyRule, CopyWatch, CopyCheck
 from app.services import automatic
 from app.services.custody import CustodyVault, private_read
 from app.services.custody_accounts import verify_account
@@ -43,6 +43,10 @@ async def reconcile_policy(journal, web3, grant):
                 tx = await web3.eth.get_transaction(tx_hash)
                 actual = await receipt_cost(web3, receipt, grant.chain_id, tx.value)
                 journal.execute('UPDATE signed SET actual=? WHERE task=?', (actual, entry['task']))
+                from app.services.daily_budget import day_key
+                included = await web3.eth.get_block(receipt.blockNumber)
+                journal.execute('UPDATE daily_signed SET day=? WHERE task=?',
+                    (day_key(datetime.fromtimestamp(included.timestamp,timezone.utc)),entry['task']))
                 break
     journal.commit()
     _reconciled[grant.context_hash] = time.monotonic()
@@ -192,6 +196,11 @@ async def prepare_task(db, task_id, vault=None):
             copy_mints.enabled()
             copy_key = copy_mints.stage_key(s)
             source = s['copy_source']
+            active_check=await db.scalar(select(CopyCheck).join(CopyWatch,CopyWatch.id==CopyCheck.watch_id).where(
+                CopyCheck.user_id==user.id,CopyCheck.active.is_(True),
+                func.lower(CopyWatch.address)==source['source_address'].lower()))
+            if active_check:
+                raise ValueError('Check-only mode cannot sign copied mints')
             if (task.copy_stage_key != copy_key or s['mint_kind'] != source.get('mint_kind', 'public')
                     or source['chain_id'] != s['chain_id'] or source['contract'].lower() != s['contract'].lower()
                     or any(source[k] != s[k] for k in ('start','end'))
@@ -201,6 +210,9 @@ async def prepare_task(db, task_id, vault=None):
             await copy_mints.verify_source(web3, source)
             if task.copy_rule_id:
                 rule = await db.get(CopyRule, task.copy_rule_id)
+                check=await db.get(CopyCheck,rule.watch_id) if rule else None
+                if check and check.active:
+                    raise ValueError('Check-only mode cannot sign copied mints')
                 pin = journal.execute('SELECT * FROM copy_rules WHERE id=?', (task.copy_rule_id,)).fetchone()
                 if not rule or rule.status != 'active' or not pin or pin['intent'] != rule.context_hash:
                     raise ValueError('Copy approval is paused or not independently registered')
@@ -248,6 +260,8 @@ async def prepare_task(db, task_id, vault=None):
                 raise ValueError('Attempt to change a previously signed task')
             raw, tx_hash, nonce = previous['raw'], previous['hash'], previous['nonce']
         else:
+            from app.services import daily_budget
+            await daily_budget.check_private(db,journal,vault,user,task,auth,web3,datetime.now(timezone.utc))
             # Independently reconcile the signer's lifetime budget; API DB edits cannot reset it.
             advance = _preflights.get(task.id)
             if (not advance or advance[1] != intent or time.monotonic() - advance[0] > 90
@@ -323,6 +337,8 @@ async def prepare_task(db, task_id, vault=None):
             raw, tx_hash = '0x' + bytes(signed.raw_transaction).hex(), '0x' + bytes(signed.hash).hex()
             journal.execute('INSERT INTO signed(task,policy,intent,address,chain,nonce,liability,raw,hash) VALUES(?,?,?,?,?,?,?,?,?)',
                 (task.id, grant.id, intent, address.lower(), s['chain_id'], nonce, s['total_cap_wei'], raw, tx_hash))
+            journal.execute('INSERT INTO daily_signed(task,user_id,day) VALUES(?,?,?)',
+                (task.id,user.id,daily_budget.day_key(datetime.now(timezone.utc))))
             if copy_key:
                 journal.execute('INSERT INTO copy_signed(task,rule,stage) VALUES(?,?,?)', (task.id, task.copy_rule_id, copy_key))
                 journal.execute('INSERT INTO copy_collections(task,address,chain,contract,kind) VALUES(?,?,?,?,?)',
@@ -353,6 +369,8 @@ async def prepare(task_id: str, db=Depends(get_db)):
             'SeaDrop proof or exact-stage validation failed.' if error.status in (400,409,422) else 'Presale provider temporarily unavailable.') from None
     except (ValueError, HTTPException) as error:
         await db.rollback()
+        if isinstance(error,HTTPException) and (error.status_code == 429 or error.status_code >= 500):
+            raise error
         actionable = {'Insufficient funds for mint value and gas', 'Estimated gas or total debit exceeds task authorization',
                       'Task or signer policy expired', 'Public stage changed on chain',
                       'Independent signer budget exhausted or reserved by uncertain submissions',
@@ -363,6 +381,56 @@ async def prepare(task_id: str, db=Depends(get_db)):
     except Exception:
         await db.rollback()
         raise HTTPException(503, 'Signer or RPC temporarily unavailable; no fresh-nonce retry is permitted.') from None
+
+
+@app.post('/account-limits/{user_id}/register',dependencies=[Depends(authenticate)])
+async def register_daily_limit(user_id: str, db=Depends(get_db)):
+    from app.services import daily_budget
+    await automatic.lock_execution(db)
+    user = await db.get(User,user_id,populate_existing=True)
+    if not user or not user.is_active or user.deleted_at or user.daily_limit_status not in ('active','registering'):
+        raise HTTPException(409,'Daily limit owner is unavailable.')
+    vault = CustodyVault()
+    journal = vault.journal()
+    try:
+        config = daily_budget.configuration(user)
+        pin = journal.execute('SELECT * FROM daily_limits WHERE user_id=?',(user.id,)).fetchone()
+        if pin and (pin['revision'] > config['revision'] or (
+                pin['revision'] == config['revision'] and pin['intent'] != automatic.digest(config))):
+            raise ValueError('Cannot rewrite a registered limit revision')
+        if config['limit_wei'] is not None and not 0 < config['limit_wei'] < 2**63:
+            raise ValueError('Invalid daily ceiling')
+        await daily_budget.backfill_private(journal,vault,user.id)
+        journal.execute('INSERT INTO daily_limits(user_id,revision,intent,configuration) VALUES(?,?,?,?) '
+            'ON CONFLICT(user_id) DO UPDATE SET revision=excluded.revision,intent=excluded.intent,configuration=excluded.configuration',
+            (user.id,config['revision'],automatic.digest(config),json.dumps(config,sort_keys=True)))
+        journal.commit()
+        await db.commit()
+        return {'registered':True,'revision':config['revision']}
+    except Exception:
+        await db.rollback()
+        raise HTTPException(503,'Daily limit confirmation unavailable. Future signing remains blocked.') from None
+    finally:
+        journal.close()
+
+
+@app.get('/account-limits/{user_id}/usage',dependencies=[Depends(authenticate)])
+async def daily_usage(user_id: str, db=Depends(get_db)):
+    from app.services import daily_budget
+    user = await db.get(User,user_id)
+    if not user or not user.is_active or user.deleted_at:
+        raise HTTPException(404,'Account not found.')
+    journal = CustodyVault().journal()
+    try:
+        daily_budget.private_configuration(journal,user)
+        await daily_budget.reconcile_private(journal,user.id)
+        used = daily_budget.private_usage(journal,user.id,daily_budget.day_key())
+        return {**{k:str(v) for k,v in used.items()},'signed_tasks':[
+            r['task'] for r in journal.execute('SELECT task FROM daily_signed WHERE user_id=?',(user.id,)).fetchall()]}
+    except Exception:
+        raise HTTPException(503,'Registered spending information unavailable.') from None
+    finally:
+        journal.close()
 
 
 @app.post('/copy-rules/{rule_id}/register', dependencies=[Depends(authenticate)])

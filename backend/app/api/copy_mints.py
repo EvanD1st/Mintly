@@ -10,10 +10,11 @@ from pydantic import BaseModel, Field, ConfigDict
 from sqlalchemy import select, func
 from app.api.deps import get_db, get_current_user
 from app.config import settings
-from app.models import CopyWatch, CopyRule, CopyEvent, MintTask, MintAuthorization, ActivityEvent
+from app.models import CopyWatch, CopyRule, CopyEvent, MintTask, MintAuthorization, ActivityEvent, CopyCheck, CopyCheckResult, Wallet
 from app.services import automatic, copy_mints as copying
 from app.services.mint_plans import aware
 from app.schemas.drop import DropSchema
+from app.services.mint_progress import progress as task_progress
 
 router = APIRouter(prefix='/copy-mints', tags=['copy-mints'])
 
@@ -57,6 +58,84 @@ class WalletRuleRequest(BaseModel):
 
 class PauseRequest(BaseModel):
     paused: bool
+
+
+class CheckRequest(BaseModel):
+    model_config=ConfigDict(extra='forbid')
+    request_id:uuid.UUID
+    wallet_id:str
+    quantity:int=Field(ge=1,le=100,strict=True)
+    quantity_mode:Literal['fixed','max_free']='fixed'
+    price_cap_eth:str=Field(pattern=r'^[0-9]+(\.[0-9]+)?$',max_length=40)
+    fee_cap_eth:str=Field(pattern=r'^[0-9]+(\.[0-9]+)?$',max_length=40)
+    budget_eth:str=Field(pattern=r'^[0-9]+(\.[0-9]+)?$',max_length=40)
+    free_only:bool=False
+    include_presales:bool=False
+    expires_at:datetime
+
+
+@router.post('/watches/{watch_id}/checks')
+async def start_checks(watch_id:str,req:CheckRequest,user=Depends(get_current_user),db=Depends(get_db)):
+    copying.enabled()
+    await automatic.lock_execution(db)
+    watch=await own_watch(db,user,watch_id)
+    wallet=await db.get(Wallet,req.wallet_id)
+    if not wallet or wallet.user_id!=user.id or wallet.archived_at:
+        raise HTTPException(404,'Receiving wallet not found.')
+    if req.quantity_mode=='max_free' and not req.free_only:
+        raise HTTPException(422,'Maximum quantity is available only for free mints.')
+    if req.expires_at.tzinfo is None or not datetime.now(timezone.utc)<aware(req.expires_at)<=datetime.now(timezone.utc)+timedelta(days=30):
+        raise HTTPException(422,'Choose a check period of up to 30 days.')
+    price,fee,budget=map(automatic.wei,(req.price_cap_eth,req.fee_cap_eth,req.budget_eth))
+    if fee<=0 or budget<fee or price*req.quantity+fee>=2**63:
+        raise HTTPException(422,'Enter finite positive gas and budget limits.')
+    version=automatic.digest([user.id,watch_id,req.model_dump(mode='json')])
+    old=await db.get(CopyCheck,watch_id)
+    if old and old.version==version and old.active:
+        return {'check_only':True,'version':version}
+    after={}
+    for chain in watch.chains:
+        web3=await automatic.provider_for(chain)
+        try:
+            after[str(chain)]=await web3.eth.block_number
+        finally:
+            await web3.provider.disconnect()
+    snapshot={'user_id':user.id,'wallet_id':wallet.id,'account':wallet.address,'quantity':req.quantity,
+        'quantity_mode':req.quantity_mode,'price_cap_wei':price,'fee_cap_wei':fee,'budget_wei':budget,
+        'free_only':req.free_only,'mint_kinds':['public','allowlist','signed'] if req.include_presales else ['public'],
+        'after_blocks':after}
+    for rule in (await db.scalars(select(CopyRule).where(CopyRule.watch_id==watch_id,CopyRule.user_id==user.id,
+            CopyRule.status.in_(['active','registering'])))).all():
+        await copying.pause_rule(db,rule)
+        await db.flush()
+    if old:
+        old.wallet_id,old.version,old.snapshot,old.active,old.expires_at=wallet.id,version,snapshot,True,req.expires_at
+    else:
+        db.add(CopyCheck(watch_id=watch_id,user_id=user.id,wallet_id=wallet.id,version=version,snapshot=snapshot,active=True,expires_at=req.expires_at))
+    record(db,user.id,'Check-only copying enabled','No new transactions will be signed. Previously signed transactions remain tracked.')
+    await db.commit()
+    return {'check_only':True,'version':version}
+
+
+@router.delete('/watches/{watch_id}/checks')
+async def stop_checks(watch_id:str,user=Depends(get_current_user),db=Depends(get_db)):
+    await automatic.lock_execution(db)
+    await own_watch(db,user,watch_id)
+    check=await db.get(CopyCheck,watch_id)
+    if check:
+        check.active=False
+    await db.commit()
+    return {'check_only':False,'copying_resumed':False}
+
+
+@router.get('/check-results')
+async def check_results(user=Depends(get_current_user),db=Depends(get_db),limit:int=Query(25,ge=1,le=100)):
+    rows=(await db.execute(select(CopyCheckResult,CopyEvent,CopyWatch).join(CopyEvent,CopyEvent.id==CopyCheckResult.event_id)
+        .join(CopyWatch,CopyWatch.id==CopyCheckResult.watch_id).where(CopyCheckResult.user_id==user.id,
+            CopyEvent.user_id==user.id,CopyWatch.user_id==user.id).order_by(CopyCheckResult.created_at.desc()).limit(limit))).all()
+    return {'results':[{'id':r.id,'watch_id':w.id,'watch_label':w.label,'wallet_id':r.wallet_id,'observation':e.observation,
+        'status':r.status,'note':r.note,'quantity':r.quantity,'estimated_fee_wei':str(r.estimated_fee_wei) if r.estimated_fee_wei is not None else None,
+        'checked_at':r.created_at,'transaction_sent':False} for r,e,w in rows]}
 
 
 async def own_watch(db, user, watch_id, *, archived=False):
@@ -104,6 +183,7 @@ async def register_rule(rule_id):
 
 @router.get('')
 async def overview(user=Depends(get_current_user), db=Depends(get_db)):
+    checks=(await db.scalars(select(CopyCheck).where(CopyCheck.user_id==user.id))).all()
     watches = (await db.execute(select(CopyWatch).where(CopyWatch.user_id == user.id,
         CopyWatch.archived_at.is_(None)).order_by(CopyWatch.created_at.desc()))).scalars().all()
     cutoff = int((datetime.now(timezone.utc) - timedelta(days=7)).timestamp())
@@ -116,6 +196,7 @@ async def overview(user=Depends(get_current_user), db=Depends(get_db)):
         'watches': [{'id': w.id, 'address': w.address, 'label': w.label, 'chains': w.chains,
             'preferences': w.preferences or {},
             'cursors': w.cursors, 'recent_mints': counts.get(w.id, 0),
+            'check_only':any(c.watch_id==w.id and c.active and aware(c.expires_at)>datetime.now(timezone.utc) for c in checks),
             'rules': [public_rule(r) for r in rules if r.watch_id == w.id]} for w in watches],
         'scope': 'Direct SeaDrop public mints; eligible allowlist/signed stages require explicit opt-in. No public copy after a whitelist copy.'}
 
@@ -158,6 +239,9 @@ async def follow(req: FollowRequest, user=Depends(get_current_user), db=Depends(
 async def remove(watch_id: str, user=Depends(get_current_user), db=Depends(get_db)):
     await automatic.lock_execution(db)
     watch = await own_watch(db, user, watch_id, archived=True)
+    check=await db.get(CopyCheck,watch_id)
+    if check:
+        check.active=False
     for rule in (await db.execute(select(CopyRule).where(CopyRule.watch_id == watch.id))).scalars().all():
         await copying.pause_rule(db, rule)
         rule.status = 'revoked'
@@ -246,6 +330,9 @@ async def save_rule(watch_id, req, user, db, *, group=None):
     await automatic.lock_execution(db)
     watch = await own_watch(db, user, watch_id)
     grant = await automatic.grant_for(db, str(req.grant_id), user.id)
+    check=await db.get(CopyCheck,watch_id)
+    if check:
+        check.active=False  # Only an explicit new copy consent can leave check-only mode.
     if grant.chain_id not in watch.chains or grant.account.lower() == watch.address.lower():
         raise HTTPException(409, 'Choose a policy on a monitored network for a different receiving wallet.')
     if 'public' not in grant.scope['mint_kinds']:
@@ -320,6 +407,9 @@ async def pause(req: PauseRequest, watch_id: str | None = None, user=Depends(get
         if req.paused:
             await copying.pause_rule(db, rule)
         elif rule.status == 'paused' and aware(rule.expires_at) > datetime.now(timezone.utc):
+            check=await db.get(CopyCheck,rule.watch_id)
+            if check and check.active:
+                raise HTTPException(409,'Check-only mode is on. Review a new copy approval to enable spending.')
             watch = await own_watch(db, user, rule.watch_id)
             await automatic.grant_for(db, rule.grant_id, user.id)
             if rule.chain_id not in watch.chains or rule.budget_wei <= rule.spent_wei + rule.reserved_wei:
@@ -361,6 +451,7 @@ async def activity(watch_id: str | None = None, offset: int = Query(0, ge=0), li
         if funding:
             note = copying.funding_note(o['chain_id'], int(o['price_wei']) > 0)
         entries.append({'id': event.id, 'watch_id': event.watch_id, 'wallet_label': watch.label,
+            'progress':task_progress(task) if task else None,
             'observed_at': event.created_at, 'observation': o,
             'status': 'skipped' if funding and unsigned else (task.status if task else event.status),
             'note': note, 'task_id': event.task_id,

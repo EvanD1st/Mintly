@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, false
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, BigInteger, Integer, false
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -19,6 +19,9 @@ class User(Base):
     role: Mapped[str] = mapped_column(String(12), default="member", nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     automation_paused: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false(), nullable=False)
+    daily_limit_wei: Mapped[Optional[int]] = mapped_column(BigInteger)
+    daily_limit_revision: Mapped[int] = mapped_column(Integer, default=0, server_default='0')
+    daily_limit_status: Mapped[str] = mapped_column(String(24), default='active', server_default='active')
     must_change_password: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 

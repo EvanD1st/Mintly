@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/drop_model.dart';
 import '../state/app_state.dart';
+import '../widgets/mint_progress.dart';
 import '../theme/colors.dart';
 import 'automatic_review_screen.dart';
 import 'history_screen.dart';
@@ -267,6 +268,7 @@ class _CopyDetailsState extends State<_CopyDetails> {
 
 class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
   Map<String, dynamic>? _data, _activity;
+  List<Map<String, dynamic>> _checks = [];
   final _search = TextEditingController();
   Timer? _timer;
   String? _error, _filter;
@@ -320,6 +322,14 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
       final activity = await api.fetchCopyActivity(watchId: _filter);
       if (mounted && generation == _generation) {
         setState(() => _activity = activity);
+      }
+      try {
+        final checks = await api.fetchCopyCheckResults();
+        if (mounted && generation == _generation) {
+          setState(() => _checks = (checks['results'] as List? ?? []).cast<Map<String, dynamic>>());
+        }
+      } catch (_) {
+        // Keep the existing activity when check-only results cannot refresh.
       }
     } catch (e) {
       if (mounted && generation == _generation) {
@@ -595,6 +605,9 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
                 tooltip: 'Wallet options',
                 icon: const CopyGlyph('more'),
                 onSelected: (value) {
+                  if (value == 'stop-checks') {
+                    _act(() => ref.read(apiServiceProvider).stopCopyChecks('${watch['id']}'));
+                  }
                   if (value == 'edit') _follow(watch);
                   if (value == 'remove') _remove(watch);
                   if (value == 'pause') {
@@ -606,6 +619,8 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
                   }
                 },
                 itemBuilder: (_) => [
+                  if (watch['check_only'] == true)
+                    const PopupMenuItem(value: 'stop-checks', child: Text('Stop check-only')) ,
                   const PopupMenuItem(
                     value: 'edit',
                     child: Text('Edit name / networks'),
@@ -632,7 +647,7 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
             children: [
               for (final chain in watch['chains'] as List)
                 _Chip(_network(chain)),
-              _Chip(active ? 'Copying on' : 'Watching only'),
+              _Chip(watch['check_only'] == true ? 'Check-only · no spending' : active ? 'Copying on' : 'Watching only'),
             ],
           ),
           const SizedBox(height: 18),
@@ -899,6 +914,10 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
             _date(event['observed_at']),
             style: Theme.of(context).textTheme.bodySmall,
           ),
+          if (event['progress'] is Map<String, dynamic>) ...[
+            MintProgress(progress: event['progress'] as Map<String, dynamic>),
+            const SizedBox(height: 8),
+          ],
           if (event['note'] != null)
             Padding(
               padding: const EdgeInsets.only(top: 8),
@@ -1024,6 +1043,17 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
               ),
             ),
           ),
+        if (_checks.any((c) => _filter == null || c['watch_id'] == _filter)) ...[
+          const Text('Check-only results', style: TextStyle(fontWeight: FontWeight.w700)),
+          const SizedBox(height: 10),
+          for (final check in _checks.where((c) => _filter == null || c['watch_id'] == _filter))
+            _Panel(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('${(check['observation'] as Map)['name']}', style: const TextStyle(fontWeight: FontWeight.w700)),
+              Text(check['status'] == 'would_copy' ? 'Would copy' : check['status'] == 'would_skip' ? 'Would skip' : 'Not verified'),
+              Text('${check['note']}'),
+              const Text('No transaction sent.'),
+            ])),
+        ],
         ...events.map(_event),
         if (_activity?['next_offset'] != null)
           OutlinedButton(
@@ -1188,40 +1218,37 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
   Map<String, dynamic>? _policy, _pending;
   DateTime? _expiry;
   bool _free = false, _consent = false, _busy = false, _customQuantity = false;
-  bool _includePresales = false;
+  bool _includePresales = false, _checkOnly = false;
   int _days = 7;
   String? _error;
 
   @override
   void initState() {
     super.initState();
+    _checkOnly = widget.watch['check_only'] == true;
     _policies = _loadPolicies();
   }
 
   Future<List<Map<String, dynamic>>> _loadPolicies() async {
     final all = await ref.read(apiServiceProvider).fetchAutomaticPolicies();
-    final labels = <String, String>{};
+    final wallets = <String, Map<String, dynamic>>{};
     try {
       for (final wallet in await ref.read(apiServiceProvider).fetchWallets()) {
-        labels['${wallet['id']}'] = '${wallet['label']}';
+        if ('${wallet['address']}'.toLowerCase() != '${widget.watch['address']}'.toLowerCase()) {
+          wallets['${wallet['id']}'] = {
+            'id': wallet['id'], 'account': wallet['address'], 'label': wallet['label'] ?? 'Wallet',
+            'policies': <Map<String, dynamic>>[],
+          };
+        }
       }
     } catch (_) {
-      // Wallet addresses still identify the owner-scoped approvals if labels cannot load.
+      // Owner-scoped policy metadata still identifies approved receiving wallets.
     }
-    final eligible = all
-        .where(
-          (p) =>
-              p['status'] == 'enabled' &&
-              '${p['account']}'.toLowerCase() !=
-                  '${widget.watch['address']}'.toLowerCase() &&
-              ((p['scope'] as Map)['mint_kinds'] as List).contains('public'),
-        )
-        .toList();
-    final wallets = <String, Map<String, dynamic>>{};
-    for (final policy in eligible) {
+    for (final policy in all) {
+      if (policy['status'] != 'enabled' || '${policy['account']}'.toLowerCase() == '${widget.watch['address']}'.toLowerCase()
+          || !((policy['scope'] as Map)['mint_kinds'] as List).contains('public')) continue;
       final wallet = wallets.putIfAbsent('${policy['wallet_id']}', () => {
-        'id': policy['wallet_id'], 'account': policy['account'],
-        'label': labels['${policy['wallet_id']}'] ?? 'Wallet',
+        'id': policy['wallet_id'], 'account': policy['account'], 'label': 'Wallet',
         'policies': <Map<String, dynamic>>[],
       });
       final policies = wallet['policies'] as List<Map<String, dynamic>>;
@@ -1245,6 +1272,10 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
 
   void _setExpiry() {
     final policies = _policy!['policies'] as List<Map<String, dynamic>>;
+    if (_checkOnly || policies.isEmpty) {
+      _expiry = DateTime.now().toUtc().add(Duration(days: _days));
+      return;
+    }
     final policyExpiry = policies.map((p) => DateTime.parse('${p['expires_at']}').toUtc())
         .reduce((a, b) => a.isBefore(b) ? a : b);
     final expiry = DateTime.now().toUtc().add(Duration(days: _days));
@@ -1277,7 +1308,8 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
     });
     _pending ??= {
       'request_id': _uuid(),
-      'grant_ids': [for (final p in _policy!['policies'] as List<Map<String, dynamic>>) p['id']],
+      if (_checkOnly) 'wallet_id': _policy!['id'],
+      if (!_checkOnly) 'grant_ids': [for (final p in _policy!['policies'] as List<Map<String, dynamic>>) p['id']],
       'quantity': _free ? 100 : int.parse(_quantity.text.trim()),
       'quantity_mode': _free ? 'max_free' : 'fixed',
       'price_cap_eth': _price.text.trim(),
@@ -1286,9 +1318,14 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
       'free_only': _free,
       'include_presales': _includePresales,
       'expires_at': _expiry!.toIso8601String(),
-      'consent': true,
+      if (!_checkOnly) 'consent': true,
     };
     try {
+      if (_checkOnly) {
+        await ref.read(apiServiceProvider).startCopyChecks('${widget.watch['id']}', _pending!);
+        if (mounted) Navigator.pop(context);
+        return;
+      }
       final result = await ref
           .read(apiServiceProvider)
           .approveWalletCopyRules('${widget.watch['id']}', _pending!);
@@ -1326,7 +1363,7 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
           if (!snapshot.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
-          final policies = snapshot.data!;
+          final policies = snapshot.data!.where((p) => _checkOnly || (p['policies'] as List).isNotEmpty).toList();
           return Form(
             key: _form,
             child: ListView(
@@ -1366,13 +1403,20 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
                   ),
                 ),
                 Text(
-                  'Choose your limits',
+                  _checkOnly ? 'Choose check-only limits' : 'Choose your limits',
                   style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                     fontWeight: FontWeight.w700,
                   ),
                 ),
                 const SizedBox(height: 7),
                 const SizedBox(height: 18),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero, title: const Text('Check-only mode'),
+                  subtitle: const Text('Preview new mints without signing or spending.'), value: _checkOnly,
+                  onChanged: locked ? null : (value) => setState(() {
+                    _checkOnly = value; _policy = null; _consent = false;
+                  }),
+                ),
                 if (policies.isEmpty)
                   const _Panel(
                     child: Text('Add a receiving wallet in Wallets first.'),
@@ -1413,10 +1457,10 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
                     Wrap(spacing: 6, runSpacing: 6, children: [
                       for (final chain in [1, 4663, 8453])
                         _Chip(((_policy!['policies'] as List).any((p) => p['chain_id'] == chain))
-                            ? _network(chain) : '${_network(chain)} · Not approved'),
+                            ? _network(chain) : '${_network(chain)} · ${_checkOnly ? 'Check only' : 'Not approved'}'),
                     ]),
                     const SizedBox(height: 8),
-                    const Text('Copies on the mint’s network. Add ETH there for gas.',
+                    Text(_checkOnly ? 'Results are checks only. No transaction will be sent.' : 'Copies on the mint’s network. Add ETH there for gas.',
                         style: TextStyle(fontSize: 12)),
                   ],
                   const SizedBox(height: 18),
@@ -1605,7 +1649,7 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
                   _Panel(
                     highlighted: true,
                     child: Text(
-                      'Network fees apply. Mints outside your limits are skipped. Already signed transactions may still finish after pausing or unlinking.'
+                      _checkOnly ? 'Check-only sends no new transactions. Already signed transactions from earlier copying may still finish.' : 'Network fees apply. Mints outside your limits are skipped. Already signed transactions may still finish after pausing or unlinking.'
                       '${(_policy?['policies'] as List? ?? []).any((p) => p['chain_id'] == 8453) ? ' Base fees can change until inclusion.' : ''}',
                     ),
                   ),
@@ -1616,7 +1660,9 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
                         ? null
                         : (v) => setState(() => _consent = v == true),
                     title: Text(
-                      _free
+                      _checkOnly
+                          ? 'Start check-only monitoring with these limits. No spending approval is given.'
+                          : _free
                           ? 'Approve maximum free minting (up to 100 NFTs) on the approved networks within these limits${_includePresales ? ', including eligible whitelist stages' : ''}.'
                           : 'Approve copying on the approved networks within these limits${_includePresales ? ', including eligible whitelist stages' : ''}.',
                     ),
@@ -1637,10 +1683,10 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
                         : _enable,
                     child: Text(
                       _busy
-                          ? 'Confirming copy permission…'
+                          ? (_checkOnly ? 'Starting checks…' : 'Confirming copy permission…')
                           : _pending != null
                           ? 'Retry saved approval'
-                          : 'Enable copy minting',
+                          : _checkOnly ? 'Start check-only' : 'Enable copy minting',
                     ),
                   ),
                 ],

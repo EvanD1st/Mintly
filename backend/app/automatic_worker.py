@@ -76,6 +76,7 @@ async def step(session_factory=AsyncSessionLocal, sign=request_signature, *, now
                 await db.commit()
                 return True
             task.next_attempt_at = now + timedelta(seconds=1)
+            task.preparation_started_at = task.preparation_started_at or now
             await db.commit()  # signer independently acquires the same lock
         else:
             recovery = await db.scalar(select(MintRecovery).where(MintRecovery.task_id == task.id))
@@ -100,6 +101,11 @@ async def step(session_factory=AsyncSessionLocal, sign=request_signature, *, now
                             recovery.status = ('confirmed' if receipt.status == 1 else 'reverted') if tx_hash == recovery.replacement_hash else 'superseded'
                         break
                 if receipt:
+                    included = await web3.eth.get_block(receipt.blockNumber)
+                    task.included_at = datetime.fromtimestamp(included.timestamp,timezone.utc)
+                    task.included_block_hash = '0x' + bytes(receipt.blockHash).hex()
+                    task.inclusion_observed_at = task.inclusion_observed_at or now
+                    task.inclusion_result = 'success' if receipt.status == 1 else 'reverted'
                     auth = await db.get(MintAuthorization, task.authorization_id)
                     actual = await receipt_cost(web3, receipt, chain_id, auth.snapshot['price_wei'] * auth.quantity)
                     task.actual_gas_used, task.actual_effective_gas_price = receipt.gasUsed, receipt.effectiveGasPrice
@@ -121,12 +127,22 @@ async def step(session_factory=AsyncSessionLocal, sign=request_signature, *, now
                         break
                 task.next_attempt_at = now + timedelta(seconds=2)
                 if seen_receipt:
+                    included = await web3.eth.get_block(seen_receipt.blockNumber)
+                    if included.hash != seen_receipt.blockHash:
+                        seen_receipt = None
+                    else:
+                        task.included_at = datetime.fromtimestamp(included.timestamp,timezone.utc)
+                        task.included_block_hash = '0x' + bytes(seen_receipt.blockHash).hex()
+                        task.inclusion_observed_at = now
+                        task.inclusion_result = 'success' if seen_receipt.status == 1 else 'reverted'
+                if seen_receipt:
                     task.status = 'submitted'
                     if active_recovery:
                         recovery.status = 'submitted'
                     task.failure_reason = 'Receipt observed; waiting for canonical confirmations.'
                     await db.commit()
                     return True
+                task.included_at,task.inclusion_observed_at,task.included_block_hash,task.inclusion_result = None,None,None,None
                 owner = await db.get(User, auth.snapshot['user_id'], populate_existing=True)
                 if not owner or owner.automation_paused or not owner.is_active or owner.deleted_at:
                     task.failure_reason = 'Automation paused. Saved transaction held; receipt tracking continues.'
@@ -222,6 +238,13 @@ async def step(session_factory=AsyncSessionLocal, sign=request_signature, *, now
                 await db.commit()
                 return True
             task.preparation_attempts += 1
+            from app.services.daily_budget import LIMIT_NOTE
+            if isinstance(error,httpx.HTTPStatusError) and error.response.status_code == 429 and error.response.json().get('detail') == LIMIT_NOTE:
+                task.preparation_attempts -= 1
+                task.failure_reason = LIMIT_NOTE
+                task.next_attempt_at = now + timedelta(seconds=60)
+                await db.commit()
+                return True
             permanent = isinstance(error, httpx.HTTPStatusError) and error.response.status_code == 409
             if permanent or task.preparation_attempts >= 6:
                 note = 'Bounded preparation retries exhausted. No transaction broadcast.'

@@ -47,7 +47,7 @@ class NotificationService:
         user_id: Optional[str] = None,
     ) -> bool:
         """Send to opted-in devices; return True only if FCM accepted a message."""
-        if category == 'mint_status' and not user_id:
+        if category in ('mint_status','wallet_alerts') and not user_id:
             logger.warning('Mint-status delivery requires an account owner.')
             return False
         payload = {
@@ -82,7 +82,8 @@ class NotificationService:
                 )
             )).scalars().all()
             for device in devices:
-                if not (device.preferences or {}).get(category, True):
+                prefs=device.preferences or {}
+                if not prefs.get(category,prefs.get('mint_status',True) if category=='wallet_alerts' else True):
                     continue
                 message = messaging.Message(
                     token=device.device_token,

@@ -208,6 +208,10 @@ async def make_snapshot(db, req, user_id, *, presale_mint=None):
         from app.services.copy_mints import enabled as copy_enabled
         copy_enabled()
         event = await db.get(CopyEvent, req.copy_event_id)
+        from app.models import CopyCheck
+        check=await db.get(CopyCheck,event.watch_id) if event else None
+        if check and check.active:
+            raise HTTPException(409,'Check-only mode is on. Turn it off before reviewing a copy mint.')
         if not event or event.user_id != user_id or event.task_id:
             raise HTTPException(409, 'Copy observation is unavailable or already has a task.')
         o = event.observation
@@ -286,6 +290,8 @@ async def prepare_mint(web3, snapshot):
 
 
 async def release_reservation(db, task, actual=0):
+    from app.services.daily_budget import settle
+    await settle(db,task,actual)
     auth = await db.get(MintAuthorization, task.authorization_id)
     grant = await db.get(AutomaticGrant, auth.grant_id)
     grant.reserved_wei -= auth.total_spend_cap_wei

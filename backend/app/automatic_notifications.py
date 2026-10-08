@@ -34,9 +34,16 @@ async def deliver_one():
 
 
 async def run():
+    from app.services import wallet_alerts
+    import time
+    last_alert_check=-1000
     while True:
         try:
             await deliver_one()
+            if time.monotonic()-last_alert_check>=60:
+                await wallet_alerts.poll()
+                last_alert_check=time.monotonic()
+            await wallet_alerts.deliver()
         except Exception:
             pass
         await asyncio.sleep(15)
