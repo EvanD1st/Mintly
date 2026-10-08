@@ -14,6 +14,7 @@ from app.schemas.task import DraftTaskRequest, ArmTaskRequest, TaskSchema, Queue
 from app.services.parser import format_wei_to_eth
 from app.services import automatic
 from app.services.opensea import OpenSeaUnavailable
+from app.services.mint_plans import aware
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -90,7 +91,7 @@ async def arm_mint_task(req: ArmTaskRequest, user: User = Depends(get_current_us
     task = MintTask(id=str(uuid.uuid4()), authorization_id=auth.id, wallet_id=req.wallet_id,
         drop_id=req.drop_id, stage_id=req.stage_id, plan_id=req.plan_id, copy_stage_key=copy_key, status='armed', is_demo=False,
         idempotency_key=key, request_hash=request_hash, execution_mode=automatic.MODE,
-        scheduled_for_utc=datetime.fromtimestamp(snapshot['start'], timezone.utc),
+        scheduled_for_utc=datetime.fromtimestamp(snapshot.get('execute_at', snapshot['start']), timezone.utc),
         expires_at_utc=datetime.fromtimestamp(snapshot['expiry'], timezone.utc))
     grant.reserved_wei += auth.total_spend_cap_wei
     db.add(auth)
@@ -118,7 +119,7 @@ async def task_response(db, task):
         quantity=auth.quantity, unit_price_eth=format_wei_to_eth(s['price_wei']),
         fee_cap_eth=format_wei_to_eth(auth.max_fee_wei), total_cap_eth=format_wei_to_eth(auth.total_spend_cap_wei),
         drop_name=s['drop_name'], chain=s['chain'], stage_name=s['stage_name'], icon_name='gem',
-        time_wat_label=datetime.fromtimestamp(s['start'], ZoneInfo('Africa/Lagos')).strftime('%H:%M WAT'),
+        time_wat_label=aware(task.scheduled_for_utc).astimezone(ZoneInfo('Africa/Lagos')).strftime('%d %b · %H:%M WAT'),
         transaction_hash=task.transaction_hash, explorer_url=task.explorer_url, failure_reason=task.failure_reason,
         submitted_at=task.submitted_at, confirmed_at=task.confirmed_at, actual_total_cost_wei=task.actual_total_cost_wei,
         execution_mode=task.execution_mode, wallet_address=s['account'])

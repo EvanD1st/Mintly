@@ -231,7 +231,17 @@ class ApiService extends ChangeNotifier {
 
   Future<Map<String, dynamic>> previewAutomaticTask(
     Map<String, dynamic> request,
-  ) async => (await _post('/tasks/draft', request)) as Map<String, dynamic>;
+  ) async {
+    final result = (await _post('/tasks/draft', request)) as Map<String,dynamic>;
+    if (request['scheduled_for_utc'] != null) {
+      final time = DateTime.parse('${request['scheduled_for_utc']}').toUtc();
+      final expected = (time.microsecondsSinceEpoch+999999) ~/ 1000000;
+      if ((result['snapshot'] as Map?)?['execute_at'] != expected) {
+        throw const ApiException('The server did not confirm your selected mint time. Refresh before setting automatic minting.');
+      }
+    }
+    return result;
+  }
 
   Future<MintTaskModel> armAutomaticTask(Map<String, dynamic> request) async {
     final task = MintTaskModel.fromJson(
@@ -241,6 +251,13 @@ class ApiService extends ChangeNotifier {
       throw const ApiException(
         'The server did not confirm a saved task. Retry with the same request.',
       );
+    }
+    if (request['scheduled_for_utc'] != null) {
+      final requested = DateTime.parse('${request['scheduled_for_utc']}').toUtc();
+      final expected = (requested.microsecondsSinceEpoch+999999) ~/ 1000000;
+      if (task.scheduledForUtc.toUtc().millisecondsSinceEpoch ~/ 1000 != expected) {
+        throw const ApiException('The saved mint time could not be confirmed. Refresh the queue before retrying.');
+      }
     }
     return task;
   }

@@ -62,6 +62,7 @@ void main() {
       });
       final pending = Completer<http.Response>();
       final armedRequests = <Map<String, dynamic>>[];
+      final scheduled = start.add(const Duration(minutes:10));
       final api = ApiService(
         client: MockClient((request) async {
           final path = request.url.path;
@@ -97,6 +98,12 @@ void main() {
             expect(body['wallet_id'], 'w');
             expect(body['plan_id'], 'plan-id');
             expect(body['quantity'], 2);
+            final received=DateTime.parse(body['scheduled_for_utc']).toUtc();
+            expect(received.year,scheduled.year);
+            expect(received.month,scheduled.month);
+            expect(received.day,scheduled.day);
+            expect(received.hour,scheduled.hour);
+            expect(received.minute,scheduled.minute);
             expect(body['fee_cap_eth'], '0.000500000000000000');
             expect(
               DateTime.parse(body['expires_at']),
@@ -108,6 +115,7 @@ void main() {
                 'review_hash':
                     'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
                 'snapshot': {
+                  'execute_at': (DateTime.parse(body['scheduled_for_utc']).microsecondsSinceEpoch+999999) ~/ 1000000,
                   'chain': 'Sepolia',
                   'chain_id': 11155111,
                   'contract': address,
@@ -148,6 +156,15 @@ void main() {
       await tester.pumpAndSettle();
       // A plan selects its exact wallet automatically; no dropdown interaction required.
       expect(find.text(address), findsOneWidget);
+      await tester.tap(find.text('Change time'));
+      await tester.pumpAndSettle();
+      final wat=scheduled.add(const Duration(hours:1));
+      String pad(int value)=>value.toString().padLeft(2,'0');
+      await tester.enterText(find.byKey(const Key('mint-date-input')),'${pad(wat.day)}/${pad(wat.month)}/${wat.year}');
+      await tester.enterText(find.byKey(const Key('mint-time-input')),'${pad(wat.hour)}:${pad(wat.minute)}');
+      await tester.tap(find.text('Save time'));
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds:300));
       await tester.tap(find.text('Review limits'));
       await tester.pumpAndSettle();
       expect(
@@ -160,7 +177,7 @@ void main() {
       );
       await tester.tap(find.byType(CheckboxListTile));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Arm automatic mint'));
+      await tester.tap(find.text('Set automatic'));
       await tester.pump();
       await tester.tap(find.text('Saving…'));
       await tester.pump();
@@ -172,7 +189,7 @@ void main() {
       expect(find.textContaining('Automatic mint armed.'), findsNothing);
       pending.complete(http.Response('{"detail":"Response lost"}', 503));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Arm automatic mint'));
+      await tester.tap(find.text('Set automatic'));
       await tester.pumpAndSettle();
       expect(armedRequests.length, 2);
       expect(armedRequests[1], armedRequests[0]);

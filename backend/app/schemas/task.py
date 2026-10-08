@@ -19,6 +19,7 @@ class DraftTaskRequest(BaseModel):
     price_cap_eth: str | None = Field(default=None, pattern=r'^[0-9]+(\.[0-9]+)?$')
     total_cap_eth: str | None = Field(default=None, pattern=r'^[0-9]+(\.[0-9]+)?$')
     expires_at: datetime | None = None
+    scheduled_for_utc: datetime | None = None
     conditional_eligibility: bool = False
     onchain_stage_index: int | None = Field(default=None, ge=1, strict=True)
 

@@ -166,6 +166,18 @@ async def make_snapshot(db, req, user_id, *, presale_mint=None):
     total = wei(req.total_cap_eth) if req.total_cap_eth is not None else price * req.quantity + fee
     if not max(datetime.now(timezone.utc), start) < expiry <= min(end, aware(grant.expires_at)):
         raise HTTPException(409, 'Submission expiry must fall within the stage and policy validity.')
+    scheduled = getattr(req, 'scheduled_for_utc', None)
+    execute_at = None
+    if scheduled is not None:
+        if scheduled.tzinfo is None:
+            raise HTTPException(422, 'Mint time must include its time zone; Mintly displays WAT.')
+        scheduled = aware(scheduled)
+        # Round up fractional seconds rather than execute before the requested instant.
+        from math import ceil
+        execute_at = ceil(scheduled.timestamp())
+        if (scheduled < start or scheduled <= datetime.now(timezone.utc)
+                or execute_at >= int(expiry.timestamp())):
+            raise HTTPException(409, 'Choose a future mint time within the stage and before the approval expires.')
     if price < stage_price or fee <= 0 or total < stage_price * req.quantity + fee:
         raise HTTPException(409, 'Mint price, gas budget or total ceiling is insufficient.')
     if total > int(grant.scope['max_task_wei']) or total > grant.budget_wei - grant.spent_wei - grant.reserved_wei:
@@ -181,6 +193,8 @@ async def make_snapshot(db, req, user_id, *, presale_mint=None):
         'conditional_eligibility': req.conditional_eligibility,
         'onchain_stage_index': req.onchain_stage_index,
     }
+    if execute_at is not None:
+        snapshot['execute_at'] = execute_at
     if getattr(req, 'copy_event_id', None):
         from app.models import CopyEvent
         from app.services.copy_mints import enabled as copy_enabled

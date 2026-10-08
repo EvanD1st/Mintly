@@ -75,6 +75,11 @@ async def prepare_task(db, task_id, vault=None):
                 (auth.max_price_per_token_wei, auth.max_fee_wei, auth.total_spend_cap_wei)
             or s['expiry'] != int(aware(task.expires_at_utc).timestamp())):
         raise ValueError('Authorization ownership, account or task scope mismatch')
+    if s.get('execute_at') is not None:
+        if int(aware(task.scheduled_for_utc).timestamp()) != s['execute_at']:
+            raise ValueError('Task mint time differs from the reviewed authorization')
+        if int(datetime.now(timezone.utc).timestamp()) < s['execute_at']:
+            return {'task_id':task.id, 'status':'armed', 'note':'Waiting for the selected mint time.'}
     vault = vault or CustodyVault()
     policy = vault.policy(grant)
     if (not automatic.allows_collection(policy, s['contract'])
@@ -218,6 +223,8 @@ async def prepare_task(db, task_id, vault=None):
             # Recheck wall time after network preparation, immediately before using the key.
             if int(datetime.now(timezone.utc).timestamp()) >= s['expiry']:
                 raise ValueError('Task expired during preparation')
+            if s.get('execute_at') is not None and int(datetime.now(timezone.utc).timestamp()) < s['execute_at']:
+                raise ValueError('Selected mint time has not arrived')
             await verify_account(web3, policy)
             account = vault.account(policy)
             signed = account.sign_transaction(tx)
