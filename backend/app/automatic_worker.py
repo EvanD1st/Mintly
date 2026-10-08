@@ -203,7 +203,16 @@ async def step(session_factory=AsyncSessionLocal, sign=request_signature, *, now
             finally:
                 await web3.provider.disconnect()
     try:
-        await sign(task_id)
+        result = await sign(task_id)
+        if isinstance(result, dict) and result.get('status') == 'armed':
+            # Count waiting from the response, not the start of a slow RPC.
+            # Otherwise one blocked nonce/chain can monopolize every iteration.
+            async with session_factory() as db:
+                await automatic.lock_execution(db)
+                task = await db.get(MintTask, task_id)
+                if task and task.status in ('armed','preparing') and not task.signed_tx_raw:
+                    task.next_attempt_at = max(now, datetime.now(timezone.utc)) + timedelta(seconds=1)
+                await db.commit()
     except Exception as error:
         async with session_factory() as db:
             await automatic.lock_execution(db)

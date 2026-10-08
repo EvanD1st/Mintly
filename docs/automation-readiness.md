@@ -22,7 +22,9 @@ repeating receipt RPC work for at most 30 seconds; unresolved liabilities stay
 fully charged. Gas-price and estimate calls run concurrently. Due unsigned and
 prepared tasks get priority over receipt polling, and signing clears the extra
 one-second worker delay. Chain inclusion and confirmations remain outside
-Mintly's control. No change to the source confirmation policy is included.
+Mintly's control. Waiting tasks defer from the end of their RPC response so a
+blocked wallet nonce cannot continually displace other due tasks.
+No change to the source confirmation policy is included.
 
 Copy observation
 ----------------

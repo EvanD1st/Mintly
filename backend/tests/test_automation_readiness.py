@@ -239,3 +239,23 @@ async def test_parallel_network_updates_preserve_each_others_cursor(copying, mon
         watch = await db.get(CopyWatch,c['watch_id'])
         assert watch.cursors['31337']['block'] == 42
         assert watch.cursors['1']['status'] == 'unavailable'
+
+
+async def test_slow_waiting_task_does_not_starve_other_due_tasks(lab, monkeypatch):
+    from app import automatic_worker
+    for index in range(2):
+        result = await lab.client.post('/api/tasks/arm',json={**lab.request,'idempotency_key':f'fairness-intent-{index}'})
+        assert result.status_code == 200
+    current = lab.start + 7
+    class Clock(datetime):
+        @classmethod
+        def now(cls,tz=None):
+            return datetime.fromtimestamp(current,timezone.utc)
+    monkeypatch.setattr(automatic_worker,'datetime',Clock)
+    calls = []
+    async def waiting(task_id):
+        calls.append(task_id)
+        return {'status':'armed','note':'Waiting for prior nonce'}
+    await automatic_worker.step(lab.factory,waiting,now=datetime.fromtimestamp(lab.start,timezone.utc))
+    await automatic_worker.step(lab.factory,waiting,now=datetime.fromtimestamp(current,timezone.utc))
+    assert len(calls) == 2 and calls[0] != calls[1]

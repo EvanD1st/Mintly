@@ -149,9 +149,10 @@ void main() {
         );
         await tester.pumpAndSettle();
         expect(find.text('Your activity'), findsOneWidget);
-        expect(find.text('Notifications'), findsOneWidget);
         expect(find.text('History'), findsOneWidget);
         expect(find.text('Copy mints'), findsOneWidget);
+        await tester.scrollUntilVisible(find.text('Notifications'), 200);
+        expect(find.text('Notifications'), findsOneWidget);
         await tester.scrollUntilVisible(find.text('About the app'), 250);
         expect(find.text('Live source'), admin ? findsOneWidget : findsNothing);
         expect(
