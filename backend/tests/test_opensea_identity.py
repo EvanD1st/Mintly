@@ -56,6 +56,8 @@ async def auth_lab(lab,monkeypatch):
                     'price':'5','max_total_mintable_by_wallet':'7'}],'accessToken':'must-not-leak'},{}
             raise AssertionError(path)
     monkeypatch.setattr(identity,'Transport',Transport)
+    async def api_key(self):return 'api-key-disposable-1234'
+    monkeypatch.setattr('app.services.opensea.OpenSeaClient._key',api_key)
     async def broker(wallet_id,operation,*,slug=None,key=None):
         path=f'/opensea/{wallet_id}/'+('register' if operation=='register' else 'stages/'+slug)
         response=await lab.signer_client.post(path,json={'api_key':key or 'api-key-disposable-1234'} if operation!='register' else None)
