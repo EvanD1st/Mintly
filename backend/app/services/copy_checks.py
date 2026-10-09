@@ -21,7 +21,8 @@ async def evaluate(web3,observation,snapshot,*,now=None):
         return {'status':'would_skip','note':'Whitelist copying is off in these settings.'}
     await copy_mints.verify_source(web3,o)
     if kind == 'public':
-        count=await copy_mints.maximum_free_quantity(web3,o,r) if r['quantity_mode']=='max_free' else r['quantity']
+        count=(await copy_mints.maximum_free_quantity(web3,o,r) if r['quantity_mode']=='max_free' else
+            await copy_mints.maximum_available_quantity(web3,o,r) if r['quantity_mode']=='max_available' else r['quantity'])
         price=o['price_wei']
         s={**o,'mint_kind':kind,'account':r['account'],'recipient':r['account'],'quantity':count,
             'price_cap_wei':r['price_cap_wei']}

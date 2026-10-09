@@ -1,4 +1,5 @@
 import '../widgets/mintly_notice.dart';
+import 'saved_plan_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../theme/colors.dart';
@@ -122,7 +123,11 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
                 final isOpenSeaLink = uri != null && uri.scheme == 'https' && uri.host == 'opensea.io' &&
                   uri.pathSegments.length >= 2 && uri.pathSegments.first == 'collection';
                 if (isOpenSeaLink) {
-                  await notifier.importOpenSeaMint(text, quantity: _quantity);
+                  final plan = await notifier.importOpenSeaMint(text, quantity: _quantity);
+                  if (context.mounted) {
+                    await Navigator.pushReplacement(context,MaterialPageRoute(builder:(_) => SavedPlanScreen(plan:plan)));
+                  }
+                  return;
                 } else if (api.isAdmin) {
                   await notifier.importList(text);
                 } else {
@@ -130,7 +135,7 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
                 }
                 if (context.mounted) {
                   MintlyNotice.show(context, SnackBar(
-                    content: Text(isOpenSeaLink ? 'Mint check saved. See Mint plans.' : 'List imported.'),
+                    content: const Text('List imported.'),
                   ));
                   Navigator.of(context).pop();
                 }

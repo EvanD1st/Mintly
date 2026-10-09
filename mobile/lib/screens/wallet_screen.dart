@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../state/app_state.dart';
 import 'import_screen.dart';
 import 'custody_import_screen.dart';
+import 'wallet_setup_screen.dart';
 
 class WalletScreen extends ConsumerStatefulWidget {
   const WalletScreen({super.key});
@@ -102,7 +103,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
     final imported = await Navigator.push<bool>(
       context,
       MaterialPageRoute(
-        builder: (_) => CustodyImportScreen(
+        builder: (_) => wallet == null ? const WalletSetupScreen() : CustodyImportScreen(
           walletId: wallet?['id'] as String?,
           address: wallet?['address'] as String?,
         ),
@@ -113,7 +114,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
       MintlyNotice.show(context,
         const SnackBar(
           content: Text(
-            'Wallet imported. Select an NFT to review an automatic mint.',
+              'Wallet saved. Signing access depends on the setup you chose.',
           ),
         ),
       );

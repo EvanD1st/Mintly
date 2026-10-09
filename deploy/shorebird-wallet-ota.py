@@ -24,6 +24,21 @@ NOTICES = "base/assets/flutter_assets/NOTICES.Z"
 FONT = "base/assets/flutter_assets/fonts/MaterialIcons-Regular.otf"
 
 
+@contextmanager
+def installed_native_sources(version):
+    """Old installers get Dart fallback only; never replace their native secure store."""
+    if version not in {'1.1.1+4','1.1.0+3','1.0.1+2','1.0.0+1'}:
+        yield
+        return
+    baseline='6c9c5a83cff9fb35ca0bbef8c4ad2c2fb43ae235'
+    subprocess.run(['git','fetch','--depth=1','origin',baseline],check=True)
+    try:
+        subprocess.run(['git','restore','--source='+baseline,'--worktree','--','android'],check=True)
+        yield
+    finally:
+        subprocess.run(['git','restore','--source=HEAD','--worktree','--','android'],check=True)
+
+
 def check_font(installed_bytes, built_bytes):
     installed = TTFont(io.BytesIO(installed_bytes))
     built = TTFont(io.BytesIO(built_bytes))
@@ -133,7 +148,7 @@ def patch_release(version, track, audit_only):
         command.append("--dart-define=MINTLY_LEGACY_ICONS=true")
     # Isolate Shorebird downloads so the archive audited is the exact release
     # selected by the CLI, rather than a guessed or stale release artifact.
-    with installed_plugin_graph(legacy_icons), tempfile.TemporaryDirectory(prefix="mintly-ota-") as scratch:
+    with installed_native_sources(version), installed_plugin_graph(legacy_icons), tempfile.TemporaryDirectory(prefix="mintly-ota-") as scratch:
         env = {**os.environ, "TMPDIR": scratch, "TMP": scratch, "TEMP": scratch}
         subprocess.run(command + ["--dry-run", "--allow-asset-diffs"], env=env, check=True)
         candidates = []

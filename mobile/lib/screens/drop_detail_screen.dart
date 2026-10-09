@@ -56,8 +56,9 @@ class DropDetailScreen extends ConsumerWidget {
           title: const Text('Linked wallet'), subtitle: Text(state.checkedWalletLabel),
         )),
         const SizedBox(height: 12),
-        const Text('A feed listing does not establish wallet-specific eligibility or authorize spending. '
-          'Never enter a recovery phrase. In MetaMask, check the destination, network, and total amount before approving any transaction.'),
+        const Text('A feed listing does not verify your wallet’s eligibility or authorize spending. '
+          'Adding an address gives no signing access. Automatic signing is a separate, explicit custody setup; use a dedicated minting wallet. '
+          'Never share a recovery phrase with a mint site or support contact.'),
         const SizedBox(height: 20),
         if (drop.stages.isNotEmpty) ...[
           FilledButton.icon(onPressed: () => Navigator.push(context, MaterialPageRoute(

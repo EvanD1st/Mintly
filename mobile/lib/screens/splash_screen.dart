@@ -3,15 +3,18 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import '../theme/colors.dart';
 import 'auth_gate.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../state/app_state.dart';
+import '../services/push_service.dart';
 
-class SplashScreen extends StatefulWidget {
+class SplashScreen extends ConsumerStatefulWidget {
   const SplashScreen({super.key});
 
   @override
-  State<SplashScreen> createState() => _SplashScreenState();
+  ConsumerState<SplashScreen> createState() => _SplashScreenState();
 }
 
-class _SplashScreenState extends State<SplashScreen>
+class _SplashScreenState extends ConsumerState<SplashScreen>
     with SingleTickerProviderStateMixin {
   late AnimationController _controller;
   late Animation<double> _loaderAnimation;
@@ -35,7 +38,14 @@ class _SplashScreenState extends State<SplashScreen>
     _controller.forward();
 
     // Smooth transition into the main shell once initialization finishes
-    _timer = Timer(const Duration(milliseconds: 1800), () {
+    _timer = Timer(const Duration(milliseconds: 1800), () async {
+      final api = ref.read(apiServiceProvider);
+      final restored = await api.restoreSession();
+      if (!mounted) return;
+      if (restored && !api.mustChangePassword) {
+        await ref.read(mintlyProvider.notifier).loadInitialData();
+        try { await PushService.instance.connect(api); } catch (_) { /* Sign-in stays valid if notifications are unavailable. */ }
+      }
       if (mounted) {
         Navigator.of(context).pushReplacement(
           PageRouteBuilder(

@@ -20,6 +20,7 @@ android {
     }
 
     defaultConfig {
+        testInstrumentationRunner = "com.mintly.mintly.test.SecureSessionInstrumentation"
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "com.mintly.mintly"
         // You can update the following values to match your application needs.

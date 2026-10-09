@@ -16,7 +16,8 @@ final walletSecretResolverProvider =
 class CustodyImportScreen extends ConsumerStatefulWidget {
   final String? walletId;
   final String? address;
-  const CustodyImportScreen({super.key, this.walletId, this.address});
+  final int? initialChain;
+  const CustodyImportScreen({super.key, this.walletId, this.address, this.initialChain});
   @override
   ConsumerState<CustodyImportScreen> createState() =>
       _CustodyImportScreenState();
@@ -36,6 +37,7 @@ class _CustodyImportScreenState extends ConsumerState<CustodyImportScreen>
   final _networkBudgets = <int, TextEditingController>{};
   final _networkMaximums = <int, TextEditingController>{};
   List<Map<String, dynamic>> _networks = [];
+  final Set<int> _selectedNetworks = {};
   bool _multiNetwork = false;
   late final Future<Map<String, dynamic>> _config;
   late final String _requestId;
@@ -77,6 +79,7 @@ class _CustodyImportScreenState extends ConsumerState<CustodyImportScreen>
       final chain = network['chain_id'] as int;
       _networkBudgets[chain] = TextEditingController();
       _networkMaximums[chain] = TextEditingController();
+      if (widget.initialChain == null || widget.initialChain == chain) _selectedNetworks.add(chain);
     }
     return config;
   }
@@ -84,7 +87,8 @@ class _CustodyImportScreenState extends ConsumerState<CustodyImportScreen>
   String _combinedBudget() {
     final scale = BigInt.from(10).pow(18);
     var total = BigInt.zero;
-    for (final controller in _networkBudgets.values) {
+    for (final entry in _networkBudgets.entries.where((entry) => _selectedNetworks.contains(entry.key))) {
+      final controller = entry.value;
       final value = controller.text.trim();
       if (!RegExp(r'^\d+(\.\d{1,18})?$').hasMatch(value)) continue;
       final parts = value.split('.');
@@ -209,6 +213,10 @@ class _CustodyImportScreenState extends ConsumerState<CustodyImportScreen>
   }
 
   Future<void> _submit() async {
+    if (_multiNetwork && _selectedNetworks.isEmpty) {
+      setState(() => _error = 'Select at least one network.');
+      return;
+    }
     if (!_consent || _walletKey == null || !_form.currentState!.validate()) {
       return;
     }
@@ -231,7 +239,7 @@ class _CustodyImportScreenState extends ConsumerState<CustodyImportScreen>
       'collection_scope': 'reviewed_mints',
       if (_multiNetwork)
         'networks': [
-          for (final network in _networks)
+          for (final network in _networks.where((n) => _selectedNetworks.contains(n['chain_id'])))
             {
               'chain_id': network['chain_id'],
               'budget_eth': _networkBudgets[network['chain_id']]!.text.trim(),
@@ -286,7 +294,7 @@ class _CustodyImportScreenState extends ConsumerState<CustodyImportScreen>
     canPop: !_busy,
     child: Scaffold(
       appBar: AppBar(
-        title: Text(_limits ? 'Minting limits' : 'Import MetaMask wallet'),
+        title: Text(_limits ? 'Approve signing limits' : 'Enable automatic signing'),
       ),
       body: FutureBuilder<Map<String, dynamic>>(
         future: _config,
@@ -335,7 +343,7 @@ class _CustodyImportScreenState extends ConsumerState<CustodyImportScreen>
                 const SizedBox(height: 24),
                 if (!_limits) ...[
                   const Text(
-                    'Your phrase stays on this device. Mintly stores the selected account’s encrypted key for automatic minting.',
+                    'The phrase is used on this device to derive your selected account. Its private key is sent over HTTPS to Mintly’s custody service and stored encrypted. Use a dedicated minting wallet; this is signing access, not an address connection.',
                   ),
                   const SizedBox(height: 16),
                   if (widget.walletId == null) ...[
@@ -399,26 +407,31 @@ class _CustodyImportScreenState extends ConsumerState<CustodyImportScreen>
                 ] else ...[
                   Text(
                     _multiNetwork
-                        ? 'Set a separate budget for each network. Each includes NFT prices and network fees.'
+                        ? 'Choose your networks. Set a budget only for selected networks, including mint prices and gas.'
                         : 'Approve access for this selected account.',
                   ),
                   const SizedBox(height: 20),
                   if (_multiNetwork) ...[
                     for (final network in _networks) ...[
-                      TextFormField(
-                        key: Key('custody-budget-${network['chain_id']}'),
-                        controller: _networkBudgets[network['chain_id']],
-                        enabled: !_busy && !_attempted,
-                        keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true,
-                        ),
-                        decoration: InputDecoration(
-                          labelText: '${network['name']} budget (ETH)',
-                        ),
-                        validator: _amount,
-                        onChanged: (_) => setState(() {}),
+                      CheckboxListTile(
+                        key: Key('custody-select-${network['chain_id']}'),
+                        contentPadding: EdgeInsets.zero, title: Text('${network['name']}'),
+                        value: _selectedNetworks.contains(network['chain_id']),
+                        onChanged: _busy || _attempted ? null : (selected) => setState(() {
+                          final id = network['chain_id'] as int;
+                          if (selected == true) { _selectedNetworks.add(id); } else { _selectedNetworks.remove(id); }
+                        }),
                       ),
-                      const SizedBox(height: 16),
+                      if (_selectedNetworks.contains(network['chain_id'])) ...[
+                        TextFormField(
+                          key: Key('custody-budget-${network['chain_id']}'),
+                          controller: _networkBudgets[network['chain_id']], enabled: !_busy && !_attempted,
+                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                          decoration: InputDecoration(labelText: '${network['name']} budget (ETH)'),
+                          validator: _amount, onChanged: (_) => setState(() {}),
+                        ),
+                        const SizedBox(height: 16),
+                      ],
                     ],
                     Text(
                       'Combined authorized budget: ${_combinedBudget()} ETH',
@@ -523,7 +536,7 @@ class _CustodyImportScreenState extends ConsumerState<CustodyImportScreen>
                       child: Column(
                         children: [
                           if (_multiNetwork)
-                            for (final network in _networks)
+                            for (final network in _networks.where((n) => _selectedNetworks.contains(n['chain_id'])))
                               TextFormField(
                                 controller:
                                     _networkMaximums[network['chain_id']],

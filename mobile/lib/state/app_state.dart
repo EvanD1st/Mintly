@@ -263,7 +263,7 @@ class MintlyNotifier extends StateNotifier<MintlyState> {
     return ok;
   }
 
-  Future<void> importOpenSeaMint(
+  Future<MintPlanModel> importOpenSeaMint(
     String url, {
     int quantity = 1,
     String? walletId,
@@ -275,6 +275,7 @@ class MintlyNotifier extends StateNotifier<MintlyState> {
     );
     _saveMintPlan(plan);
     await loadInitialData();
+    return plan;
   }
 
   void _saveMintPlan(MintPlanModel plan) {

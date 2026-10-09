@@ -200,7 +200,7 @@ async def store_import(req, user, db):
     matches = (await db.scalars(select(Wallet).join(User, User.id == Wallet.user_id).where(
         func.lower(Wallet.address) == account.address.lower(), User.is_active.is_(True), User.deleted_at.is_(None))
         .order_by(Wallet.created_at, Wallet.id))).all()
-    if any(w.user_id != user.id and w.archived_at is None for w in matches):
+    if any(w.user_id != user.id and w.archived_at is None and w.signing_capability != 'watch_only' for w in matches):
         raise HTTPException(409, 'This wallet is still linked to another Mintly account. Unlink it there first.')
     if any(w.user_id == user.id and w.archived_at is None and (wallet is None or w.id != wallet.id) for w in matches):
         raise HTTPException(409, 'This account is already linked. Choose another account or open its wallet details.')

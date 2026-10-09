@@ -230,7 +230,7 @@ async def prepare_task(db, task_id, vault=None):
                             raise ValueError('Shared copy approval is not fully pinned')
                 quantity_matches = (r['quantity'] == s['quantity'] if mode == 'fixed' else (
                     s.get('copy_quantity_mode') == mode and 1 <= s['quantity'] <= r['quantity']
-                    and s['price_wei'] == 0 and s['price_cap_wei'] == 0))
+                    and (mode=='max_available' or (s['price_wei'] == 0 and s['price_cap_wei'] == 0))))
                 if (automatic.digest(rule.snapshot) != pin['intent'] or s.get('copy_rule_id') != rule.id
                         or s['mint_kind'] not in r.get('mint_kinds', ['public'])
                         or r['grant_id'] != grant.id or r['user_id'] != grant.user_id
@@ -239,7 +239,8 @@ async def prepare_task(db, task_id, vault=None):
                         or source['block_number'] <= r['after_block']
                         or not quantity_matches or s['expiry'] > r['expiry']
                         or s['price_cap_wei'] != r['price_cap_wei'] or s['fee_cap_wei'] != r['fee_cap_wei']
-                        or s['total_cap_wei'] != r['total_cap_wei'] or (r['free_only'] and s['price_wei'] != 0)):
+                        or (s['total_cap_wei'] != r['total_cap_wei'] if mode!='max_available' else not 0<s['total_cap_wei']<=r['total_cap_wei'])
+                        or (r['free_only'] and s['price_wei'] != 0)):
                     raise ValueError('Copy mint differs from the independently approved limits')
             duplicate = journal.execute('SELECT task FROM copy_signed WHERE stage=?', (copy_key,)).fetchone()
             if duplicate and duplicate['task'] != task.id:
@@ -464,7 +465,8 @@ async def register_copy_rule(rule_id: str, db=Depends(get_db)):
             or r.get('mint_kinds', ['public']) not in (['public'], ['public','allowlist','signed'])
             or not 1 <= r['quantity'] <= 100
             or not 0 <= r['price_cap_wei'] or not 0 < r['fee_cap_wei']
-            or r['total_cap_wei'] != r['price_cap_wei'] * r['quantity'] + r['fee_cap_wei']
+            or r['total_cap_wei'] != (min(r['price_cap_wei']*r['quantity']+r['fee_cap_wei'],r['budget_wei'],policy['max_task_wei'])
+                if r.get('quantity_mode')=='max_available' else r['price_cap_wei']*r['quantity']+r['fee_cap_wei'])
             or not r['total_cap_wei'] <= min(r['budget_wei'], policy['max_task_wei'])
             or r['budget_wei'] != rule.budget_wei or r['budget_wei'] > policy['budget_wei']
             or (r['free_only'] and r['price_cap_wei'] != 0)):

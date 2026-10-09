@@ -92,7 +92,7 @@ void main() {
               200,
             );
           }
-          if (path.endsWith('/tasks/draft')) {
+          if (path.endsWith('/tasks/guided-preview')) {
             final body = jsonDecode(request.body) as Map<String, dynamic>;
             expect(body['stage_id'], 's');
             expect(body['wallet_id'], 'w');
@@ -104,13 +104,12 @@ void main() {
             expect(received.day,scheduled.day);
             expect(received.hour,scheduled.hour);
             expect(received.minute,scheduled.minute);
-            expect(body['fee_cap_eth'], '0.000500000000000000');
-            expect(
-              DateTime.parse(body['expires_at']),
-              start.add(const Duration(minutes: 30)),
-            );
+            expect(body['maximum_total_eth'], '0.001');
+            expect(body.containsKey('mint_kind'), isFalse);
+            expect(body.containsKey('gas_limit_eth'), isFalse);
             return http.Response(
               jsonEncode({
+                'request': {...body, 'guided': true, 'mint_kind': 'public', 'price_cap_eth': '0.00000000000000001', 'fee_cap_eth': '0.00099999999999998', 'total_cap_eth': '0.001'},
                 'eligibility': 'verified',
                 'review_hash':
                     'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
@@ -123,6 +122,7 @@ void main() {
                   'stage_name': stage.stageName,
                   'mint_kind': 'public',
                   'quantity': 2,
+                  'price_wei': 10,
                   'price_cap_wei': 10,
                   'fee_cap_wei': 1000000000000000,
                   'total_cap_wei': 1000000000000010,
@@ -165,6 +165,9 @@ void main() {
       await tester.tap(find.text('Save time'));
       await tester.pumpAndSettle();
       await tester.pump(const Duration(milliseconds:300));
+      await tester.enterText(find.byWidgetPredicate((w) => w is TextField && w.decoration?.labelText == 'Maximum total spend (ETH)'), '0.001');
+      expect(find.text('Merkle allowlist'), findsNothing);
+      expect(find.text('Signed presale'), findsNothing);
       await tester.tap(find.text('Review limits'));
       await tester.pumpAndSettle();
       expect(
@@ -172,7 +175,7 @@ void main() {
         findsOneWidget,
       );
       expect(
-        find.textContaining('Selected public stage · public'),
+        find.textContaining('Selected public stage · Public mint'),
         findsOneWidget,
       );
       await tester.tap(find.byType(CheckboxListTile));

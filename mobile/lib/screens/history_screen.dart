@@ -5,7 +5,8 @@ import '../state/app_state.dart';
 import '../theme/compatible_icons.dart';
 
 class HistoryScreen extends ConsumerStatefulWidget {
-  const HistoryScreen({super.key});
+  final bool embedded;
+  const HistoryScreen({super.key, this.embedded = false});
   @override
   ConsumerState<HistoryScreen> createState() => _HistoryState();
 }
@@ -181,7 +182,7 @@ class _HistoryState extends ConsumerState<HistoryScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('History')),
+    appBar: widget.embedded ? null : AppBar(title: const Text('Activity & history')),
     body: RefreshIndicator(
       onRefresh: () => _load(reset: true),
       child: ListView(

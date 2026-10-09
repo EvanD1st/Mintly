@@ -7,6 +7,8 @@ from app.api.deps import get_current_user, get_db
 from app.models import Wallet, WalletPairing
 from app.schemas.wallet import WalletSchema
 from app.services import automatic
+from eth_utils import is_address, to_checksum_address
+import uuid
 
 router = APIRouter(prefix='/wallets', tags=['wallets'])
 public_router = APIRouter(prefix='/wallet-link', tags=['wallet-link'])
@@ -16,6 +18,27 @@ class PairRequest(BaseModel):
     address: str = Field(min_length=42, max_length=42)
 class CompleteRequest(PairRequest):
     signature: str = Field(min_length=130, max_length=132)
+
+
+class WatchWalletRequest(BaseModel):
+    label:str=Field(min_length=1,max_length=80)
+    address:str=Field(min_length=42,max_length=42)
+
+
+@router.post('/watch')
+async def add_watch_wallet(req:WatchWalletRequest,user=Depends(get_current_user),db=Depends(get_db)):
+    if not is_address(req.address) or int(req.address,16)==0:
+        raise HTTPException(422,'Enter a valid wallet address.')
+    from sqlalchemy import func
+    await automatic.lock_execution(db)
+    wallet=await db.scalar(select(Wallet).where(Wallet.user_id==user.id,Wallet.archived_at.is_(None),
+        func.lower(Wallet.address)==req.address.lower()))
+    if wallet:
+        return WalletSchema.model_validate(wallet)
+    wallet=Wallet(id=str(uuid.uuid4()),user_id=user.id,address=to_checksum_address(req.address),label=req.label.strip(),
+        signing_capability='watch_only',is_demo=False)
+    db.add(wallet);await db.commit()
+    return WalletSchema.model_validate(wallet)
 
 @router.get('', response_model=list[WalletSchema])
 async def list_wallets(user=Depends(get_current_user), db=Depends(get_db)):

@@ -99,7 +99,7 @@ Future<ApiService> apiFor({
                   .toIso8601String(),
               'remaining_wei': '10000000000000000',
               'scope': {
-                'mint_kinds': ['public'],
+                'mint_kinds': ['public', 'allowlist', 'signed'],
                 'max_task_wei': '1000000000000000',
               },
             },
@@ -232,8 +232,10 @@ void main() {
         await tester.pumpAndSettle();
         await tester.tap(find.textContaining('Everyday wallet ·').last);
         await tester.pumpAndSettle();
-        await tester.ensureVisible(find.text('2 NFTs'));
-        await tester.tap(find.text('2 NFTs'));
+        await tester.ensureVisible(find.text('Custom'));
+        await tester.tap(find.text('Custom'));
+        await tester.pumpAndSettle();
+        await tester.enterText(find.byWidgetPredicate((w) => w is TextField && w.decoration?.labelText == 'Custom NFT quantity'), '2');
         Future<void> reveal(Finder finder, {bool up = false}) async {
           await tester.scrollUntilVisible(
             finder,
@@ -266,9 +268,9 @@ void main() {
         await tester.pumpAndSettle();
         await tester.tap(find.text('Free mints only'));
         await tester.pumpAndSettle();
-        await reveal(find.text('Maximum available for my wallet'), up: true);
-        expect(find.text('Maximum available for my wallet'), findsOneWidget);
-        expect(find.text('Quantity per mint'), findsNothing);
+        await reveal(find.text('Free mints use the maximum available for your wallet, within your limits (up to 100 NFTs).'), up: true);
+        expect(find.text('Free mints use the maximum available for your wallet, within your limits (up to 100 NFTs).'), findsOneWidget);
+        expect(find.text('Custom'), findsNothing);
         await reveal(find.byType(CheckboxListTile));
         expect(
           tester.widget<CheckboxListTile>(find.byType(CheckboxListTile)).value,
@@ -276,11 +278,11 @@ void main() {
         );
         if (!keepFree) {
           await reveal(find.text('Free mints only'), up: true);
-          await tester.tap(find.text('Free mints only'));
+          await tester.tap(find.text('Public / whitelist mints'));
           await tester.pumpAndSettle();
-          expect(find.text('Maximum available for my wallet'), findsNothing);
-          await reveal(find.text('Quantity per mint'), up: true);
-          expect(find.text('Quantity per mint'), findsOneWidget);
+          expect(find.text('Free mints use the maximum available for your wallet, within your limits (up to 100 NFTs).'), findsNothing);
+          await reveal(find.text('Custom'), up: true);
+          expect(find.text('Custom'), findsOneWidget);
           await enter('Max mint price per NFT', '0.00001');
         }
         await reveal(find.byType(CheckboxListTile));
@@ -405,7 +407,7 @@ void main() {
         await tester.pumpAndSettle();
         await tester.tap(find.text('Free mints only'));
         await tester.pumpAndSettle();
-        await tester.scrollUntilVisible(find.text('Maximum available for my wallet'), -200, scrollable: settingsScroll);
+        await tester.scrollUntilVisible(find.text('Free mints use the maximum available for your wallet, within your limits (up to 100 NFTs).'), -200, scrollable: settingsScroll);
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);
         await capture('max-free-settings');

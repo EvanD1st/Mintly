@@ -1,5 +1,6 @@
 import '../widgets/mintly_notice.dart';
 import '../widgets/mint_progress.dart';
+import '../widgets/automation_control.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -63,6 +64,7 @@ class QueueScreen extends ConsumerWidget {
             style: TextStyle(fontSize: 13, color: muted),
           ),
           const SizedBox(height: 20),
+          const AutomationControl(),
           TextButton(
             onPressed: () => Navigator.push(
               context,

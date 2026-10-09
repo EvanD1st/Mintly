@@ -4,7 +4,8 @@ import '../theme/colors.dart';
 import '../state/app_state.dart';
 import 'discover_screen.dart';
 import 'queue_screen.dart';
-import 'activity_screen.dart';
+import 'history_screen.dart';
+import 'copy_mints_screen.dart';
 import 'wallet_screen.dart';
 
 class MainShell extends ConsumerStatefulWidget {
@@ -29,7 +30,8 @@ class _MainShellState extends ConsumerState<MainShell> with WidgetsBindingObserv
   final List<Widget> _screens = const [
     DiscoverScreen(),
     QueueScreen(),
-    ActivityScreen(),
+    CopyMintsScreen(),
+    HistoryScreen(embedded: true),
     WalletScreen(),
   ];
 
@@ -62,8 +64,9 @@ class _MainShellState extends ConsumerState<MainShell> with WidgetsBindingObserv
               children: [
                 _buildNavItem(0, Icons.today, 'Today', green, muted),
                 _buildNavItem(1, Icons.timer_outlined, 'Mint plans', green, muted),
-                _buildNavItem(2, Icons.history, 'Activity', green, muted),
-                _buildNavItem(3, Icons.account_balance_wallet_outlined, 'Wallet', green, muted),
+                _buildCopyNavItem(green, muted),
+                _buildNavItem(3, Icons.history, 'Activity', green, muted),
+                _buildNavItem(4, Icons.account_balance_wallet_outlined, 'Wallet', green, muted),
               ],
             ),
           ),
@@ -81,7 +84,7 @@ class _MainShellState extends ConsumerState<MainShell> with WidgetsBindingObserv
       },
       borderRadius: BorderRadius.circular(12),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -104,4 +107,12 @@ class _MainShellState extends ConsumerState<MainShell> with WidgetsBindingObserv
       ),
     );
   }
+
+  Widget _buildCopyNavItem(Color green, Color muted) => InkWell(
+    onTap: () => setState(() => _currentIndex = 2),
+    child: Padding(padding:const EdgeInsets.symmetric(horizontal:8,vertical:6),child:Column(mainAxisSize:MainAxisSize.min,children:[
+      const CopyGlyph('copy',size:22),
+      const SizedBox(height:3),Text('Copy',style:TextStyle(fontSize:10,color:_currentIndex == 2 ? green : muted)),
+    ])),
+  );
 }

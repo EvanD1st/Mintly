@@ -85,9 +85,11 @@ async def copy_gas_quote(web3, tx, chain, paid=False):
 
 def quantity_mode(rule):
     mode = rule.get('quantity_mode', 'fixed')
-    if mode not in ('fixed', 'max_free') or (mode == 'max_free' and (
+    if mode not in ('fixed', 'max_free','max_available') or (mode == 'max_free' and (
             not rule['free_only'] or rule['price_cap_wei'] != 0 or rule['quantity'] != 100)):
         raise ValueError('Unsupported or unapproved copy quantity mode')
+    if mode=='max_available' and (rule['quantity']!=100 or rule['free_only']):
+        raise ValueError('Maximum available requires independently approved quantity limits')
     return mode
 
 
@@ -128,6 +130,24 @@ async def maximum_free_quantity(web3, observation, rule):
     if await fits(ceiling):
         return ceiling
     raise HTTPException(409, 'Maximum free mint exceeds your network-fee limit or available gas balance.')
+
+
+async def maximum_available_quantity(web3,observation,rule):
+    """Receiving-wallet maximum constrained by supply and the full approved fee ceiling."""
+    current=await public_stage(web3,observation['contract'])
+    if any(current[k]!=observation[k] for k in ('price_wei','start','end')):
+        raise ValueError('Public stage changed')
+    price=current['price_wei']
+    if price>rule['price_cap_wei']:
+        raise HTTPException(409,'Mint price is outside your copy limits.')
+    minted,supply,maximum=decode(['uint256']*3,await web3.eth.call({'to':observation['contract'],
+        'data':keccak(text='getMintStats(address)')[:4]+encode(['address'],[rule['account']])}))
+    remaining=rule['total_cap_wei']-rule['fee_cap_wei']
+    affordable=remaining//price if price else 100
+    count=min(rule['quantity'],current['limit']-minted,maximum-supply,affordable)
+    if count<1:
+        raise HTTPException(409,'No mint quantity fits your wallet allowance, supply and spending limits.')
+    return count
 
 
 def enabled():
@@ -246,12 +266,14 @@ async def prepare_presale_copy(web3, observation, rule):
             await verify_presale(web3, mint)
             return mint
         mode = quantity_mode(rule)
-        mint = await build(1 if mode == 'max_free' else rule['quantity'])
-        if mode == 'max_free' and mint['params'][0] == 0:
+        mint = await build(1 if mode in ('max_free','max_available') else rule['quantity'])
+        if mode in ('max_free','max_available') and (mint['params'][0] == 0 or mode=='max_available'):
             minted, supply, maximum = decode(['uint256'] * 3, await web3.eth.call({
                 'to': observation['contract'], 'data': keccak(text='getMintStats(address)')[:4]
                     + encode(['address'], [rule['account']])}))
             count = min(rule['quantity'], mint['params'][1] - minted, mint['params'][5] - supply, maximum - supply)
+            if mint['params'][0]:
+                count=min(count,(rule['total_cap_wei']-rule['fee_cap_wei'])//mint['params'][0])
             if count < 1:
                 raise HTTPException(409, 'No whitelist mint allowance or supply remains.')
             if count != 1:
@@ -363,9 +385,23 @@ async def arm_event(db, event, rule, web3):
     if kind not in r.get('mint_kinds', ['public']):
         event.status, event.note = 'skipped', 'Whitelist copying is off. Enable it in Copy settings.'
         return
+    if quantity_mode(r)=='max_available':
+        from app.models import AutomaticGrant,User
+        from app.services.daily_budget import usage
+        grant=await db.get(AutomaticGrant,rule.grant_id)
+        user=await db.get(User,rule.user_id)
+        ceiling=min(r['total_cap_wei'],rule.budget_wei-rule.spent_wei-rule.reserved_wei,
+            await group_remaining(db,rule),grant.budget_wei-grant.spent_wei-grant.reserved_wei)
+        if user.daily_limit_wei is not None:
+            daily=await usage(db,user.id)
+            ceiling=min(ceiling,user.daily_limit_wei-sum(daily.values()))
+        r={**r,'total_cap_wei':ceiling}
     await no_mixed_stage_copy(db, {'chain_id':o['chain_id'], 'account':r['account'], 'contract':o['contract'], 'mint_kind':kind})
     if kind == 'public' and (o['price_wei'] > r['price_cap_wei'] or (r['free_only'] and o['price_wei'] != 0)):
         event.status, event.note = 'skipped', 'Mint price is outside your copy limits.'
+        return
+    if r['total_cap_wei']<=r['fee_cap_wei'] and r['price_cap_wei']>0:
+        event.status,event.note='skipped','No paid mint quantity fits the remaining spending budget.'
         return
     if rule.budget_wei - rule.spent_wei - rule.reserved_wei < r['total_cap_wei']:
         event.status, event.note = 'skipped', 'Copy budget is exhausted or reserved by pending mints.'
@@ -378,7 +414,8 @@ async def arm_event(db, event, rule, web3):
     presale, slug = None, None
     if kind == 'public':
         drop, stage = await drop_for(db, web3, o)
-        quantity = await maximum_free_quantity(web3, o, r) if mode == 'max_free' else r['quantity']
+        quantity = (await maximum_free_quantity(web3,o,r) if mode=='max_free' else
+            await maximum_available_quantity(web3,o,r) if mode=='max_available' else r['quantity'])
         price = o['price_wei']
     else:
         presale, slug = await prepare_presale_copy(web3, o, r)
@@ -396,7 +433,7 @@ async def arm_event(db, event, rule, web3):
         conditional_eligibility=False, onchain_stage_index=o.get('onchain_stage_index'))
     grant, s = await automatic.make_snapshot(db, req, rule.user_id, presale_mint=presale)
     s['copy_rule_id'], s['copy_source'] = rule.id, o
-    if mode == 'max_free':
+    if mode in ('max_free','max_available'):
         s['copy_quantity_mode'] = mode
     key = await no_duplicate(db, s)
     s['execution'] = presale['execution'] if presale else await automatic.prepare_mint(web3, s)

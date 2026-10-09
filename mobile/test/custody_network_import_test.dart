@@ -144,7 +144,7 @@ void main() {
         find.byKey(const Key('custody-password')),
         'password',
       );
-      await tester.tap(find.byType(CheckboxListTile));
+      await tester.tap(find.widgetWithText(CheckboxListTile, 'I authorize Mintly to store this account’s encrypted key and mint within my limits.'));
       await tester.pump();
       await tester.tap(find.text('Import wallet'));
       await tester.pumpAndSettle();

@@ -15,7 +15,7 @@ import 'wallet_secret_test.dart' show phrase;
 
 void main() {
   testWidgets(
-    'wallet rows unlink only after Okay and phrase-only setup replaces web',
+    'wallet rows unlink only after Okay and address and explicit signing choices replace web',
     (tester) async {
       var removed = 0;
       final wallets = [
@@ -86,6 +86,10 @@ void main() {
       expect(find.text('First wallet'), findsNothing);
       expect(find.text('Second wallet'), findsOneWidget);
       await tester.tap(find.text('Add wallet'));
+      await tester.pumpAndSettle();
+      expect(find.text('Add address only'), findsOneWidget);
+      expect(find.text('Secret recovery phrase'), findsNothing);
+      await tester.tap(find.text('Continue to automatic signing'));
       await tester.pumpAndSettle();
       expect(find.text('Secret recovery phrase'), findsOneWidget);
       expect(find.text('Private key'), findsNothing);
