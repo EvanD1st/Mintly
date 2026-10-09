@@ -17,7 +17,7 @@ from web3.exceptions import TransactionNotFound
 from app.config import settings
 from app.database import AsyncSessionLocal
 from app.models import MintTask, MintAuthorization, ActivityEvent, MintRecovery, Wallet, User
-from app.services import automatic
+from app.services import automatic, mint_diagnostics
 from app.services.automatic_signer import final_receipt
 from app.services.automatic_fees import receipt_cost, additional_fee
 from app.services.mint_plans import aware
@@ -218,6 +218,8 @@ async def step(session_factory=AsyncSessionLocal, sign=request_signature, *, now
                 return True
             finally:
                 await web3.provider.disconnect()
+    attempt_started=datetime.now(timezone.utc)
+    attempt_number=task.preparation_attempts+1
     try:
         result = await sign(task_id)
         if isinstance(result, dict) and result.get('status') == 'armed':
@@ -229,12 +231,24 @@ async def step(session_factory=AsyncSessionLocal, sign=request_signature, *, now
                 if task and task.status in ('armed','preparing') and not task.signed_tx_raw:
                     task.next_attempt_at = max(now, datetime.now(timezone.utc)) + timedelta(seconds=1)
                 await db.commit()
+        try:
+            async with session_factory() as db:
+                observed=await db.get(MintTask,task_id)
+                if observed:
+                    await mint_diagnostics.save(db,observed,'preparation',attempt_number,attempt_started,
+                        'waiting' if isinstance(result,dict) and result.get('status')=='armed' else 'request_completed',
+                        events=result.get('_diagnostics',[]) if isinstance(result,dict) else [],status=200)
+                    await db.commit()
+        except Exception:
+            log.warning('Mint diagnostics persistence unavailable task_id=%s',task_id)
     except Exception as error:
         async with session_factory() as db:
             await automatic.lock_execution(db)
             task = await db.get(MintTask, task_id)
             # The signer may have committed before its HTTP response was lost.
             if task.status not in ('armed', 'preparing') or task.signed_tx_raw:
+                await mint_diagnostics.save(db,task,'preparation',attempt_number,attempt_started,'response_lost_after_commit',
+                    events=mint_diagnostics.from_error(error),status=error.response.status_code if isinstance(error,httpx.HTTPStatusError) else None,error=error)
                 await db.commit()
                 return True
             task.preparation_attempts += 1
@@ -243,6 +257,8 @@ async def step(session_factory=AsyncSessionLocal, sign=request_signature, *, now
                 task.preparation_attempts -= 1
                 task.failure_reason = LIMIT_NOTE
                 task.next_attempt_at = now + timedelta(seconds=60)
+                await mint_diagnostics.save(db,task,'preparation',attempt_number,attempt_started,'daily_budget_wait',
+                    events=mint_diagnostics.from_error(error),status=429,error=error)
                 await db.commit()
                 return True
             permanent = isinstance(error, httpx.HTTPStatusError) and error.response.status_code == 409
@@ -254,6 +270,9 @@ async def step(session_factory=AsyncSessionLocal, sign=request_signature, *, now
             else:
                 task.next_attempt_at = now + timedelta(seconds=max(15, min(2 ** task.preparation_attempts, 60)))
                 task.failure_reason = 'Preparation temporarily unavailable; bounded retry scheduled.'
+            await mint_diagnostics.save(db,task,'preparation',attempt_number,attempt_started,
+                'retry_scheduled' if task.status in ('armed','preparing') else task.status,
+                events=mint_diagnostics.from_error(error),status=error.response.status_code if isinstance(error,httpx.HTTPStatusError) else None,error=error)
             await db.commit()
     return True
 
@@ -287,9 +306,11 @@ async def preflight_step(session_factory=AsyncSessionLocal, check=None, *, now=N
                 or_(MintTask.preflight_checked_at.is_(None), MintTask.preflight_checked_at < now - timedelta(seconds=30)))
             .order_by(MintTask.scheduled_for_utc).limit(8))).all()
     for task_id in ids:
+        started=datetime.now(timezone.utc);events=[];http_status=None;failure=None
         try:
             if check:
-                await check(task_id)
+                result=await check(task_id)
+                events=result.get('_diagnostics',[]) if isinstance(result,dict) else []
             else:
                 token = Path(settings.AUTOMATIC_SIGNER_TOKEN_FILE).read_text().strip()
                 if len(token) < 32:
@@ -298,7 +319,12 @@ async def preflight_step(session_factory=AsyncSessionLocal, check=None, *, now=N
                     response = await client.post(settings.AUTOMATIC_SIGNER_URL + f'/tasks/{task_id}/preflight',
                         headers={'Authorization':'Bearer ' + token})
                     response.raise_for_status()
-        except Exception:
+                    http_status=response.status_code
+                    events=response.json().get('_diagnostics',[])
+        except Exception as error:
+            failure=error
+            events=mint_diagnostics.from_error(error)
+            http_status=error.response.status_code if isinstance(error,httpx.HTTPStatusError) else None
             log.info('Advance check deferred; mint-time validation retained.')
             async with session_factory() as db:
                 await automatic.lock_execution(db)
@@ -307,6 +333,15 @@ async def preflight_step(session_factory=AsyncSessionLocal, check=None, *, now=N
                     task.preflight_checked_at = datetime.now(timezone.utc)
                     task.preflight_note = 'Advance checks unavailable. Mint-time checks are still required.'
                 await db.commit()
+        try:
+            async with session_factory() as db:
+                observed=await db.get(MintTask,task_id)
+                if observed:
+                    await mint_diagnostics.save(db,observed,'preflight',None,started,'check_unavailable' if failure else 'check_completed',
+                        events=events,status=http_status,error=failure)
+                    await db.commit()
+        except Exception:
+            log.warning('Mint diagnostics persistence unavailable task_id=%s',task_id)
     return len(ids)
 
 

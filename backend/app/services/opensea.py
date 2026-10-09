@@ -106,27 +106,38 @@ def stage_schedule(drop: dict) -> list[dict]:
 class OpenSeaClient:
     async def _request(self, method: str, path: str, *, payload: dict | None = None,
                        key: str | None = None) -> tuple[int, dict]:
+        import time
+        from app.services.mint_diagnostics import record_http
+        started=time.monotonic();status=None;retry_after=None;failure=None
         headers = {"Accept": "application/json"}
-        if key:
-            headers["X-API-KEY"] = key
+        if key:headers["X-API-KEY"] = key
         timeout = aiohttp.ClientTimeout(total=12)
         try:
             async with aiohttp.ClientSession(timeout=timeout, trust_env=False) as session:
                 async with session.request(method, f"{API_ROOT}{path}", headers=headers,
                                            json=payload, allow_redirects=False) as response:
+                    status=response.status;retry_after=response.headers.get('Retry-After')
                     if 300 <= response.status < 400:
+                        failure='redirect'
                         raise OpenSeaUnavailable("OpenSea unexpectedly redirected a request.")
                     if response.content_length and response.content_length > 256 * 1024:
+                        failure='response_too_large'
                         raise OpenSeaUnavailable("OpenSea response was too large.")
                     body = await response.content.read(256 * 1024 + 1)
                     if len(body) > 256 * 1024:
+                        failure='response_too_large'
                         raise OpenSeaUnavailable("OpenSea response was too large.")
                     data = json.loads(body) if body else {}
                     if not isinstance(data, dict):
+                        failure='invalid_response'
                         raise OpenSeaUnavailable("OpenSea returned an unexpected response.")
                     return response.status, data
         except (aiohttp.ClientError, TimeoutError, ValueError) as error:
+            failure='timeout' if isinstance(error,TimeoutError) else 'invalid_response' if isinstance(error,ValueError) else 'network_error'
             raise OpenSeaUnavailable("OpenSea is temporarily unavailable.") from error
+        finally:
+            try:record_http(method,path,status,retry_after,started,failure)
+            except Exception:pass  # Diagnostic logging never changes the HTTP outcome.
 
     async def _key(self) -> str:
         path = Path(settings.OPENSEA_KEY_FILE)

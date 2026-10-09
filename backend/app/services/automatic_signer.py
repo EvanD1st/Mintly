@@ -114,12 +114,15 @@ async def preflight_task(db, task_id, vault=None):
 
 @app.post('/tasks/{task_id}/preflight')
 async def advance_checks(task_id: str, authorization: str | None = Header(default=None), db=Depends(get_db)):
-    authenticate(authorization)
-    try:
-        return await preflight_task(db, task_id)
-    except Exception:
-        await db.rollback()
-        raise HTTPException(503, 'Advance checks unavailable; no transaction was signed.') from None
+    from app.services import mint_diagnostics
+    with mint_diagnostics.capture(task_id,'preflight') as events:
+        authenticate(authorization)
+        try:
+            result=await preflight_task(db, task_id)
+            return {**result,'_diagnostics':events}
+        except Exception:
+            await db.rollback()
+            raise HTTPException(503, 'Advance checks unavailable; no transaction was signed.',headers=mint_diagnostics.headers(events)) from None
 
 
 def authenticate(authorization: str | None = Header(default=None)):
@@ -362,26 +365,30 @@ async def prepare_task(db, task_id, vault=None):
 
 @app.post('/tasks/{task_id}/prepare', dependencies=[Depends(authenticate)])
 async def prepare(task_id: str, db=Depends(get_db)):
-    try:
-        return await prepare_task(db, task_id)
-    except OpenSeaUnavailable as error:
-        await db.rollback()
-        raise HTTPException(409 if error.status in (400,409,422) else 503,
-            'SeaDrop proof or exact-stage validation failed.' if error.status in (400,409,422) else 'Presale provider temporarily unavailable.') from None
-    except (ValueError, HTTPException) as error:
-        await db.rollback()
-        if isinstance(error,HTTPException) and (error.status_code == 429 or error.status_code >= 500):
-            raise error
-        actionable = {'Insufficient funds for mint value and gas', 'Estimated gas or total debit exceeds task authorization',
-                      'Task or signer policy expired', 'Public stage changed on chain',
-                      'Independent signer budget exhausted or reserved by uncertain submissions',
-                      'Independent shared copy budget exhausted or reserved',
-                      'Whitelist copy already signed. Public mint skipped.', 'Public copy already signed. Whitelist mint skipped.'}
-        detail = str(error) if str(error) in actionable else 'Independent signer rejected task policy, identity, budget or chain readiness.'
-        raise HTTPException(409, detail) from None
-    except Exception:
-        await db.rollback()
-        raise HTTPException(503, 'Signer or RPC temporarily unavailable; no fresh-nonce retry is permitted.') from None
+    from app.services import mint_diagnostics
+    with mint_diagnostics.capture(task_id,'preparation') as events:
+        try:
+            result=await prepare_task(db, task_id)
+            return {**result,'_diagnostics':events}
+        except OpenSeaUnavailable as error:
+            await db.rollback()
+            raise HTTPException(409 if error.status in (400,409,422) else 503,
+                'SeaDrop proof or exact-stage validation failed.' if error.status in (400,409,422) else 'Presale provider temporarily unavailable.',headers=mint_diagnostics.headers(events)) from None
+        except (ValueError, HTTPException) as error:
+            await db.rollback()
+            if isinstance(error,HTTPException) and (error.status_code == 429 or error.status_code >= 500):
+                error.headers={**(error.headers or {}),**mint_diagnostics.headers(events)}
+                raise error
+            actionable = {'Insufficient funds for mint value and gas', 'Estimated gas or total debit exceeds task authorization',
+                          'Task or signer policy expired', 'Public stage changed on chain',
+                          'Independent signer budget exhausted or reserved by uncertain submissions',
+                          'Independent shared copy budget exhausted or reserved',
+                          'Whitelist copy already signed. Public mint skipped.', 'Public copy already signed. Whitelist mint skipped.'}
+            detail = str(error) if str(error) in actionable else 'Independent signer rejected task policy, identity, budget or chain readiness.'
+            raise HTTPException(409, detail,headers=mint_diagnostics.headers(events)) from None
+        except Exception:
+            await db.rollback()
+            raise HTTPException(503, 'Signer or RPC temporarily unavailable; no fresh-nonce retry is permitted.',headers=mint_diagnostics.headers(events)) from None
 
 
 @app.post('/account-limits/{user_id}/register',dependencies=[Depends(authenticate)])
