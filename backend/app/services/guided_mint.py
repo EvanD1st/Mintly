@@ -76,6 +76,8 @@ async def prepare(db,body,user_id):
             candidate=SimpleNamespace(wallet_id=wallet.id,drop_id=drop.id,stage_id=stage.id,quantity=body.quantity,mint_kind=source_kind or 'auto')
             presale=await own_presale(db,candidate,user_id,web3)
             kind,price,index=presale['kind'],presale['params'][0],presale['params'][4]
+        if price is None:
+            raise HTTPException(409,'This phase’s mint price is not verified.')
         total=automatic.wei(body.maximum_total_eth)
         mint_value=price*body.quantity
         fee=automatic.wei(body.gas_limit_eth) if body.gas_limit_eth is not None else total-mint_value

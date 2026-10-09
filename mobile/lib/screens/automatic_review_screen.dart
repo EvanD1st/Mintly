@@ -85,10 +85,19 @@ class _AutomaticReviewState extends ConsumerState<AutomaticReviewScreen> {
     _review = null;
     _request = null;
     _consent = false;
-    _mintAt = WatTime.defaultForStage(_stage.startTimeUtc,DateTime.now().toUtc());
-    if (widget.plan != null && widget.initialMintKind != 'public' && _stage.startTimeUtc.isAfter(DateTime.now().toUtc())) {
-      _mintAt = _stage.startTimeUtc.toUtc().add(const Duration(seconds:15));
+    _mintAt = _defaultMintTime();
+  }
+
+  bool get _scheduledWhitelist => widget.plan != null &&
+      (widget.initialMintKind != 'public' ||
+          (widget.plan!.stageType != null && widget.plan!.stageType != 'public_sale'));
+
+  DateTime _defaultMintTime() {
+    final now = DateTime.now().toUtc();
+    if (_scheduledWhitelist && _stage.startTimeUtc.toUtc().isAfter(now)) {
+      return _stage.startTimeUtc.toUtc().add(const Duration(seconds:15));
     }
+    return WatTime.defaultForStage(_stage.startTimeUtc,now);
   }
 
   Future<void> _pickMintTime() async {
@@ -316,12 +325,9 @@ class _AutomaticReviewState extends ConsumerState<AutomaticReviewScreen> {
             )),
             if (_stage.startTimeUtc.toUtc().isAfter(DateTime.now().toUtc()))
               TextButton(onPressed:_busy ? null : () => setState(() {
-                _mintAt = WatTime.defaultForStage(_stage.startTimeUtc,DateTime.now().toUtc());
-    if (widget.plan != null && widget.initialMintKind != 'public' && _stage.startTimeUtc.isAfter(DateTime.now().toUtc())) {
-      _mintAt = _stage.startTimeUtc.toUtc().add(const Duration(seconds:15));
-    }
+                _mintAt = _defaultMintTime();
                 _consent = false;
-              }),child:const Text('Use stage opening time')),
+              }),child:Text(_scheduledWhitelist ? 'Use opening time + 15 seconds' : 'Use stage opening time')),
             const Text('Time is always WAT. Confirmation can be later than the selected time.',style:TextStyle(fontSize:12)),
             TextField(controller:_quantity,enabled:!_busy,keyboardType:TextInputType.number,
               decoration:const InputDecoration(labelText:'NFT quantity')),

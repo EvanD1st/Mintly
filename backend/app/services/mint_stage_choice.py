@@ -50,9 +50,12 @@ async def stages(db,plan,user_id):
         from eth_utils import keccak,to_checksum_address
         web3=await automatic.provider_for(plan.chain_id)
         try:
-            minted,supply,maximum=decode(['uint256']*3,await web3.eth.call({'to':to_checksum_address(plan.contract_address),
-                'data':keccak(text='getMintStats(address)')[:4]+encode(['address'],[to_checksum_address(wallet.address)])}))
-            # Public metadata is optional; it must not invalidate the wallet mint count.
+            try:
+                minted,supply,maximum=decode(['uint256']*3,await web3.eth.call({'to':to_checksum_address(plan.contract_address),
+                    'data':keccak(text='getMintStats(address)')[:4]+encode(['address'],[to_checksum_address(wallet.address)])}))
+            except Exception:
+                if note is None:note='Eligibility found; remaining allowance could not be checked on-chain. It will be checked before signing.'
+            # Public metadata is independent; neither read discards the other's result.
             try:
                 from app.services.copy_mints import public_stage
                 public=await public_stage(web3,to_checksum_address(plan.contract_address))

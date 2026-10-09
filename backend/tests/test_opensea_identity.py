@@ -304,7 +304,7 @@ async def test_verified_upcoming_phase_can_be_approved_without_proof_and_execute
     journal=CustodyVault().journal();assert journal.execute('SELECT COUNT(*) FROM signed').fetchone()[0]==1;journal.close()
 
 
-@pytest.mark.parametrize('fault',['eligibility','quantity','allowance','phase_changed','no_selection','public_fallback','late_instructions'])
+@pytest.mark.parametrize('fault',['eligibility','quantity','allowance','phase_changed','no_selection','public_fallback','late_instructions','runtime_changed'])
 async def test_delayed_phase_checks_fail_closed_and_never_sign_early(auth_lab,monkeypatch,fault):
     lab,_,_=auth_lab
     plan,body=await selected_upcoming(lab,monkeypatch)
@@ -337,7 +337,15 @@ async def test_delayed_phase_checks_fail_closed_and_never_sign_early(auth_lab,mo
                 @classmethod
                 def now(cls,tz=None):return datetime.fromtimestamp(lab.start+15,tz)
             monkeypatch.setattr('app.services.automatic_signer.datetime',Clock)
-            if fault=='public_fallback':
+            if fault=='runtime_changed':
+                lab.kind='signed'
+                original=OpenSeaClient.get_drop
+                async def changed(self,slug):
+                    detail=await original(self,slug)
+                    detail['stages'][0]['end_time']=datetime.fromtimestamp(lab.end+1,timezone.utc).isoformat()
+                    return detail
+                monkeypatch.setattr(OpenSeaClient,'get_drop',changed)
+            elif fault=='public_fallback':
                 from eth_abi import encode
                 from app.services.signer.base import MINT_PUBLIC_SELECTOR,SEADROP_V1_ADDRESS
                 async def fallback(*args):return 200,{'to':SEADROP_V1_ADDRESS,'chain':'local-test','value':'10',
@@ -350,7 +358,7 @@ async def test_delayed_phase_checks_fail_closed_and_never_sign_early(auth_lab,mo
             async with lab.factory() as db:
                 task=await db.get(MintTask,tid)
                 assert task.signed_tx_raw is None
-                assert task.status=='failed' if fault=='public_fallback' else task.status=='armed'
+                assert task.status=='failed' if fault in ('public_fallback','runtime_changed') else task.status=='armed'
                 if fault=='late_instructions':assert task.preparation_attempts==1 and task.next_attempt_at is not None
     journal=CustodyVault().journal();assert journal.execute('SELECT COUNT(*) FROM signed').fetchone()[0]==0;journal.close()
 
