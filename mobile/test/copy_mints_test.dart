@@ -395,26 +395,18 @@ void main() {
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);
         await capture('settings');
-        await tester.scrollUntilVisible(
-          find.text('Free mints only'),
-          200,
-          scrollable: find
-              .byWidgetPredicate(
-                (w) => w is Scrollable && w.axisDirection == AxisDirection.down,
-              )
-              .last,
-        );
+        final settingsScroll = find.descendant(
+          of: find.byKey(const ValueKey('copy-settings-scroll')),
+          matching: find.byType(Scrollable),
+        ).first;
+        await tester.scrollUntilVisible(find.text('Free mints only'), 200, scrollable: settingsScroll);
+        await tester.pumpAndSettle();
+        await tester.ensureVisible(find.text('Free mints only'));
+        await tester.pumpAndSettle();
         await tester.tap(find.text('Free mints only'));
         await tester.pumpAndSettle();
-        await tester.scrollUntilVisible(
-          find.text('Maximum available for my wallet'),
-          -200,
-          scrollable: find
-              .byWidgetPredicate(
-                (w) => w is Scrollable && w.axisDirection == AxisDirection.down,
-              )
-              .last,
-        );
+        await tester.scrollUntilVisible(find.text('Maximum available for my wallet'), -200, scrollable: settingsScroll);
+        await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);
         await capture('max-free-settings');
         await tester.pumpWidget(const SizedBox());

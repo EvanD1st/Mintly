@@ -1369,6 +1369,7 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
           return Form(
             key: _form,
             child: ListView(
+              key: const ValueKey('copy-settings-scroll'),
               padding: const EdgeInsets.all(20),
               children: [
                 _Panel(
