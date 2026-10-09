@@ -255,9 +255,13 @@ void main() {
     Map<String,dynamic>? received;
     var arms = 0;
     final api = ApiService(client:MockClient((request) async {
-      if (request.url.path.endsWith('/auth/login')) return http.Response('{"token":"test","user":{"username":"member"}}',200);
-      if (request.url.path.endsWith('/automatic/policies')) return http.Response(jsonEncode([
-        {'id':'g','wallet_id':'w','status':'enabled','chain_id':4663,'expires_at':end.toIso8601String()}]),200);
+      if (request.url.path.endsWith('/auth/login')) {
+        return http.Response('{"token":"test","user":{"username":"member"}}',200);
+      }
+      if (request.url.path.endsWith('/automatic/policies')) {
+        return http.Response(jsonEncode([
+          {'id':'g','wallet_id':'w','status':'enabled','chain_id':4663,'expires_at':end.toIso8601String()}]),200);
+      }
       if (request.url.path.endsWith('/guided-preview')) {
         received = jsonDecode(request.body) as Map<String,dynamic>;
         return http.Response(jsonEncode({'snapshot':{'chain':'Robinhood','chain_id':4663,'contract':address,'account':address,
@@ -266,11 +270,13 @@ void main() {
           'execute_at':start.add(const Duration(seconds:15)).millisecondsSinceEpoch~/1000,'onchain_stage_index':null},
           'request':received,'review_hash':'hash','eligibility':'verified_waiting_for_instructions','execution_ready':false}),200);
       }
-      if (request.url.path.endsWith('/tasks/arm')) arms++;
+      if (request.url.path.endsWith('/tasks/arm')) {
+        arms++;
+      }
       return http.Response('{}',200);
     }));
     await api.login('member','password');
-    await tester.pumpWidget(ProviderScope(overrides:[apiServiceProvider.overrideWithValue(api)],
+    await tester.pumpWidget(ProviderScope(overrides:[apiServiceProvider.overrideWith((ref) => api)],
       child:MaterialApp(home:AutomaticReviewScreen(drop:drop,plan:plan))));
     await tester.pumpAndSettle();
     expect(find.text('Use opening time + 15 seconds'),findsOneWidget);
