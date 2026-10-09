@@ -22,6 +22,7 @@ async def prepared_events(presale):
     async with lab.factory() as db:
         event=await db.scalar(select(CopyEvent).where(CopyEvent.watch_id==c['watch_id']))
         event.next_attempt_at=None;event.note=None;event.last_error_category=None
+        event.preparation_attempts=0;event.upstream_events=None
         observation=dict(event.observation);eid=event.id
         await db.commit()
     return c,state,original,eid,observation
