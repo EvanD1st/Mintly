@@ -21,7 +21,7 @@ Map<String, dynamic> importResponse(Map<String, dynamic> sent) => {
   'wallet_id': 'new-wallet',
   'account': sent['account_address'],
   'grants': [
-    for (final network in networks)
+    for (final network in (sent['networks'] as List))
       {
         'id': 'grant-${network['chain_id']}',
         'wallet_id': 'new-wallet',
@@ -62,8 +62,9 @@ void main() {
       expect(payload.containsKey('password'), isFalse);
     },
   );
+  for (final onlyRobinhood in [false, true]) {
   testWidgets(
-    'one phrase import explicitly approves all network budgets and shows their sum',
+    'selected networks approve only their budgets: Robinhood only $onlyRobinhood',
     (tester) async {
       tester.view.physicalSize = const Size(1000, 2400);
       tester.view.devicePixelRatio = 1;
@@ -123,6 +124,12 @@ void main() {
       );
       await tester.tap(find.text('Continue'));
       await tester.pumpAndSettle();
+      if (onlyRobinhood) {
+        await tester.tap(find.byKey(const Key('custody-select-1')));
+        await tester.tap(find.byKey(const Key('custody-select-8453')));
+        await tester.pumpAndSettle();
+        expect(find.byKey(const Key('custody-budget-1')), findsNothing);
+      } else {
       await tester.enterText(
         find.byKey(const Key('custody-budget-1')),
         '0.001',
@@ -131,20 +138,21 @@ void main() {
         find.byKey(const Key('custody-budget-8453')),
         '0.002',
       );
+      }
       await tester.enterText(
         find.byKey(const Key('custody-budget-4663')),
         '0.003',
       );
       await tester.pump();
       expect(
-        find.text('Combined authorized budget: 0.006 ETH'),
+        find.text('Combined authorized budget: ${onlyRobinhood ? '0.003' : '0.006'} ETH'),
         findsOneWidget,
       );
       await tester.enterText(
         find.byKey(const Key('custody-password')),
         'password',
       );
-      await tester.tap(find.byType(CheckboxListTile));
+      await tester.tap(find.widgetWithText(CheckboxListTile, 'I authorize Mintly to store this account’s encrypted key and mint within my limits.'));
       await tester.pump();
       await tester.tap(find.text('Import wallet'));
       await tester.pumpAndSettle();
@@ -156,14 +164,15 @@ void main() {
       expect(sent?.containsKey('chain_id'), isFalse);
       expect(sent?.containsKey('budget_eth'), isFalse);
       expect(sent?['networks'], [
-        {'chain_id': 1, 'budget_eth': '0.001', 'max_task_eth': '0.001'},
-        {'chain_id': 8453, 'budget_eth': '0.002', 'max_task_eth': '0.002'},
+        if (!onlyRobinhood) {'chain_id': 1, 'budget_eth': '0.001', 'max_task_eth': '0.001'},
+        if (!onlyRobinhood) {'chain_id': 8453, 'budget_eth': '0.002', 'max_task_eth': '0.002'},
         {'chain_id': 4663, 'budget_eth': '0.003', 'max_task_eth': '0.003'},
       ]);
       expect(tester.takeException(), isNull);
     },
   );
 
+  }
   for (final failure in [
     'missing',
     'duplicate_chain',

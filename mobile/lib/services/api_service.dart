@@ -6,6 +6,8 @@ import '../models/task_model.dart';
 import '../models/activity_model.dart';
 import '../models/mint_plan_model.dart';
 import '../widgets/mintly_notice.dart';
+import 'session_vault.dart';
+import 'dart:async';
 
 class ApiException implements Exception {
   final String message;
@@ -20,6 +22,13 @@ class ApiService extends ChangeNotifier {
     defaultValue: 'https://mintly.duckdns.org/api',
   );
   final http.Client _client;
+  final SessionVault _vault;
+  Future<void> _storage = Future<void>.value();
+  Future<T> _store<T>(Future<T> Function() action) {
+    final next = _storage.then((_) => action());
+    _storage = next.then<void>((_) {}, onError: (Object _) {});
+    return next;
+  }
   String _sessionToken = '';
   Map<String, dynamic>? _user;
   int _sessionRevision = 0;
@@ -27,7 +36,9 @@ class ApiService extends ChangeNotifier {
   String checkedWalletLabel = 'No wallet connected';
   String lastCheckedText = 'Wallet-specific eligibility is unverified';
 
-  ApiService({http.Client? client}) : _client = client ?? http.Client();
+  bool sessionRemembered = false;
+  bool restoringSession = false;
+  ApiService({http.Client? client, SessionVault? vault}) : _client = client ?? http.Client(), _vault = vault ?? PlatformSessionVault();
 
   bool get isLiveBackendConnected => _sessionToken.isNotEmpty;
   String get username => _user?['username'] as String? ?? '';
@@ -83,7 +94,44 @@ class ApiService extends ChangeNotifier {
     _sessionRevision++;
     MintlyNotice.dismissAll();
     _resetMetadata();
+    final expiry = result['expires_at'];
+    final revision = _sessionRevision;
+    final token = _sessionToken;
+    final remembered = expiry is String && await _store(() => _vault.save({'token':token,'expires_at':expiry,'origin':baseUrl}));
+    if (expiry is! String) unawaited(_store(() => _vault.clear()));
+    if (revision != _sessionRevision) return;
+    sessionRemembered = remembered;
     notifyListeners();
+  }
+
+  void _expiredSession() {
+    disconnectBackend();
+    scheduleMicrotask(() => MintlyNotice.navigatorKey.currentState?.popUntil((route) => route.isFirst));
+  }
+
+  Future<bool> restoreSession() async {
+    if (isLiveBackendConnected || restoringSession) return isLiveBackendConnected;
+    restoringSession = true;
+    final revision = _sessionRevision;
+    try {
+      _requireHttps();
+      final saved = await _store(() => _vault.read());
+      if (revision != _sessionRevision) return false;
+      if (saved == null) return false;
+      final expiry = DateTime.tryParse('${saved['expires_at']}');
+      if (saved['origin'] != baseUrl || expiry == null || !expiry.toUtc().isAfter(DateTime.now().toUtc()) || saved['token'] is! String) {
+        await _store(() => _vault.clear()); return false;
+      }
+      final response = await _client.get(Uri.parse('$baseUrl/auth/me'), headers:{'Authorization':'Bearer ${saved['token']}'}).timeout(const Duration(seconds:12));
+      if (revision != _sessionRevision) return false;
+      if (response.statusCode == 401) { await _store(() => _vault.clear()); return false; }
+      final user = _decode(response) as Map<String,dynamic>;
+      if (user['id'] is! String || user['username'] is! String) { await _store(() => _vault.clear()); return false; }
+      _sessionToken = saved['token'] as String; _user = user; _sessionRevision++;
+      sessionRemembered = true; _resetMetadata(); notifyListeners();
+      return true;
+    } catch (_) { return false; }
+    finally { restoringSession = false; }
   }
 
   Future<void> changePassword(String oldPassword, String newPassword) async {
@@ -103,6 +151,8 @@ class ApiService extends ChangeNotifier {
   }
 
   void disconnectBackend() {
+    unawaited(_store(() => _vault.clear()));
+    sessionRemembered = false;
     _sessionToken = '';
     _user = null;
     _sessionRevision++;
@@ -129,13 +179,14 @@ class ApiService extends ChangeNotifier {
     super.dispose();
   }
 
-  Future<dynamic> _get(String path) async {
+  Future<dynamic> _get(String path,{Duration timeout=const Duration(seconds:15)}) async {
     _requireHttps();
     final revision = _sessionRevision;
     final response = await _client
         .get(Uri.parse('$baseUrl$path'), headers: _headers)
-        .timeout(const Duration(seconds: 15));
+        .timeout(timeout);
     _checkSession(revision);
+    if (response.statusCode == 401) { _expiredSession(); throw const ApiException('Your session ended. Sign in again.'); }
     return _decode(response);
   }
 
@@ -154,6 +205,7 @@ class ApiService extends ChangeNotifier {
         )
         .timeout(timeout);
     _checkSession(revision);
+    if (response.statusCode == 401) { _expiredSession(); throw const ApiException('Your session ended. Sign in again.'); }
     return _decode(response);
   }
 
@@ -164,6 +216,7 @@ class ApiService extends ChangeNotifier {
         .delete(Uri.parse('$baseUrl$path'), headers: _headers)
         .timeout(const Duration(seconds: 15));
     _checkSession(revision);
+    if (response.statusCode == 401) { _expiredSession(); throw const ApiException('Your session ended. Sign in again.'); }
     return _decode(response);
   }
 
@@ -184,6 +237,23 @@ class ApiService extends ChangeNotifier {
 
   Future<Map<String, dynamic>> fetchWalletReadiness() async =>
       (await _get('/wallets/readiness')) as Map<String, dynamic>;
+
+  Future<Map<String,dynamic>> fetchOpenSeaAccess(String walletId) async =>
+      Map<String,dynamic>.from(await _get('/wallets/$walletId/opensea-access'));
+  Future<Map<String,dynamic>> setOpenSeaAccess(String walletId,bool enabled) async =>
+      Map<String,dynamic>.from(await _post('/wallets/$walletId/opensea-access',
+        {'enabled':enabled,'consent':enabled,'terms_accepted':enabled},timeout:const Duration(seconds:90)));
+  Future<Map<String,dynamic>> fetchMintStages(String planId) async =>
+      Map<String,dynamic>.from(await _get('/mint-plans/$planId/stages',timeout:const Duration(seconds:90)));
+  Future<MintPlanModel> selectMintStage(String planId,String stageId,int quantity) async =>
+      MintPlanModel.fromJson(await _post('/mint-plans/$planId/stage',{'stage_uuid':stageId,'quantity':quantity},timeout:const Duration(seconds:90)));
+
+  Future<void> addWatchWallet(String address, String label) async {
+    await _post('/wallets/watch', {'address': address, 'label': label});
+  }
+
+  Future<Map<String,dynamic>> previewGuidedMint(Map<String,dynamic> request) async =>
+      (await _post('/tasks/guided-preview',request,timeout:const Duration(seconds:30))) as Map<String,dynamic>;
 
   Future<Map<String, dynamic>> fetchAutomationStatus() async =>
       (await _get('/automatic/status')) as Map<String, dynamic>;

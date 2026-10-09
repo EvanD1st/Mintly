@@ -92,7 +92,7 @@ void main() {
               200,
             );
           }
-          if (path.endsWith('/tasks/draft')) {
+          if (path.endsWith('/tasks/guided-preview')) {
             final body = jsonDecode(request.body) as Map<String, dynamic>;
             expect(body['stage_id'], 's');
             expect(body['wallet_id'], 'w');
@@ -104,13 +104,12 @@ void main() {
             expect(received.day,scheduled.day);
             expect(received.hour,scheduled.hour);
             expect(received.minute,scheduled.minute);
-            expect(body['fee_cap_eth'], '0.000500000000000000');
-            expect(
-              DateTime.parse(body['expires_at']),
-              start.add(const Duration(minutes: 30)),
-            );
+            expect(body['maximum_total_eth'], '0.001');
+            expect(body.containsKey('mint_kind'), isFalse);
+            expect(body.containsKey('gas_limit_eth'), isFalse);
             return http.Response(
               jsonEncode({
+                'request': {...body, 'guided': true, 'mint_kind': 'public', 'price_cap_eth': '0.00000000000000001', 'fee_cap_eth': '0.00099999999999998', 'total_cap_eth': '0.001'},
                 'eligibility': 'verified',
                 'review_hash':
                     'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
@@ -123,6 +122,7 @@ void main() {
                   'stage_name': stage.stageName,
                   'mint_kind': 'public',
                   'quantity': 2,
+                  'price_wei': 10,
                   'price_cap_wei': 10,
                   'fee_cap_wei': 1000000000000000,
                   'total_cap_wei': 1000000000000010,
@@ -165,6 +165,9 @@ void main() {
       await tester.tap(find.text('Save time'));
       await tester.pumpAndSettle();
       await tester.pump(const Duration(milliseconds:300));
+      await tester.enterText(find.byWidgetPredicate((w) => w is TextField && w.decoration?.labelText == 'Maximum total spend (ETH)'), '0.001');
+      expect(find.text('Merkle allowlist'), findsNothing);
+      expect(find.text('Signed presale'), findsNothing);
       await tester.tap(find.text('Review limits'));
       await tester.pumpAndSettle();
       expect(
@@ -172,7 +175,7 @@ void main() {
         findsOneWidget,
       );
       expect(
-        find.textContaining('Selected public stage · public'),
+        find.textContaining('Selected public stage · Public mint'),
         findsOneWidget,
       );
       await tester.tap(find.byType(CheckboxListTile));
@@ -197,4 +200,43 @@ void main() {
       expect(find.textContaining('Automatic mint armed.'), findsNothing);
     },
   );
+
+  testWidgets('missing signing prerequisite has a working setup link and retains draft fields', (tester) async {
+    tester.view.physicalSize = const Size(900, 1800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    var loads = 0;
+    final now = DateTime.now().toUtc();
+    final drop = DropModel.fromJson({'id':'d','name':'Draft collection','chain_id':4663,
+      'stages':[{'id':'s','stage_name':'Public stage','start_time_utc':now.add(const Duration(hours:1)).toIso8601String(),
+        'end_time_utc':now.add(const Duration(hours:2)).toIso8601String(),'price_wei':0,'price_eth_str':'0','limit_per_wallet':10}]});
+    final api = ApiService(client:MockClient((r) async {
+      if (r.url.path.endsWith('/auth/login')) { return http.Response('{"token":"test","user":{"username":"member"}}',200); }
+      loads++;
+      expect(r.url.path.endsWith('/automatic/policies'),true);
+      return http.Response('[]',200);
+    }));
+    await api.login('member','password');
+    await tester.pumpWidget(ProviderScope(overrides:[apiServiceProvider.overrideWith((ref)=>api)],
+      child:MaterialApp(home:AutomaticReviewScreen(drop:drop))));
+    await tester.pumpAndSettle();
+    expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton,'Review limits')).onPressed,isNull);
+    Finder field(String label)=>find.byWidgetPredicate((w)=>w is TextField && w.decoration?.labelText==label);
+    await tester.enterText(field('NFT quantity'),'3');
+    await tester.enterText(field('Maximum total spend (ETH)'),'0.004');
+    final time = tester.widget<Text>(find.byKey(const Key('automatic-mint-time'))).data;
+    await tester.tap(find.text('Set up wallet'));
+    await tester.pumpAndSettle();
+    expect(find.text('Add address only'),findsOneWidget);
+    expect(find.text('Continue to automatic signing'),findsOneWidget);
+    expect(find.text('Secret recovery phrase'),findsNothing);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(loads,2);
+    expect(tester.widget<TextField>(field('NFT quantity')).controller!.text,'3');
+    expect(tester.widget<TextField>(field('Maximum total spend (ETH)')).controller!.text,'0.004');
+    expect(tester.widget<Text>(find.byKey(const Key('automatic-mint-time'))).data,time);
+    await tester.pumpWidget(const SizedBox());
+  });
 }

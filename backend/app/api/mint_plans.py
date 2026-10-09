@@ -51,6 +51,7 @@ def response(plan: MintPlan, wallet: Wallet) -> dict:
         "opensea_url": plan.opensea_url, "chain": plan.chain,
         "contract_address": plan.contract_address,
         "stage_name": plan.stage_name, "stage_type": plan.stage_type,
+        "selected_stage_uuid": plan.selected_stage.get("uuid") if plan.selected_stage else None,
         "starts_at": plan.starts_at, "ends_at": plan.ends_at,
         "price_eth": eth_amount(plan.price_wei),
         "mint_value_eth": eth_amount(plan.mint_value_wei),
@@ -180,12 +181,22 @@ async def automatic_context(plan_id: str, user: User = Depends(get_current_user)
         transaction = {}
         await refresh_mint_plan(plan, wallet, client, detail=detail, transaction_out=transaction)
         selected = next((s for s in stage_schedule(detail) if s['uuid'] == plan.stage_uuid), None)
-        kinds = {'public_sale': 'public', 'allowlist': 'allowlist', 'signed': 'signed',
+        if plan.selected_stage:
+            from app.services.mint_stage_choice import pinned
+            if not selected or pinned(selected)!=plan.selected_stage:
+                raise HTTPException(409,'Your selected phase changed. Review its details again.')
+            overlaps=[s for s in stage_schedule(detail) if s['type']!='public_sale' and selected['type']!='public_sale'
+                and (s['starts_at'],s['ends_at'])==(selected['starts_at'],selected['ends_at'])]
+            if len(overlaps)>1:
+                raise HTTPException(409,'The project has overlapping whitelist phases whose exact mint instructions cannot be distinguished. Automatic minting is unavailable for this selection.')
+        kinds = {'signed_presale':'signed','public_sale': 'public', 'allowlist': 'allowlist', 'signed': 'signed',
                  'allowlist_sale': 'allowlist', 'signed_sale': 'signed'}
-        if not selected or selected['price_wei'] is None or selected['max_per_wallet'] < plan.quantity:
+        if not selected or selected['price_wei'] is None or (not plan.selected_stage and selected['max_per_wallet'] < plan.quantity):
             raise HTTPException(409, 'No mint stage with sufficient quantity is available.')
         # OpenSea stage types vary; unknown methods require explicit review rather than guessing.
         kind = kinds.get(selected['type'])
+        if plan.selected_stage and plan.status=='not_ready':
+            raise HTTPException(409,plan.status_note)
         if transaction:
             from app.services.seadrop_mint import decode_mint
             kind = decode_mint(transaction, plan.contract_address, wallet.address, plan.quantity)['kind']
@@ -246,3 +257,26 @@ async def remove_mint_plan(plan_id: str, user: User = Depends(get_current_user),
     record_plan(db, plan, await db.get(Wallet, plan.wallet_id), 'removed')
     await db.commit()
     return {'status': 'removed', 'in_flight': in_flight, 'history_retained': True}
+
+
+class SelectStageRequest(BaseModel):
+    stage_uuid:str=Field(min_length=1,max_length=100)
+    quantity:int=Field(ge=1,le=100,strict=True)
+
+@router.get('/{plan_id}/stages')
+async def eligible_stages(plan_id:str,user=Depends(get_current_user),db=Depends(get_db)):
+    plan=await db.get(MintPlan,plan_id)
+    if not plan or plan.user_id!=user.id:raise HTTPException(404,'Mint plan not found.')
+    from app.services.mint_stage_choice import stages
+    try:return (await stages(db,plan,user.id))[0]
+    except OpenSeaUnavailable as error:raise api_error(error) from None
+
+@router.post('/{plan_id}/stage')
+async def choose_stage(plan_id:str,req:SelectStageRequest,user=Depends(get_current_user),db=Depends(get_db)):
+    plan=await db.get(MintPlan,plan_id)
+    if not plan or plan.user_id!=user.id or plan.archived_at:raise HTTPException(404,'Mint plan not found.')
+    from app.services.mint_stage_choice import select_stage
+    try:
+        plan,wallet=await select_stage(db,plan,req,user.id)
+        return response(plan,wallet)
+    except OpenSeaUnavailable as error:raise api_error(error) from None

@@ -1,5 +1,6 @@
 import '../widgets/mintly_notice.dart';
 import '../widgets/mint_progress.dart';
+import '../widgets/automation_control.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -11,6 +12,7 @@ import '../models/mint_plan_model.dart';
 import '../models/drop_model.dart';
 import 'automatic_review_screen.dart';
 import 'history_screen.dart';
+import 'mint_stages_screen.dart';
 
 class QueueScreen extends ConsumerWidget {
   const QueueScreen({super.key});
@@ -63,6 +65,7 @@ class QueueScreen extends ConsumerWidget {
             style: TextStyle(fontSize: 13, color: muted),
           ),
           const SizedBox(height: 20),
+          const AutomationControl(),
           TextButton(
             onPressed: () => Navigator.push(
               context,
@@ -504,7 +507,7 @@ class QueueScreen extends ConsumerWidget {
               style: TextStyle(color: muted, fontSize: 11),
             ),
             Text(
-              'MetaMask shows the final network fee before approval.',
+              'Review the gas and total spending limits before approving automatic minting.',
               style: TextStyle(color: muted, fontSize: 11),
             ),
             const SizedBox(height: 8),
@@ -551,6 +554,10 @@ class QueueScreen extends ConsumerWidget {
             Wrap(
               spacing: 8,
               children: [
+                OutlinedButton(onPressed:() async {
+                  final selected=await Navigator.push<MintPlanModel>(context,MaterialPageRoute(builder:(_)=>MintStagesScreen(plan:plan)));
+                  if(selected!=null) await notifier.loadInitialData();
+                },child:const Text('Choose mint phase')),
                 OutlinedButton(
                   onPressed: () async {
                     final controller = TextEditingController(

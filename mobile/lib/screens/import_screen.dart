@@ -1,4 +1,5 @@
 import '../widgets/mintly_notice.dart';
+import 'saved_plan_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../theme/colors.dart';
@@ -98,7 +99,7 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
           Text('OpenSea checks this quantity against your wallet’s stage limit and remaining supply.', style: TextStyle(color: muted, fontSize: 11)),
 
           Text(
-            'Supports native-ETH SeaDrop V1 drops on Ethereum, Base, Robinhood Chain, Arbitrum One and Optimism. Mintly checks stage timing and wallet readiness. Gas is estimated. Approve in MetaMask on the drop’s network; importing does not sign a mint.',
+            'Supports native-ETH SeaDrop V1 drops on Ethereum, Base, Robinhood Chain, Arbitrum One and Optimism. Mintly checks stage timing and wallet readiness. Gas is estimated. Importing saves a plan without signing a mint. Next, choose a wallet and explicitly approve automatic signing limits.',
             style: TextStyle(fontSize: 11, color: muted, height: 1.4),
           ),
           const SizedBox(height: 24),
@@ -122,7 +123,11 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
                 final isOpenSeaLink = uri != null && uri.scheme == 'https' && uri.host == 'opensea.io' &&
                   uri.pathSegments.length >= 2 && uri.pathSegments.first == 'collection';
                 if (isOpenSeaLink) {
-                  await notifier.importOpenSeaMint(text, quantity: _quantity);
+                  final plan = await notifier.importOpenSeaMint(text, quantity: _quantity);
+                  if (context.mounted) {
+                    await Navigator.pushReplacement(context,MaterialPageRoute(builder:(_) => SavedPlanScreen(plan:plan)));
+                  }
+                  return;
                 } else if (api.isAdmin) {
                   await notifier.importList(text);
                 } else {
@@ -130,7 +135,7 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
                 }
                 if (context.mounted) {
                   MintlyNotice.show(context, SnackBar(
-                    content: Text(isOpenSeaLink ? 'Mint check saved. See Mint plans.' : 'List imported.'),
+                    content: const Text('List imported.'),
                   ));
                   Navigator.of(context).pop();
                 }

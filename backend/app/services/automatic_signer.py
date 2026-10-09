@@ -230,7 +230,7 @@ async def prepare_task(db, task_id, vault=None):
                             raise ValueError('Shared copy approval is not fully pinned')
                 quantity_matches = (r['quantity'] == s['quantity'] if mode == 'fixed' else (
                     s.get('copy_quantity_mode') == mode and 1 <= s['quantity'] <= r['quantity']
-                    and s['price_wei'] == 0 and s['price_cap_wei'] == 0))
+                    and (mode=='max_available' or (s['price_wei'] == 0 and s['price_cap_wei'] == 0))))
                 if (automatic.digest(rule.snapshot) != pin['intent'] or s.get('copy_rule_id') != rule.id
                         or s['mint_kind'] not in r.get('mint_kinds', ['public'])
                         or r['grant_id'] != grant.id or r['user_id'] != grant.user_id
@@ -239,7 +239,8 @@ async def prepare_task(db, task_id, vault=None):
                         or source['block_number'] <= r['after_block']
                         or not quantity_matches or s['expiry'] > r['expiry']
                         or s['price_cap_wei'] != r['price_cap_wei'] or s['fee_cap_wei'] != r['fee_cap_wei']
-                        or s['total_cap_wei'] != r['total_cap_wei'] or (r['free_only'] and s['price_wei'] != 0)):
+                        or (s['total_cap_wei'] != r['total_cap_wei'] if mode!='max_available' else not 0<s['total_cap_wei']<=r['total_cap_wei'])
+                        or (r['free_only'] and s['price_wei'] != 0)):
                     raise ValueError('Copy mint differs from the independently approved limits')
             duplicate = journal.execute('SELECT task FROM copy_signed WHERE stage=?', (copy_key,)).fetchone()
             if duplicate and duplicate['task'] != task.id:
@@ -464,7 +465,8 @@ async def register_copy_rule(rule_id: str, db=Depends(get_db)):
             or r.get('mint_kinds', ['public']) not in (['public'], ['public','allowlist','signed'])
             or not 1 <= r['quantity'] <= 100
             or not 0 <= r['price_cap_wei'] or not 0 < r['fee_cap_wei']
-            or r['total_cap_wei'] != r['price_cap_wei'] * r['quantity'] + r['fee_cap_wei']
+            or r['total_cap_wei'] != (min(r['price_cap_wei']*r['quantity']+r['fee_cap_wei'],r['budget_wei'],policy['max_task_wei'])
+                if r.get('quantity_mode')=='max_available' else r['price_cap_wei']*r['quantity']+r['fee_cap_wei'])
             or not r['total_cap_wei'] <= min(r['budget_wei'], policy['max_task_wei'])
             or r['budget_wei'] != rule.budget_wei or r['budget_wei'] > policy['budget_wei']
             or (r['free_only'] and r['price_cap_wei'] != 0)):
@@ -618,3 +620,29 @@ async def policy_ready(grant_id: str, db=Depends(get_db)):
         return {'status': 'ready', 'policy_id': grant.id, 'account': grant.account}
     except Exception:
         raise HTTPException(409, 'Custodial policy or encrypted keystore is unavailable.') from None
+
+
+@app.post('/opensea/{wallet_id}/register',dependencies=[Depends(authenticate)])
+async def register_opensea(wallet_id:str,db=Depends(get_db)):
+    from app.services.opensea_identity import connection
+    try:return await connection(db,wallet_id,'register')
+    except Exception:
+        await db.rollback()
+        raise HTTPException(503,'OpenSea access could not be confirmed. No mint transaction was signed.') from None
+
+
+from pydantic import BaseModel,Field
+class EligibilityLookup(BaseModel):
+    api_key:str=Field(min_length=10,max_length=512)
+
+@app.post('/opensea/{wallet_id}/stages/{slug}',dependencies=[Depends(authenticate)])
+async def opensea_stages(wallet_id:str,slug:str,req:EligibilityLookup,db=Depends(get_db)):
+    from app.services.opensea_identity import connection,IdentityUnavailable
+    try:return await connection(db,wallet_id,'stages',slug=slug,key=req.api_key)
+    except IdentityUnavailable as error:
+        await db.rollback()
+        code=409 if error.status in (401,403) else 503
+        raise HTTPException(code,'OpenSea eligibility access needs reconnection.' if code==409 else 'OpenSea eligibility checks are temporarily unavailable.') from None
+    except Exception:
+        await db.rollback()
+        raise HTTPException(409,'Verify this wallet’s OpenSea eligibility access again.') from None

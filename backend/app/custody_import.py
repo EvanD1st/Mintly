@@ -200,7 +200,7 @@ async def store_import(req, user, db):
     matches = (await db.scalars(select(Wallet).join(User, User.id == Wallet.user_id).where(
         func.lower(Wallet.address) == account.address.lower(), User.is_active.is_(True), User.deleted_at.is_(None))
         .order_by(Wallet.created_at, Wallet.id))).all()
-    if any(w.user_id != user.id and w.archived_at is None for w in matches):
+    if any(w.user_id != user.id and w.archived_at is None and w.signing_capability != 'watch_only' for w in matches):
         raise HTTPException(409, 'This wallet is still linked to another Mintly account. Unlink it there first.')
     if any(w.user_id == user.id and w.archived_at is None and (wallet is None or w.id != wallet.id) for w in matches):
         raise HTTPException(409, 'This account is already linked. Choose another account or open its wallet details.')
@@ -212,9 +212,10 @@ async def store_import(req, user, db):
     legacy_pending = await db.scalar(select(MintPermission.id).join(MintPlan, MintPlan.id == MintPermission.plan_id)
         .where(MintPlan.wallet_id.in_(address_wallets), MintPermission.raw_transaction.is_not(None),
             MintPermission.status.not_in(('confirmed', 'reverted'))).limit(1))
-    if (wallet is None or wallet.archived_at) and (pending or legacy_pending):
+    needs_relink = wallet is None or wallet.archived_at is not None or wallet.signing_capability == 'watch_only'
+    if needs_relink and (pending or legacy_pending):
         raise HTTPException(409, 'A previously signed mint for this wallet is unresolved. Wait for settlement before relinking.')
-    if wallet is None or wallet.archived_at:
+    if needs_relink:
         await signer_relink_ready(account.address)
     if wallet is None:
         if not req.account_address:

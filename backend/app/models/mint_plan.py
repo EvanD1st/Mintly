@@ -28,6 +28,7 @@ class MintPlan(Base):
     chain_id: Mapped[int] = mapped_column(Integer, nullable=False)
     contract_address: Mapped[str] = mapped_column(String(42), nullable=False)
     opensea_url: Mapped[str] = mapped_column(Text, nullable=False)
+    selected_stage: Mapped[dict | None] = mapped_column(JSON)
     stage_uuid: Mapped[str | None] = mapped_column(String(100))
     stage_name: Mapped[str | None] = mapped_column(String(80))
     stage_type: Mapped[str | None] = mapped_column(String(40))

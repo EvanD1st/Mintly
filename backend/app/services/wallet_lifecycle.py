@@ -11,6 +11,10 @@ async def unlink(db, wallet):
     if wallet.archived_at:
         return
     now = datetime.now(timezone.utc)
+    from app.models import OpenSeaAccess
+    access=await db.get(OpenSeaAccess,wallet.id)
+    if access:
+        access.enabled=False;access.revision+=1;access.status='registering';access.expires_at=now
     for check in (await db.scalars(select(CopyCheck).where(CopyCheck.wallet_id==wallet.id,CopyCheck.user_id==wallet.user_id))).all():
         check.active=False
     grants = (await db.scalars(select(AutomaticGrant).where(AutomaticGrant.wallet_id == wallet.id))).all()

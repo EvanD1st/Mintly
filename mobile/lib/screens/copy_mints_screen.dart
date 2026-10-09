@@ -6,9 +6,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/drop_model.dart';
 import '../state/app_state.dart';
 import '../widgets/mint_progress.dart';
+import '../widgets/automation_control.dart';
 import '../theme/colors.dart';
 import 'automatic_review_screen.dart';
 import 'history_screen.dart';
+import 'wallet_setup_screen.dart';
 
 // Drawn icons keep this section compatible with installed OTA font subsets.
 class CopyGlyph extends StatelessWidget {
@@ -671,10 +673,10 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
                   ],
                 ),
               ),
-              FilledButton(
+              Expanded(flex: 2, child: FilledButton(
                 onPressed: _busy ? null : () => _setup(watch),
-                child: const Text('Set up copy'),
-              ),
+                child: Text(watch['check_only'] == true ? 'Manage checks' : active ? 'Copying active · Manage' : rules.any((r) => r['status'] == 'paused') ? 'Copying paused · Manage' : 'Set up copy', textAlign: TextAlign.center),
+              )),
             ],
           ),
           const SizedBox(height: 8),
@@ -711,6 +713,7 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        const AutomationControl(),
         Text(
           'Copy minting',
           style: Theme.of(
@@ -1217,8 +1220,9 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
   late Future<List<Map<String, dynamic>>> _policies;
   Map<String, dynamic>? _policy, _pending;
   DateTime? _expiry;
-  bool _free = false, _consent = false, _busy = false, _customQuantity = false;
-  bool _includePresales = false, _checkOnly = false;
+  bool _free = false, _consent = false, _busy = false;
+  bool _includePresales = true, _checkOnly = false;
+  String _quantityChoice = 'one';
   int _days = 7;
   String? _error;
 
@@ -1272,6 +1276,20 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
     super.dispose();
   }
 
+  bool get _needsSigningApproval => !_checkOnly && (_policy == null || (_policy!['policies'] as List).isEmpty || (_policy!['policies'] as List).any((p) => !{'public','allowlist','signed'}.every((kind) => ((p['scope'] as Map)['mint_kinds'] as List).contains(kind))));
+
+  Future<void> _setupWallet() async {
+    final selected = _policy;
+    await Navigator.push(context,MaterialPageRoute(builder: (_) => WalletSetupScreen(walletId:selected?['id'] as String?,address:selected?['account'] as String?)));
+    if (!mounted) return;
+    final future = _loadPolicies();
+    setState(() { _policies = future; _policy = null; _consent = false; });
+    final wallets = await future;
+    if (!mounted || selected == null) return;
+    final match = wallets.where((wallet) => wallet['id'] == selected['id']).firstOrNull;
+    if (match != null) setState(() { _policy = match; _setExpiry(); });
+  }
+
   void _setExpiry() {
     final policies = _policy!['policies'] as List<Map<String, dynamic>>;
     if (_checkOnly || policies.isEmpty) {
@@ -1312,8 +1330,8 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
       'request_id': _uuid(),
       if (_checkOnly) 'wallet_id': _policy!['id'],
       if (!_checkOnly) 'grant_ids': [for (final p in _policy!['policies'] as List<Map<String, dynamic>>) p['id']],
-      'quantity': _free ? 100 : int.parse(_quantity.text.trim()),
-      'quantity_mode': _free ? 'max_free' : 'fixed',
+      'quantity': _free || _quantityChoice == 'max' ? 100 : int.parse(_quantity.text.trim()),
+      'quantity_mode': _free ? 'max_free' : _quantityChoice == 'max' ? 'max_available' : 'fixed',
       'price_cap_eth': _price.text.trim(),
       'fee_cap_eth': _gas.text.trim(),
       'budget_eth': _budget.text.trim(),
@@ -1365,7 +1383,7 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
           if (!snapshot.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
-          final policies = snapshot.data!.where((p) => _checkOnly || (p['policies'] as List).isNotEmpty).toList();
+          final policies = snapshot.data!;
           return Form(
             key: _form,
             child: ListView(
@@ -1421,9 +1439,7 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
                   }),
                 ),
                 if (policies.isEmpty)
-                  const _Panel(
-                    child: Text('Add a receiving wallet in Wallets first.'),
-                  ),
+                  Column(children:[const _Panel(child:Text('Add a receiving wallet to continue.')),OutlinedButton(onPressed:locked ? null : _setupWallet,child:const Text('Set up wallet'))]),
                 if (policies.isNotEmpty) ...[
                   DropdownButtonFormField<String>(
                     icon: const CopyGlyph('down'),
@@ -1447,8 +1463,7 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
                         ? null
                         : (id) => setState(() {
                             _policy = policies.firstWhere((p) => p['id'] == id);
-                            final preferences = widget.watch['preferences'] as Map? ?? {};
-                            _includePresales = (preferences['presale_wallets'] as Map? ?? {})[id] == true;
+                            _includePresales = true;
                             _consent = false;
                             _setExpiry();
                           }),
@@ -1463,88 +1478,40 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
                             ? _network(chain) : '${_network(chain)} · ${_checkOnly ? 'Check only' : 'Not approved'}'),
                     ]),
                     const SizedBox(height: 8),
+                    if (_needsSigningApproval) ...[
+                      const Text('This wallet needs approval for public and eligible whitelist signing.'),
+                      OutlinedButton(onPressed:locked ? null : _setupWallet,child:const Text('Set up wallet')),
+                    ],
                     Text(_checkOnly ? 'Results are checks only. No transaction will be sent.' : 'Copies on the mint’s network. Add ETH there for gas.',
                         style: TextStyle(fontSize: 12)),
                   ],
                   const SizedBox(height: 18),
-                  if (_free)
-                    const _Panel(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Maximum available for my wallet',
-                            style: TextStyle(fontWeight: FontWeight.w700),
-                          ),
-                          SizedBox(height: 8),
-                          Text('Up to 100 NFTs per drop.'),
-                        ],
-                      ),
-                    )
-                  else
-                    _Panel(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          const Text('Quantity per mint'),
-                          const SizedBox(height: 10),
-                          Row(
-                            children: [
-                              for (final count in [1, 2])
-                                Expanded(
-                                  child: Padding(
-                                    padding: const EdgeInsets.only(right: 8),
-                                    child: OutlinedButton(
-                                      onPressed: locked
-                                          ? null
-                                          : () => setState(() {
-                                              _quantity.text = '$count';
-                                              _customQuantity = false;
-                                            }),
-                                      style: OutlinedButton.styleFrom(
-                                        backgroundColor:
-                                            _quantity.text == '$count'
-                                            ? Theme.of(context)
-                                                  .colorScheme
-                                                  .primary
-                                                  .withValues(alpha: .12)
-                                            : null,
-                                      ),
-                                      child: Text(
-                                        '$count NFT${count == 1 ? '' : 's'}',
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              Expanded(
-                                child: TextButton(
-                                  onPressed: locked
-                                      ? null
-                                      : () => setState(
-                                          () => _customQuantity = true,
-                                        ),
-                                  child: const Text('Custom'),
-                                ),
-                              ),
-                            ],
-                          ),
-                          if (_customQuantity)
-                            TextFormField(
-                              controller: _quantity,
-                              enabled: !locked,
-                              keyboardType: TextInputType.number,
-                              decoration: const InputDecoration(
-                                labelText: 'NFTs per copied mint',
-                              ),
-                              validator: (v) =>
-                                  (int.tryParse(v ?? '') ?? 0) < 1 ||
-                                      (int.tryParse(v ?? '') ?? 101) > 100
-                                  ? 'Choose 1 to 100.'
-                                  : null,
-                            ),
-                        ],
-                      ),
-                    ),
+                  const Text('Which mints should Mintly copy?',style:TextStyle(fontWeight:FontWeight.w700)),
+                  const SizedBox(height:8),
+                  Wrap(spacing:8,runSpacing:8,children:[
+                    for (final choice in [(true,'Free mints only'),(false,'Public / whitelist mints')])
+                      OutlinedButton(onPressed:locked ? null : () => setState(() {
+                        _free = choice.$1; _consent = false;
+                        if (_free) _price.text = '0';
+                      }),style:OutlinedButton.styleFrom(backgroundColor:_free == choice.$1 ? Theme.of(context).colorScheme.primary.withValues(alpha:.12) : null),child:Text(choice.$2)),
+                  ]),
+                  const Text('Public and eligible whitelist stages. Network fees still apply.',style:TextStyle(fontSize:12)),
+                  const SizedBox(height:14),
+                  if (_free) const _Panel(child:Text('Free mints use the maximum available for your wallet, within your limits (up to 100 NFTs).'))
+                  else _Panel(child:Column(crossAxisAlignment:CrossAxisAlignment.stretch,children:[
+                    const Text('NFT quantity'),
+                    Wrap(spacing:8,runSpacing:8,children:[
+                      for (final choice in [('one','1 NFT'),('max','Max mint'),('custom','Custom')])
+                        OutlinedButton(onPressed:locked ? null : () => setState(() {
+                          _quantityChoice = choice.$1; _consent = false;
+                          if (_quantityChoice == 'one') _quantity.text = '1';
+                        }),style:OutlinedButton.styleFrom(backgroundColor:_quantityChoice == choice.$1 ? Theme.of(context).colorScheme.primary.withValues(alpha:.12) : null),child:Text(choice.$2)),
+                    ]),
+                    if (_quantityChoice == 'custom') TextFormField(controller:_quantity,enabled:!locked,
+                      keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Custom NFT quantity'),
+                      validator:(value) => (int.tryParse(value ?? '') ?? 0) < 1 || (int.tryParse(value ?? '') ?? 101) > 100 ? 'Choose 1 to 100 NFTs' : null),
+                    if (_quantityChoice == 'max') const Text('Remaining wallet allowance and collection supply, within your spending limits. Up to 100 NFTs.'),
+                  ])),
                   _Panel(
                     child: Column(
                       children: [
@@ -1587,37 +1554,6 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
                             suffixText: 'ETH',
                             helperText: 'Shared across networks · includes mint prices and gas',
                           ),
-                        ),
-                        SwitchListTile(
-                          contentPadding: EdgeInsets.zero,
-                          title: const Text('Free mints only'),
-                          subtitle: const Text(
-                            'Use the maximum available quantity.',
-                          ),
-                          value: _free,
-                          onChanged: locked
-                              ? null
-                              : (v) => setState(() {
-                                  _free = v;
-                                  _consent = false;
-                                  _price.text = v ? '0' : '';
-                                }),
-                        ),
-                        const ListTile(
-                          contentPadding: EdgeInsets.zero,
-                          title: Text('Only eligible public drops'),
-
-                          trailing: Text('Always on'),
-                        ),
-                        SwitchListTile(
-                          contentPadding: EdgeInsets.zero,
-                          title: const Text('Include eligible whitelist mints'),
-                          subtitle: const Text('Checks your wallet. No public copy after a whitelist copy.'),
-                          value: _includePresales,
-                          onChanged: locked ? null : (value) => setState(() {
-                            _includePresales = value;
-                            _consent = false;
-                          }),
                         ),
                         DropdownButtonFormField<int>(
                           icon: const CopyGlyph('down'),
@@ -1666,8 +1602,8 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
                       _checkOnly
                           ? 'Start check-only monitoring with these limits. No spending approval is given.'
                           : _free
-                          ? 'Approve maximum free minting (up to 100 NFTs) on the approved networks within these limits${_includePresales ? ', including eligible whitelist stages' : ''}.'
-                          : 'Approve copying on the approved networks within these limits${_includePresales ? ', including eligible whitelist stages' : ''}.',
+                          ? 'Approve maximum free public and eligible whitelist minting (up to 100 NFTs), including gas within these limits.'
+                          : 'Approve public and eligible whitelist copying${_quantityChoice == 'max' ? ' at the maximum available quantity (up to 100 NFTs)' : ' at my selected quantity'}, including gas within these limits.',
                     ),
                   ),
                   if (_error != null)
@@ -1681,7 +1617,7 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
                       ),
                     ),
                   FilledButton(
-                    onPressed: _busy || !_consent || _policy == null
+                    onPressed: _busy || !_consent || _policy == null || _needsSigningApproval
                         ? null
                         : _enable,
                     child: Text(

@@ -31,7 +31,7 @@ class RuleRequest(BaseModel):
     request_id: uuid.UUID
     grant_id: uuid.UUID
     quantity: int = Field(ge=1, le=100, strict=True)
-    quantity_mode: Literal['fixed', 'max_free'] = 'fixed'
+    quantity_mode: Literal['fixed', 'max_free', 'max_available'] = 'fixed'
     price_cap_eth: str = Field(pattern=r'^[0-9]+(\.[0-9]+)?$', max_length=40)
     fee_cap_eth: str = Field(pattern=r'^[0-9]+(\.[0-9]+)?$', max_length=40)
     budget_eth: str = Field(pattern=r'^[0-9]+(\.[0-9]+)?$', max_length=40)
@@ -46,7 +46,7 @@ class WalletRuleRequest(BaseModel):
     request_id: uuid.UUID
     grant_ids: list[uuid.UUID] = Field(min_length=1, max_length=3)
     quantity: int = Field(ge=1, le=100, strict=True)
-    quantity_mode: Literal['fixed', 'max_free'] = 'fixed'
+    quantity_mode: Literal['fixed', 'max_free', 'max_available'] = 'fixed'
     price_cap_eth: str = Field(pattern=r'^[0-9]+(\.[0-9]+)?$', max_length=40)
     fee_cap_eth: str = Field(pattern=r'^[0-9]+(\.[0-9]+)?$', max_length=40)
     budget_eth: str = Field(pattern=r'^[0-9]+(\.[0-9]+)?$', max_length=40)
@@ -65,7 +65,7 @@ class CheckRequest(BaseModel):
     request_id:uuid.UUID
     wallet_id:str
     quantity:int=Field(ge=1,le=100,strict=True)
-    quantity_mode:Literal['fixed','max_free']='fixed'
+    quantity_mode:Literal['fixed','max_free','max_available']='fixed'
     price_cap_eth:str=Field(pattern=r'^[0-9]+(\.[0-9]+)?$',max_length=40)
     fee_cap_eth:str=Field(pattern=r'^[0-9]+(\.[0-9]+)?$',max_length=40)
     budget_eth:str=Field(pattern=r'^[0-9]+(\.[0-9]+)?$',max_length=40)
@@ -103,7 +103,7 @@ async def start_checks(watch_id:str,req:CheckRequest,user=Depends(get_current_us
     snapshot={'user_id':user.id,'wallet_id':wallet.id,'account':wallet.address,'quantity':req.quantity,
         'quantity_mode':req.quantity_mode,'price_cap_wei':price,'fee_cap_wei':fee,'budget_wei':budget,
         'free_only':req.free_only,'mint_kinds':['public','allowlist','signed'] if req.include_presales else ['public'],
-        'after_blocks':after}
+        'after_blocks':after,'total_cap_wei':min(budget,price*req.quantity+fee)}
     for rule in (await db.scalars(select(CopyRule).where(CopyRule.watch_id==watch_id,CopyRule.user_id==user.id,
             CopyRule.status.in_(['active','registering'])))).all():
         await copying.pause_rule(db,rule)
@@ -345,10 +345,14 @@ async def save_rule(watch_id, req, user, db, *, group=None):
         raise HTTPException(422, 'Approve finite limits and an expiry within your wallet policy.')
     price, fee, budget = map(automatic.wei, (req.price_cap_eth, req.fee_cap_eth, req.budget_eth))
     total = price * req.quantity + fee
+    if req.quantity_mode=='max_available':
+        total=min(total,budget,int(grant.scope['max_task_wei']))
     if req.free_only and price != 0:
         raise HTTPException(422, 'Free mints only requires a zero mint-price cap.')
     if req.quantity_mode == 'max_free' and (not req.free_only or price != 0 or req.quantity != 100):
         raise HTTPException(422, 'Maximum quantity requires free mints only, a zero price and the 100-NFT execution ceiling.')
+    if req.quantity_mode=='max_available' and (req.quantity!=100 or req.free_only):
+        raise HTTPException(422,'Maximum available requires explicit consent for up to 100 NFTs within your limits.')
     key = str(req.request_id)
     old = await db.get(CopyRule, key)
     request = dict(watch_id=watch.id, user_id=user.id, grant_id=grant.id, wallet_id=grant.wallet_id,

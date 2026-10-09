@@ -15,13 +15,49 @@ from app.services.parser import format_wei_to_eth
 from app.services import automatic
 from app.services.opensea import OpenSeaUnavailable
 from app.services.mint_plans import aware
+from pydantic import BaseModel,Field
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
 
+class GuidedRequest(BaseModel):
+    wallet_id:str
+    grant_id:str
+    drop_id:str
+    stage_id:str
+    plan_id:str|None=None
+    copy_event_id:str|None=None
+    quantity:int=Field(ge=1,le=100,strict=True)
+    scheduled_for_utc:datetime
+    maximum_total_eth:str=Field(pattern=r'^[0-9]+(\.[0-9]+)?$',max_length=40)
+    gas_limit_eth:str|None=Field(default=None,pattern=r'^[0-9]+(\.[0-9]+)?$',max_length=40)
+
+
+@router.post('/guided-preview')
+async def guided_preview(req:GuidedRequest,user=Depends(get_current_user),db=Depends(get_db)):
+    from app.services.guided_mint import prepare
+    try:
+        return await prepare(db,req,user.id)
+    except (ValueError,OpenSeaUnavailable):
+        raise HTTPException(409,'The mint instructions or wallet eligibility could not be verified. No transaction was signed.') from None
+
+
+async def resolved_snapshot(db,req,user_id):
+    presale=None
+    if req.guided and req.mint_kind!='public':
+        grant=await automatic.grant_for(db,req.grant_id,user_id)
+        web3=await automatic.provider_for(grant.chain_id)
+        try:
+            from app.services.guided_mint import own_presale
+            presale=await own_presale(db,req,user_id,web3)
+        finally:
+            await web3.provider.disconnect()
+    return await automatic.make_snapshot(db,req,user_id,presale_mint=presale)
+
+
 @router.post("/draft")
 async def draft_task_preview(req: DraftTaskRequest, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    grant, snapshot = await automatic.make_snapshot(db, req, user.id)
+    grant, snapshot = await resolved_snapshot(db,req,user.id)
     await automatic.signer_ready(grant.id)
     web3 = await automatic.provider_for(grant.chain_id)
     try:
@@ -48,7 +84,7 @@ async def arm_mint_task(req: ArmTaskRequest, user: User = Depends(get_current_us
     automatic.enabled()
     if not req.user_consent_confirmed:
         raise HTTPException(422, 'Explicit task authorization is required.')
-    request_hash = automatic.digest(req.model_dump(mode='json', exclude={'idempotency_key'}))
+    request_hash = automatic.digest(req.model_dump(mode='json', exclude={'idempotency_key'} if req.guided else {'idempotency_key','guided'}))
     key = automatic.digest([user.id, req.idempotency_key])
     await automatic.lock_execution(db)
     existing = (await db.execute(select(MintTask).where(MintTask.idempotency_key == key))).scalar_one_or_none()
@@ -61,7 +97,7 @@ async def arm_mint_task(req: ArmTaskRequest, user: User = Depends(get_current_us
             MintTask.status.not_in(automatic.TERMINAL)).limit(1))
         if pending:
             raise HTTPException(409, 'This plan already has an active automatic mint. Check its task before arming another.')
-    grant, snapshot = await automatic.make_snapshot(db, req, user.id)
+    grant, snapshot = await resolved_snapshot(db,req,user.id)
     copy_key = None
     if req.copy_event_id:
         from app.services.copy_mints import no_duplicate

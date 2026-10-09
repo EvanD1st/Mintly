@@ -7,6 +7,8 @@ from app.api.deps import get_current_user, get_db
 from app.models import Wallet, WalletPairing
 from app.schemas.wallet import WalletSchema
 from app.services import automatic
+from eth_utils import is_address, to_checksum_address
+import uuid
 
 router = APIRouter(prefix='/wallets', tags=['wallets'])
 public_router = APIRouter(prefix='/wallet-link', tags=['wallet-link'])
@@ -17,6 +19,32 @@ class PairRequest(BaseModel):
 class CompleteRequest(PairRequest):
     signature: str = Field(min_length=130, max_length=132)
 
+
+class WatchWalletRequest(BaseModel):
+    label:str=Field(min_length=1,max_length=80)
+    address:str=Field(min_length=42,max_length=42)
+
+
+@router.post('/watch')
+async def add_watch_wallet(req:WatchWalletRequest,user=Depends(get_current_user),db=Depends(get_db)):
+    if not is_address(req.address) or int(req.address,16)==0:
+        raise HTTPException(422,'Enter a valid wallet address.')
+    from sqlalchemy import func
+    await automatic.lock_execution(db)
+    wallet=await db.scalar(select(Wallet).where(Wallet.user_id==user.id,Wallet.archived_at.is_(None),
+        func.lower(Wallet.address)==req.address.lower()))
+    if wallet:
+        return WalletSchema.model_validate(wallet)
+    active_count=await db.scalar(select(func.count()).select_from(Wallet).where(Wallet.user_id==user.id,Wallet.archived_at.is_(None)))
+    if active_count>=20:
+        raise HTTPException(409,'Unlink a wallet before adding more than 20.')
+    if not req.label.strip():
+        raise HTTPException(422,'Enter a wallet name.')
+    wallet=Wallet(id=str(uuid.uuid4()),user_id=user.id,address=to_checksum_address(req.address),label=req.label.strip(),
+        signing_capability='watch_only',is_default=active_count==0,supported_chains=['Ethereum','Base','Robinhood Chain','Arbitrum One','Optimism'],is_demo=False)
+    db.add(wallet);await db.commit()
+    return WalletSchema.model_validate(wallet)
+
 @router.get('', response_model=list[WalletSchema])
 async def list_wallets(user=Depends(get_current_user), db=Depends(get_db)):
     return (await db.scalars(select(Wallet).where(Wallet.user_id == user.id, Wallet.archived_at.is_(None))
@@ -24,7 +52,7 @@ async def list_wallets(user=Depends(get_current_user), db=Depends(get_db)):
 
 @router.post('/pairings')
 async def start_pairing(user=Depends(get_current_user)):
-    raise HTTPException(410, 'Add your wallet using its recovery phrase in the Mintly app.')
+    raise HTTPException(410, 'Open Set up wallet in Mintly to add an address or explicitly enable automatic signing.')
 
 
 @router.get('/readiness')
@@ -54,4 +82,10 @@ async def unlink_wallet(wallet_id: str, user=Depends(get_current_user), db=Depen
     from app.services.wallet_lifecycle import unlink
     await unlink(db, wallet)
     await db.commit()
+    from app.models import OpenSeaAccess
+    if await db.get(OpenSeaAccess,wallet.id):
+        try:
+            from app.api.opensea_access import broker
+            await broker(wallet.id,'register')
+        except Exception:pass  # Locally disabled immediately; signer retries remote revocation.
     return {'status': 'unlinked', 'history_retained': True, 'automatic_actions_disabled': True}

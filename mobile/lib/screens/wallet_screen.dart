@@ -8,6 +8,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../state/app_state.dart';
 import 'import_screen.dart';
 import 'custody_import_screen.dart';
+import 'wallet_setup_screen.dart';
+import 'opensea_access_screen.dart';
 
 class WalletScreen extends ConsumerStatefulWidget {
   const WalletScreen({super.key});
@@ -102,9 +104,9 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
     final imported = await Navigator.push<bool>(
       context,
       MaterialPageRoute(
-        builder: (_) => CustodyImportScreen(
-          walletId: wallet?['id'] as String?,
-          address: wallet?['address'] as String?,
+        builder: (_) => wallet == null ? const WalletSetupScreen() : CustodyImportScreen(
+          walletId: wallet['id'] as String?,
+          address: wallet['address'] as String?,
         ),
       ),
     );
@@ -113,7 +115,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
       MintlyNotice.show(context,
         const SnackBar(
           content: Text(
-            'Wallet imported. Select an NFT to review an automatic mint.',
+              'Wallet saved. Signing access depends on the setup you chose.',
           ),
         ),
       );
@@ -144,6 +146,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
                 const Text(
                   'Address linked. Import this wallet to prepare automatic minting.',
                 ),
+              OutlinedButton(onPressed:()=>Navigator.push(pageContext,MaterialPageRoute(builder:(_)=>OpenSeaAccessScreen(walletId:wallet['id'] as String))),child:const Text('OpenSea eligibility access')),
               for (final policy in policies)
                 Card(
                   child: Padding(
