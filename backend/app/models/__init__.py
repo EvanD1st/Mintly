@@ -25,3 +25,5 @@ __all__ = [
     "NotificationDevice",
     "User", "AuthSession", "LoginAttempt", "WalletPairing",
 ]
+
+from app.models.opensea_access import OpenSeaAccess

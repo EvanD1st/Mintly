@@ -620,3 +620,29 @@ async def policy_ready(grant_id: str, db=Depends(get_db)):
         return {'status': 'ready', 'policy_id': grant.id, 'account': grant.account}
     except Exception:
         raise HTTPException(409, 'Custodial policy or encrypted keystore is unavailable.') from None
+
+
+@app.post('/opensea/{wallet_id}/register',dependencies=[Depends(authenticate)])
+async def register_opensea(wallet_id:str,db=Depends(get_db)):
+    from app.services.opensea_identity import connection
+    try:return await connection(db,wallet_id,'register')
+    except Exception:
+        await db.rollback()
+        raise HTTPException(503,'OpenSea access could not be confirmed. No mint transaction was signed.') from None
+
+
+from pydantic import BaseModel,Field
+class EligibilityLookup(BaseModel):
+    api_key:str=Field(min_length=10,max_length=512)
+
+@app.post('/opensea/{wallet_id}/stages/{slug}',dependencies=[Depends(authenticate)])
+async def opensea_stages(wallet_id:str,slug:str,req:EligibilityLookup,db=Depends(get_db)):
+    from app.services.opensea_identity import connection,IdentityUnavailable
+    try:return await connection(db,wallet_id,'stages',slug=slug,key=req.api_key)
+    except IdentityUnavailable as error:
+        await db.rollback()
+        code=409 if error.status in (401,403) else 503
+        raise HTTPException(code,'OpenSea eligibility access needs reconnection.' if code==409 else 'OpenSea eligibility checks are temporarily unavailable.') from None
+    except Exception:
+        await db.rollback()
+        raise HTTPException(409,'Verify this wallet’s OpenSea eligibility access again.') from None

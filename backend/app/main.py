@@ -43,7 +43,7 @@ app.include_router(api_router)
 @app.middleware("http")
 async def prevent_sensitive_response_caching(request: Request, call_next):
     response = await call_next(request)
-    if request.url.path.startswith(("/api/auth/", "/api/admin/", "/api/wallet-link/", "/api/mint-permission", "/api/copy-mints")):
+    if request.url.path.startswith(("/api/auth/", "/api/admin/", "/api/wallet-link/", "/api/mint-permission", "/api/copy-mints", "/api/wallets/", "/api/mint-plans/")):
         response.headers["Cache-Control"] = "no-store"
     return response
 

@@ -179,12 +179,12 @@ class ApiService extends ChangeNotifier {
     super.dispose();
   }
 
-  Future<dynamic> _get(String path) async {
+  Future<dynamic> _get(String path,{Duration timeout=const Duration(seconds:15)}) async {
     _requireHttps();
     final revision = _sessionRevision;
     final response = await _client
         .get(Uri.parse('$baseUrl$path'), headers: _headers)
-        .timeout(const Duration(seconds: 15));
+        .timeout(timeout);
     _checkSession(revision);
     if (response.statusCode == 401) { _expiredSession(); throw const ApiException('Your session ended. Sign in again.'); }
     return _decode(response);
@@ -237,6 +237,16 @@ class ApiService extends ChangeNotifier {
 
   Future<Map<String, dynamic>> fetchWalletReadiness() async =>
       (await _get('/wallets/readiness')) as Map<String, dynamic>;
+
+  Future<Map<String,dynamic>> fetchOpenSeaAccess(String walletId) async =>
+      Map<String,dynamic>.from(await _get('/wallets/$walletId/opensea-access'));
+  Future<Map<String,dynamic>> setOpenSeaAccess(String walletId,bool enabled) async =>
+      Map<String,dynamic>.from(await _post('/wallets/$walletId/opensea-access',
+        {'enabled':enabled,'consent':enabled,'terms_accepted':enabled},timeout:const Duration(seconds:90)));
+  Future<Map<String,dynamic>> fetchMintStages(String planId) async =>
+      Map<String,dynamic>.from(await _get('/mint-plans/$planId/stages',timeout:const Duration(seconds:90)));
+  Future<MintPlanModel> selectMintStage(String planId,String stageId,int quantity) async =>
+      MintPlanModel.fromJson(await _post('/mint-plans/$planId/stage',{'stage_uuid':stageId,'quantity':quantity},timeout:const Duration(seconds:90)));
 
   Future<void> addWatchWallet(String address, String label) async {
     await _post('/wallets/watch', {'address': address, 'label': label});

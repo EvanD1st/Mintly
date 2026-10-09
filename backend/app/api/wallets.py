@@ -82,4 +82,10 @@ async def unlink_wallet(wallet_id: str, user=Depends(get_current_user), db=Depen
     from app.services.wallet_lifecycle import unlink
     await unlink(db, wallet)
     await db.commit()
+    from app.models import OpenSeaAccess
+    if await db.get(OpenSeaAccess,wallet.id):
+        try:
+            from app.api.opensea_access import broker
+            await broker(wallet.id,'register')
+        except Exception:pass  # Locally disabled immediately; signer retries remote revocation.
     return {'status': 'unlinked', 'history_retained': True, 'automatic_actions_disabled': True}

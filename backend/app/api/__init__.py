@@ -15,6 +15,7 @@ from app.api.mint_permissions import router as permission_router, public_router 
 
 from app.api.history import router as history_router
 from app.api.copy_mints import router as copy_router
+from app.api.opensea_access import router as opensea_access_router
 
 api_router = APIRouter(prefix="/api")
 api_router.include_router(auth_router)
@@ -27,6 +28,7 @@ protected.include_router(automatic_router)
 protected.include_router(drops_router)
 protected.include_router(import_router)
 protected.include_router(tasks_router)
+protected.include_router(opensea_access_router)
 protected.include_router(wallets_router)
 protected.include_router(source_router)
 protected.include_router(notifications_router)

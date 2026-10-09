@@ -34,6 +34,15 @@ async def refresh_mint_plan(plan: MintPlan, wallet: Wallet, client: OpenSeaClien
     active = [stage for stage in stages if stage["starts_at"] <= now < stage["ends_at"]]
     future = [stage for stage in stages if stage["starts_at"] > now]
     selected = active[0] if active else future[0] if future else None
+    if plan.selected_stage:
+        from app.services.mint_stage_choice import pinned
+        selected=next((stage for stage in stages if stage['uuid']==plan.selected_stage['uuid']),None)
+        if not selected or pinned(selected)!=plan.selected_stage:
+            plan.status='unverified';plan.status_note='Your selected phase changed. Review its details again.'
+            plan.automatic_drop_id=plan.automatic_stage_id=None
+            return plan
+        active=[selected] if selected['starts_at']<=now<selected['ends_at'] else []
+        future=[selected] if selected['starts_at']>now else []
 
     plan.collection_name = str(detail.get("collection_name") or plan.collection_slug)[:150]
     plan.chain = chain_label
@@ -84,14 +93,21 @@ async def refresh_mint_plan(plan: MintPlan, wallet: Wallet, client: OpenSeaClien
         # OpenSea chooses the first *eligible* active stage, which need not be
         # the first entry in the schedule. Bind presale params to that stage.
         from app.services.seadrop_mint import decode_mint, match_stage, ALLOW_SELECTOR, SIGNED_SELECTOR
+        chosen=selected
         if transaction['data'][2:10].lower() in (ALLOW_SELECTOR,SIGNED_SELECTOR):
             mint=decode_mint(transaction,plan.contract_address,wallet.address,plan.quantity)
-            selected=match_stage(mint,active)
+            selected=match_stage(mint,stages if plan.selected_stage else active)
+            if plan.selected_stage and selected['uuid']!=plan.selected_stage['uuid']:
+                plan.status='not_ready';plan.status_note='OpenSea prepared another phase. Mintly will not switch your selected phase.'
+                return plan
             plan.stage_uuid=selected['uuid'];plan.stage_name=selected['name'];plan.stage_type=selected['type']
             plan.starts_at=selected['starts_at'];plan.ends_at=selected['ends_at'];plan.price_wei=selected['price_wei']
         elif transaction['data'][2:10].lower() == MINT_PUBLIC_SELECTOR:
             public=[stage for stage in active if stage['type']=='public_sale']
-            if len(public)!=1:raise OpenSeaUnavailable('The eligible public stage is ambiguous.',409)
+            if len(public)!=1:raise OpenSeaUnavailable('The selected phase is not the public phase returned by OpenSea.',409)
+            if plan.selected_stage and public[0]['uuid']!=plan.selected_stage['uuid']:
+                plan.status='not_ready';plan.status_note='OpenSea prepared another phase. No public fallback is allowed.'
+                return plan
             selected=public[0]
             plan.stage_uuid=selected['uuid'];plan.stage_name=selected['name'];plan.stage_type=selected['type']
             plan.starts_at=selected['starts_at'];plan.ends_at=selected['ends_at'];plan.price_wei=selected['price_wei']

@@ -9,6 +9,7 @@ import '../state/app_state.dart';
 import 'import_screen.dart';
 import 'custody_import_screen.dart';
 import 'wallet_setup_screen.dart';
+import 'opensea_access_screen.dart';
 
 class WalletScreen extends ConsumerStatefulWidget {
   const WalletScreen({super.key});
@@ -145,6 +146,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
                 const Text(
                   'Address linked. Import this wallet to prepare automatic minting.',
                 ),
+              OutlinedButton(onPressed:()=>Navigator.push(pageContext,MaterialPageRoute(builder:(_)=>OpenSeaAccessScreen(walletId:wallet['id'] as String))),child:const Text('OpenSea eligibility access')),
               for (final policy in policies)
                 Card(
                   child: Padding(
