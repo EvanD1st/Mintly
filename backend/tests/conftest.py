@@ -47,3 +47,11 @@ async def test_db():
             os.remove("./test_mintly.db")
         except Exception:
             pass
+
+
+@pytest.fixture(autouse=True)
+def isolate_opensea_memory_caches():
+    from app.services.opensea import _drop_cache,_verified_mints
+    _drop_cache.clear();_verified_mints.clear()
+    yield
+    _drop_cache.clear();_verified_mints.clear()

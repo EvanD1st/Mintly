@@ -15,7 +15,7 @@ from eth_utils import to_checksum_address
 from app.api.deps import get_db
 from app.config import settings
 from app.models import MintTask, MintAuthorization, AutomaticGrant, AutomaticNonce, Wallet, User, CopyRule, CopyWatch, CopyCheck
-from app.services import automatic
+from app.services import automatic, mint_instruction_cache
 from app.services.custody import CustodyVault, private_read
 from app.services.custody_accounts import verify_account
 from app.services.automatic_fees import quote_gas, maximum_fee, receipt_cost
@@ -107,6 +107,10 @@ async def preflight_task(db, task_id, vault=None):
         _preflights.pop(next(iter(_preflights)))
     if execution is not None:
         _preflights[task.id] = (checked, intent, execution)
+        cache_journal=vault.journal()
+        try:
+            mint_instruction_cache.put(cache_journal,task.id,intent,execution,s['expiry']);cache_journal.commit()
+        finally:cache_journal.close()
     task.preflight_checked_at, task.preflight_note = datetime.now(timezone.utc), note
     await db.commit()
     return {'status':'checked', 'note':note}
@@ -162,7 +166,7 @@ async def prepare_task(db, task_id, vault=None):
     if task.status not in ('armed', 'preparing'):
         raise ValueError('Task is cancelled or already terminal')
     auth = await db.get(MintAuthorization, task.authorization_id)
-    s = auth.snapshot
+    s = copy.deepcopy(auth.snapshot)
     grant = await automatic.grant_for(db, auth.grant_id, s['user_id'])
     wallet = await db.get(Wallet, task.wallet_id)
     user = await db.get(User, grant.user_id)
@@ -297,10 +301,13 @@ async def prepare_task(db, task_id, vault=None):
             cached = _preflights.pop(task.id, None)
             if not execution and cached and cached[1] == intent and time.monotonic() - cached[0] <= 90:
                 execution = cached[2]
+            if not execution:
+                execution=mint_instruction_cache.get(journal,task.id,intent)
             if execution:
                 await automatic.validate_mint(web3, s, {'to': execution['target'], 'value': execution['value'], 'data': execution['data']})
             else:
                 execution = await automatic.prepare_mint(web3, s)
+            mint_instruction_cache.put(journal,task.id,intent,execution,s['expiry'])
             pending = await web3.eth.get_transaction_count(address, 'pending')
             stored = (await db.execute(select(func.max(AutomaticNonce.nonce)).where(
                 AutomaticNonce.address == address.lower(), AutomaticNonce.chain_id == s['chain_id']))).scalar()
@@ -372,8 +379,11 @@ async def prepare(task_id: str, db=Depends(get_db)):
             return {**result,'_diagnostics':events}
         except OpenSeaUnavailable as error:
             await db.rollback()
+            retry_headers=mint_diagnostics.headers(events)
+            if error.retry_after_seconds is not None:
+                retry_headers['Retry-After']=str(max(1,min(86400,error.retry_after_seconds)))
             raise HTTPException(409 if error.status in (400,409,422) else 503,
-                'SeaDrop proof or exact-stage validation failed.' if error.status in (400,409,422) else 'Presale provider temporarily unavailable.',headers=mint_diagnostics.headers(events)) from None
+                'SeaDrop proof or exact-stage validation failed.' if error.status in (400,409,422) else 'Presale provider temporarily unavailable.',headers=retry_headers) from None
         except (ValueError, HTTPException) as error:
             await db.rollback()
             if isinstance(error,HTTPException) and (error.status_code == 429 or error.status_code >= 500):

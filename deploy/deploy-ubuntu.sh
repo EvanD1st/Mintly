@@ -15,7 +15,7 @@ if ! command -v docker >/dev/null || ! docker compose version >/dev/null 2>&1; t
     sudo -n systemctl enable --now docker
 fi
 DOCKER=(docker)
-if ! docker info >/dev/null 2>&1; then DOCKER=(sudo -n --preserve-env=MINTLY_ENV_FILE,MINTLY_RELEASE,MINTLY_FIREBASE_FILE,MINTLY_X_COOKIES_FILE,MINTLY_OPENSEA_DIR docker); fi
+if ! docker info >/dev/null 2>&1; then DOCKER=(sudo -n --preserve-env=MINTLY_ENV_FILE,MINTLY_RELEASE,MINTLY_FIREBASE_FILE,MINTLY_X_COOKIES_FILE,MINTLY_OPENSEA_DIR,MINTLY_OPENSEA_AUTO_RENEW docker); fi
 
 export MINTLY_ENV_FILE="$APP_DIR/shared/.env"
 export MINTLY_RELEASE="${MINTLY_RELEASE:-local}"
@@ -36,7 +36,18 @@ chmod 600 "$MINTLY_ENV_FILE"
 COMPOSE=("${DOCKER[@]}" compose --env-file "$MINTLY_ENV_FILE" -f "$RELEASE_DIR/backend/docker-compose.yml")
 export MINTLY_OPENSEA_DIR="$APP_DIR/shared/opensea"
 mkdir -p "$MINTLY_OPENSEA_DIR"
-chmod 700 "$MINTLY_OPENSEA_DIR"
+if [[ -f "$APP_DIR/shared/custody.env" ]]; then
+    export MINTLY_OPENSEA_AUTO_RENEW=true
+    # Root API/worker rotate the key; isolated UID/GID 10001 services only read it.
+    sudo -n chgrp 10001 "$MINTLY_OPENSEA_DIR"
+    chmod 750 "$MINTLY_OPENSEA_DIR"
+    if [[ -f "$MINTLY_OPENSEA_DIR/key.json" ]]; then
+        sudo -n chown 0:10001 "$MINTLY_OPENSEA_DIR/key.json"
+        sudo -n chmod 640 "$MINTLY_OPENSEA_DIR/key.json"
+    fi
+else
+    chmod 700 "$MINTLY_OPENSEA_DIR"
+fi
 COMPOSE+=(-f "$RELEASE_DIR/backend/docker-compose.opensea.yml")
 if [[ -f "$APP_DIR/shared/custody.env" ]]; then
     # Import/signing services are deployed separately; never start the spending

@@ -56,7 +56,7 @@ jobs:
         working-directory: backend
         run: |
           node --test tests/wallet-capabilities.browser.cjs
-          python -m pytest tests/test_automatic_evm.py tests/test_wallet_relink_networks_evm.py tests/test_copy_wallet_networks.py tests/test_copy_presales.py tests/test_wat_scheduling.py tests/test_automation_readiness.py tests/test_mint_controls.py tests/test_guided_journeys.py tests/test_opensea_identity.py tests/test_mint_diagnostics.py -v
+          python -m pytest tests/test_automatic_evm.py tests/test_wallet_relink_networks_evm.py tests/test_copy_wallet_networks.py tests/test_copy_presales.py tests/test_wat_scheduling.py tests/test_automation_readiness.py tests/test_mint_controls.py tests/test_guided_journeys.py tests/test_opensea_identity.py tests/test_mint_diagnostics.py tests/test_opensea_resilience.py -v
         env:
           MINTLY_TEST_RPC: http://127.0.0.1:18545
           MINTLY_TEST_DATABASE_URL: postgresql+asyncpg://mintly_test:disposable-ci-only@127.0.0.1:15432/mintly_test

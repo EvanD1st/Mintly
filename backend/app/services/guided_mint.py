@@ -27,6 +27,8 @@ async def own_presale(db,req,user_id,web3):
         raise HTTPException(409,'The project returned a different mint stage. Reopen the plan to review it.')
     await verify_presale(web3,mint,SimpleNamespace(starts_at=stage.start_time_utc,ends_at=stage.end_time_utc,
         price_wei=mint['params'][0],stage_type='presale'))
+    from app.services.opensea import remember_verified_mint
+    remember_verified_mint(collection_slug(drop.mint_page_url),wallet.address,req.quantity,tx,mint['params'][3])
     return mint
 
 

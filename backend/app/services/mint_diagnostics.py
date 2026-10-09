@@ -7,7 +7,7 @@ import json,logging,re,time
 
 _context=ContextVar('mint_http_diagnostics',default=None)
 log=logging.getLogger('uvicorn.error')
-FAILURES={'timeout','network_error','invalid_response','redirect','response_too_large'}
+FAILURES={'timeout','network_error','invalid_response','redirect','response_too_large','cooldown','paced'}
 ENDPOINTS={'drop_mint','drop_schedule','key_creation','contract_lookup','other_opensea'}
 
 

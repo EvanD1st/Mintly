@@ -18,7 +18,16 @@ async def lifespan(app: FastAPI):
             raise RuntimeError("Production requires DEBUG=false and a random APP_SECRET_KEY of at least 32 characters.")
     # Initialize DB schema
     await init_db()
-    yield
+    key_owner=None
+    if settings.APP_ENV=='production' and settings.OPENSEA_AUTO_RENEW_KEY and not settings.OPENSEA_KEY_READ_ONLY:
+        import asyncio
+        from app.services.opensea import refresh_shared_key
+        key_owner=asyncio.create_task(refresh_shared_key())
+    try:yield
+    finally:
+        if key_owner:
+            key_owner.cancel()
+            await asyncio.gather(key_owner,return_exceptions=True)
 
 
 app = FastAPI(

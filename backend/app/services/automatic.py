@@ -308,7 +308,11 @@ async def prepare_mint(web3, snapshot):
             raise OpenSeaUnavailable('Wallet-specific presale data is unavailable; provider access at opening is required.', 503)
         if CHAINS.get(tx.get('chain'), (None,))[0] != s['chain_id']:
             raise ValueError('Upstream mint chain mismatch')
-    return await validate_mint(web3, s, tx)
+    execution=await validate_mint(web3, s, tx)
+    if s['mint_kind']!='public':
+        from app.services.opensea import remember_verified_mint
+        remember_verified_mint(collection_slug(s['mint_page_url']),s['account'],s['quantity'],tx,s['end'])
+    return execution
 
 
 async def release_reservation(db, task, actual=0):

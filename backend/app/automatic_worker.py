@@ -262,14 +262,23 @@ async def step(session_factory=AsyncSessionLocal, sign=request_signature, *, now
                 await db.commit()
                 return True
             permanent = isinstance(error, httpx.HTTPStatusError) and error.response.status_code == 409
-            if permanent or task.preparation_attempts >= 6:
+            temporary=isinstance(error,(httpx.RequestError,httpx.HTTPStatusError)) and (
+                not isinstance(error,httpx.HTTPStatusError) or error.response.status_code in (429,500,502,503,504))
+            if permanent or (not temporary and task.preparation_attempts >= 6):
                 note = 'Bounded preparation retries exhausted. No transaction broadcast.'
                 if permanent:
                     note = error.response.json().get('detail', 'Signer rejected readiness or policy.')
                 await finish(db, task, 'expired' if note == 'Task or signer policy expired' else 'failed', note)
             else:
-                task.next_attempt_at = now + timedelta(seconds=max(15, min(2 ** task.preparation_attempts, 60)))
-                task.failure_reason = 'Preparation temporarily unavailable; bounded retry scheduled.'
+                provider_wait=0
+                for row in mint_diagnostics.from_error(error):
+                    provider_wait=max(provider_wait,row.get('retry_after_seconds') or 0)
+                if isinstance(error,httpx.HTTPStatusError):
+                    provider_wait=max(provider_wait,mint_diagnostics.retry_seconds(error.response.headers.get('Retry-After')) or 0)
+                delay=max(provider_wait,max(15,min(2 ** min(task.preparation_attempts,9),300)))
+                # The original approval expiry remains the hard boundary, including long cooldowns.
+                task.next_attempt_at=min(now+timedelta(seconds=delay),aware(task.expires_at_utc))
+                task.failure_reason = 'Preparation deferred; retry remains within the approved submission window.'
             await mint_diagnostics.save(db,task,'preparation',attempt_number,attempt_started,
                 'retry_scheduled' if task.status in ('armed','preparing') else task.status,
                 events=mint_diagnostics.from_error(error),status=error.response.status_code if isinstance(error,httpx.HTTPStatusError) else None,error=error)

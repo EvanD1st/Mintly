@@ -31,6 +31,7 @@ x-custody: &custody
     AUTOMATIC_SIGNER_URL: http://automatic-signer:18766
     AUTOMATIC_SIGNER_TOKEN_FILE: /run/custody-token/token
     AUTOMATIC_CONFIRMATIONS: "12"
+    OPENSEA_COORDINATE_REQUESTS: "true"
   depends_on:
     migrate:
       condition: service_completed_successfully
@@ -65,13 +66,15 @@ services:
       CUSTODY_VAULT_DIR: /run/custody-vault
       CUSTODY_PASSWORD_FILE: /run/custody-password/password
       CUSTODY_JOURNAL_FILE: /var/lib/custody/journal.sqlite
-      OPENSEA_KEY_FILE: /tmp/opensea-key.json
+      OPENSEA_KEY_FILE: /run/opensea/key.json
+      OPENSEA_KEY_READ_ONLY: "true"
     # No host port. Only this service receives the encrypted keys and decrypting secret.
     volumes:
       - ${CUSTODY_VAULT_HOST_DIR:?Set signer vault directory}:/run/custody-vault:ro
       - ${CUSTODY_PASSWORD_DIR:?Set independent password secret directory}:/run/custody-password:ro
       - ${CUSTODY_TOKEN_DIR:?Set protected token directory}:/run/custody-token:ro
       - ${CUSTODY_JOURNAL_DIR:?Set durable signer journal directory}:/var/lib/custody:rw
+      - ${MINTLY_OPENSEA_DIR:?Set protected API key directory}:/run/opensea:ro
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,pathlib; r=urllib.request.Request('http://127.0.0.1:18766/readyz',headers={'Authorization':'Bearer '+pathlib.Path('/run/custody-token/token').read_text().strip()}); urllib.request.urlopen(r,timeout=10)"]
       interval: 30s
@@ -99,6 +102,12 @@ services:
     <<: *custody
     networks: [default, custody-control]
     command: python -m app.copy_worker
+    environment:
+      <<: *custody-env
+      OPENSEA_KEY_FILE: /run/opensea/key.json
+      OPENSEA_KEY_READ_ONLY: "true"
+    volumes:
+      - ${MINTLY_OPENSEA_DIR:?Set protected API key directory}:/run/opensea:ro
     # Observation and task construction cannot access the key vault or password.
     healthcheck:
       test: ["CMD", "python", "-c", "import pathlib,time; assert time.time()-pathlib.Path('/tmp/mintly-copy.heartbeat').stat().st_mtime < 180"]
