@@ -1,0 +1,53 @@
+{
+  "source_commit": "16ec9905798f57cefa689a394064e4e0b169a6b6",
+  "checked_at": "2026-10-09T15:56:36.725350+00:00",
+  "ci": {
+    "run_id": 37953992144,
+    "url": "https://github.com/EvanD1st/Mintly/actions/runs/37953992144",
+    "backend_passed": 389,
+    "postgresql_passed": 211,
+    "flutter_passed": 84,
+    "flutter_analysis": "clean",
+    "native_session_tests": "passed",
+    "production_startup": "passed"
+  },
+  "deployment": {
+    "release": "mint-diagnostics-16ec990",
+    "exit_code": 0,
+    "services_healthy": true,
+    "schema": "017_mint_diagnostics",
+    "mobile_ota_required": false
+  },
+  "live_verification": {
+    "read_only_upstream_probe_status": 200,
+    "sanitized_status_in_control_plane_header": 200,
+    "diagnostics_schema_verified": true,
+    "historical_attempt_codes_backfilled": false,
+    "customer_mint_triggered": false
+  },
+  "records": [
+    "task_id",
+    "phase",
+    "attempt_number",
+    "started_at",
+    "finished_at",
+    "outcome",
+    "signer_http_status",
+    "error_category",
+    "upstream_events",
+    "next_retry_at"
+  ],
+  "privacy": {
+    "response_bodies_retained": false,
+    "request_payloads_retained": false,
+    "credentials_retained": false,
+    "signatures_or_transaction_bytes_retained": false
+  },
+  "execution_changes": {
+    "retry_count_changed": false,
+    "retry_delay_changed": false,
+    "approval_expiry_changed": false,
+    "spending_limits_changed": false,
+    "nonce_rules_changed": false
+  }
+}
