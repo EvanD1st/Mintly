@@ -41,6 +41,8 @@ async def stages(db,plan,user_id):
                 key=stage_key(row['stage_uuid'])
                 if key in lookup:raise ValueError('Duplicate eligibility stage')
                 lookup[key]=row
+        except HTTPException as error:
+            note=str(error.detail) if error.status_code==409 else 'Eligibility could not be verified now. Public stage details are still available.'
         except Exception:
             note='Eligibility could not be verified now. Public stage details are still available.'
     else:note='Enable read-only OpenSea access to check your whitelist stages.'
