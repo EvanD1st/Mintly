@@ -96,7 +96,7 @@ async def refresh_mint_plan(plan: MintPlan, wallet: Wallet, client: OpenSeaClien
             plan.stage_uuid=selected['uuid'];plan.stage_name=selected['name'];plan.stage_type=selected['type']
             plan.starts_at=selected['starts_at'];plan.ends_at=selected['ends_at'];plan.price_wei=selected['price_wei']
         plan.status = "ready_for_approval"
-        plan.status_note = "OpenSea prepared this wallet's mint. Approve the transaction in MetaMask."
+        plan.status_note = "OpenSea prepared this wallet’s mint. Review automatic signing access and spending limits before confirming."
         plan.mint_value_wei = value
         plan.estimated_network_fee_wei = await estimate_network_fee(transaction, wallet.address, detail["chain"])
         if transaction_out is not None:

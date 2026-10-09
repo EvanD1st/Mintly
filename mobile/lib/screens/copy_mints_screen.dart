@@ -673,10 +673,10 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
                   ],
                 ),
               ),
-              FilledButton(
+              Expanded(flex: 2, child: FilledButton(
                 onPressed: _busy ? null : () => _setup(watch),
-                child: Text(watch['check_only'] == true ? 'Manage checks' : active ? 'Copying active · Manage' : rules.any((r) => r['status'] == 'paused') ? 'Copying paused · Manage' : 'Set up copy'),
-              ),
+                child: Text(watch['check_only'] == true ? 'Manage checks' : active ? 'Copying active · Manage' : rules.any((r) => r['status'] == 'paused') ? 'Copying paused · Manage' : 'Set up copy', textAlign: TextAlign.center),
+              )),
             ],
           ),
           const SizedBox(height: 8),
