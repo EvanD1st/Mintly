@@ -251,6 +251,7 @@ void main() {
       'contract_address':address,'stages':[{'id':'s','stage_name':'GTD','start_time_utc':start.toIso8601String(),
         'end_time_utc':end.toIso8601String(),'price_wei':0,'price_eth_str':'0','limit_per_wallet':1}]});
     final plan = MintPlanModel.fromJson({'id':'p','wallet_id':'w','collection_name':'GTD collection',
+      'opensea_url':'https://opensea.io/collection/test','chain':'Robinhood','contract_address':address,'wallet_address':address,
       'stage_type':'signed_presale','quantity':1,'status':'scheduled','status_note':'GTD eligibility verified. Waiting for the stage to open.'});
     Map<String,dynamic>? received;
     var arms = 0;
