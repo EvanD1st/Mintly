@@ -35,6 +35,11 @@ async def add_watch_wallet(req:WatchWalletRequest,user=Depends(get_current_user)
         func.lower(Wallet.address)==req.address.lower()))
     if wallet:
         return WalletSchema.model_validate(wallet)
+    active_count=await db.scalar(select(func.count()).select_from(Wallet).where(Wallet.user_id==user.id,Wallet.archived_at.is_(None)))
+    if active_count>=20:
+        raise HTTPException(409,'Unlink a wallet before adding more than 20.')
+    if not req.label.strip():
+        raise HTTPException(422,'Enter a wallet name.')
     wallet=Wallet(id=str(uuid.uuid4()),user_id=user.id,address=to_checksum_address(req.address),label=req.label.strip(),
         signing_capability='watch_only',is_demo=False)
     db.add(wallet);await db.commit()

@@ -162,7 +162,7 @@ void main() {
       await tester.ensureVisible(find.text('Continue'));
       await tester.tap(find.text('Continue'));
       await tester.pumpAndSettle();
-      expect(find.text('Minting limits'), findsOneWidget);
+      expect(find.text('Approve signing limits'), findsOneWidget);
       expect(tester.takeException(), isNull);
       await capture('minting-limits');
     },

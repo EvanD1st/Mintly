@@ -89,6 +89,8 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Add address only'), findsOneWidget);
       expect(find.text('Secret recovery phrase'), findsNothing);
+      await tester.ensureVisible(find.text('Continue to automatic signing'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Continue to automatic signing'));
       await tester.pumpAndSettle();
       expect(find.text('Secret recovery phrase'), findsOneWidget);

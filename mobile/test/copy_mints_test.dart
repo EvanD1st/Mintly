@@ -149,6 +149,8 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Copy minting'), findsOneWidget);
       expect(approved, isNull);
+      await tester.ensureVisible(find.text('Set up copy'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Set up copy'));
       await tester.pumpAndSettle();
       expect(find.text('Copy settings'), findsOneWidget);
@@ -233,9 +235,13 @@ void main() {
         await tester.tap(find.textContaining('Everyday wallet ·').last);
         await tester.pumpAndSettle();
         await tester.ensureVisible(find.text('Custom'));
+        await tester.pumpAndSettle();
         await tester.tap(find.text('Custom'));
         await tester.pumpAndSettle();
-        await tester.enterText(find.byWidgetPredicate((w) => w is TextField && w.decoration?.labelText == 'Custom NFT quantity'), '2');
+        final custom = find.byWidgetPredicate((w) => w is TextField && w.decoration?.labelText == 'Custom NFT quantity');
+        await tester.ensureVisible(custom);
+        await tester.pumpAndSettle();
+        await tester.enterText(custom, '2');
         Future<void> reveal(Finder finder, {bool up = false}) async {
           await tester.scrollUntilVisible(
             finder,
@@ -393,7 +399,9 @@ void main() {
         await capture('activity');
         await tester.tap(find.text('Following').last);
         await tester.pumpAndSettle();
-        await tester.tap(find.text('Set up copy'));
+        await tester.ensureVisible(find.text('Set up copy'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Set up copy'));
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);
         await capture('settings');

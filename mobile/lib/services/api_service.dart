@@ -98,6 +98,7 @@ class ApiService extends ChangeNotifier {
     final revision = _sessionRevision;
     final token = _sessionToken;
     final remembered = expiry is String && await _store(() => _vault.save({'token':token,'expires_at':expiry,'origin':baseUrl}));
+    if (expiry is! String) await _store(() => _vault.clear());
     if (revision != _sessionRevision) return;
     sessionRemembered = remembered;
     notifyListeners();

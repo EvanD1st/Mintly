@@ -218,7 +218,7 @@ class _AutomaticReviewState extends ConsumerState<AutomaticReviewScreen> {
           ),
         ),
       );
-      Navigator.pop(context);
+      Navigator.pop(context, task.status);
     } catch (error) {
       if (mounted) setState(() => _error = '$error');
     } finally {
@@ -305,6 +305,7 @@ class _AutomaticReviewState extends ConsumerState<AutomaticReviewScreen> {
                 );
               },
             ),
+            Text(_stage.stageName,style:Theme.of(context).textTheme.bodySmall),
             Card(child:ListTile(
               title:const Text('Mint time (WAT)'),
               subtitle:Text(WatTime.label(_mintAt),key:const Key('automatic-mint-time')),

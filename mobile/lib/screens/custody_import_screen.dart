@@ -29,7 +29,7 @@ class _CustodyImportScreenState extends ConsumerState<CustodyImportScreen>
   final _key = TextEditingController();
   final _accountNumber = TextEditingController(text: '1');
   final _label = TextEditingController(text: 'Wallet');
-  String? _selectedAddress;
+  String? _selectedAddress, _targetWalletId;
   bool _showPhrase = false;
   final _password = TextEditingController();
   final _budget = TextEditingController();
@@ -55,6 +55,7 @@ class _CustodyImportScreenState extends ConsumerState<CustodyImportScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _targetWalletId = widget.walletId;
     _config = _loadConfig();
     final random = Random.secure();
     final bytes = List.generate(16, (_) => random.nextInt(256));
@@ -181,16 +182,16 @@ class _CustodyImportScreenState extends ConsumerState<CustodyImportScreen>
             derived.fillRange(0, derived.length, 0);
             return;
           }
-          if (wallets.any(
-            (w) =>
-                '${w['address']}'.toLowerCase() == accountAddress.toLowerCase(),
-          )) {
-            derived.fillRange(0, derived.length, 0);
-            setState(
-              () => _error =
-                  'This account is already linked. Choose another account number or phrase.',
-            );
-            return;
+          final matches = wallets.where((wallet) => '${wallet['address']}'.toLowerCase() == accountAddress.toLowerCase());
+          if (matches.isNotEmpty) {
+            final existing = matches.first;
+            if (existing['signing_capability'] == 'watch_only') {
+              _targetWalletId = existing['id'] as String;
+            } else {
+              derived.fillRange(0, derived.length, 0);
+              setState(() => _error = 'This account is already linked. Open its wallet details to review signing access.');
+              return;
+            }
           }
         }
         _clearKey();
@@ -227,7 +228,7 @@ class _CustodyImportScreenState extends ConsumerState<CustodyImportScreen>
     });
     final payload = <String, dynamic>{
       'request_id': _requestId,
-      if (widget.walletId != null) 'wallet_id': widget.walletId,
+      if (_targetWalletId != null) 'wallet_id': _targetWalletId,
       'account_address': _selectedAddress,
       'wallet_label': _label.text.trim().isEmpty
           ? 'Wallet'

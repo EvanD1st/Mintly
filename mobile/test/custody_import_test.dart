@@ -129,7 +129,7 @@ void main() {
       await tester.tap(find.text('Continue'));
       await tester.pumpAndSettle();
       expect(input.controller.text, isEmpty);
-      expect(find.text('Minting limits'), findsOneWidget);
+      expect(find.text('Approve signing limits'), findsOneWidget);
       expect(
         tester.widget<FilledButton>(find.byType(FilledButton)).onPressed,
         isNull,
@@ -214,7 +214,7 @@ void main() {
       pending.complete(key);
       await tester.pumpAndSettle();
       expect(key.every((v) => v == 0), isTrue);
-      expect(find.text('Minting limits'), findsNothing);
+      expect(find.text('Approve signing limits'), findsNothing);
       final input = tester.widget<EditableText>(
         find.descendant(
           of: find.byKey(const Key('custody-recovery-phrase')),
