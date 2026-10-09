@@ -96,6 +96,8 @@ async def select_stage(db,plan,body,user_id):
     plan.stage_uuid=stage['uuid'];plan.stage_name=stage['name'];plan.stage_type=stage['type']
     plan.starts_at=stage['starts_at'];plan.ends_at=stage['ends_at'];plan.price_wei=stage['price_wei']
     plan.automatic_drop_id=plan.automatic_stage_id=None
+    plan.mint_value_wei=plan.estimated_network_fee_wei=None
+    plan.next_check_at=max(stage['starts_at'],datetime.now(timezone.utc))
     plan.status='scheduled';plan.status_note='Selected phase saved. Exact eligibility and mint limits are verified before arming.'
     from app.api.mint_plans import record_plan
     record_plan(db,plan,wallet,'phase_selected');await db.commit()

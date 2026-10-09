@@ -34,7 +34,7 @@ async def refresh_mint_plan(plan: MintPlan, wallet: Wallet, client: OpenSeaClien
     active = [stage for stage in stages if stage["starts_at"] <= now < stage["ends_at"]]
     future = [stage for stage in stages if stage["starts_at"] > now]
     selected = active[0] if active else future[0] if future else None
-    if plan.selected_stage:
+    if getattr(plan,'selected_stage',None):
         from app.services.mint_stage_choice import pinned
         selected=next((stage for stage in stages if stage['uuid']==plan.selected_stage['uuid']),None)
         if not selected or pinned(selected)!=plan.selected_stage:
@@ -96,8 +96,8 @@ async def refresh_mint_plan(plan: MintPlan, wallet: Wallet, client: OpenSeaClien
         chosen=selected
         if transaction['data'][2:10].lower() in (ALLOW_SELECTOR,SIGNED_SELECTOR):
             mint=decode_mint(transaction,plan.contract_address,wallet.address,plan.quantity)
-            selected=match_stage(mint,stages if plan.selected_stage else active)
-            if plan.selected_stage and selected['uuid']!=plan.selected_stage['uuid']:
+            selected=match_stage(mint,stages if getattr(plan,'selected_stage',None) else active)
+            if getattr(plan,'selected_stage',None) and selected['uuid']!=plan.selected_stage['uuid']:
                 plan.status='not_ready';plan.status_note='OpenSea prepared another phase. Mintly will not switch your selected phase.'
                 return plan
             plan.stage_uuid=selected['uuid'];plan.stage_name=selected['name'];plan.stage_type=selected['type']
@@ -105,7 +105,7 @@ async def refresh_mint_plan(plan: MintPlan, wallet: Wallet, client: OpenSeaClien
         elif transaction['data'][2:10].lower() == MINT_PUBLIC_SELECTOR:
             public=[stage for stage in active if stage['type']=='public_sale']
             if len(public)!=1:raise OpenSeaUnavailable('The selected phase is not the public phase returned by OpenSea.',409)
-            if plan.selected_stage and public[0]['uuid']!=plan.selected_stage['uuid']:
+            if getattr(plan,'selected_stage',None) and public[0]['uuid']!=plan.selected_stage['uuid']:
                 plan.status='not_ready';plan.status_note='OpenSea prepared another phase. No public fallback is allowed.'
                 return plan
             selected=public[0]
