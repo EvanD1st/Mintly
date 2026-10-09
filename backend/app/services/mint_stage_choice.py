@@ -1,11 +1,18 @@
 """Explicit stage discovery/selection does not authorize a mint."""
 from datetime import datetime,timezone
+from uuid import UUID
 from fastapi import HTTPException
 from sqlalchemy import select,or_
 from app.models import Wallet,OpenSeaAccess,MintTask,MintPermission
 from app.services import automatic
 from app.services.mint_plans import aware
 from app.services.opensea import OpenSeaClient,stage_schedule
+
+
+def stage_key(value):
+    # OpenSea uses compact UUIDs in schedules and hyphenated UUIDs in eligibility.
+    try:return UUID(value).hex
+    except (ValueError,TypeError,AttributeError):return value
 
 
 def pinned(stage):
@@ -30,7 +37,10 @@ async def stages(db,plan,user_id):
             from app.api.opensea_access import broker
             response=await broker(wallet.id,'stages',slug=plan.collection_slug,key=await client._key())
             if response.get('address','').lower()!=wallet.address.lower():raise ValueError('Wallet result differs')
-            lookup={row['stage_uuid']:row for row in response['stages']}
+            for row in response['stages']:
+                key=stage_key(row['stage_uuid'])
+                if key in lookup:raise ValueError('Duplicate eligibility stage')
+                lookup[key]=row
         except Exception:
             note='Eligibility could not be verified now. Public stage details are still available.'
     else:note='Enable read-only OpenSea access to check your whitelist stages.'
@@ -50,7 +60,7 @@ async def stages(db,plan,user_id):
     result=[]
     now=datetime.now(timezone.utc)
     for stage in schedule:
-        own=lookup.get(stage['uuid'],{})
+        own=lookup.get(stage_key(stage['uuid']),{})
         eligible=own.get('eligible') if own.get('eligible') is not None else True if stage['type']=='public_sale' else None
         remaining=own.get('remaining')
         total=own.get('max_total_mintable_by_wallet')

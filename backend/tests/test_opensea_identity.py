@@ -185,3 +185,34 @@ async def test_phase_selection_pins_the_phase_and_tracks_actual_remaining_allowa
     async with lab.factory() as db:
         saved=await db.get(MintPlan,plan['id']);assert saved.selected_stage['uuid']==item['id'] and saved.quantity==3
         assert await db.scalar(select(func.count()).select_from(MintTask))==0
+
+
+async def test_compact_schedule_uuid_matches_hyphenated_eligibility_uuid(auth_lab,monkeypatch):
+    lab,_,_=auth_lab
+    plan,_=await plan_context(lab,monkeypatch)
+    await enable(lab)
+    from app.services.opensea import OpenSeaClient
+    uid='3130702aa76547c595b50fc33fcf35c1'
+    async def detail(self,slug):
+        return {'chain':'local-test','contract_address':lab.nft.address,'stages':[
+            {'uuid':uid,'stage_type':'signed_presale','label':'GTD','start_time':datetime.fromtimestamp(lab.start,timezone.utc).isoformat(),
+                'end_time':datetime.fromtimestamp(lab.end,timezone.utc).isoformat(),'price':'0','max_per_wallet':'1','price_currency_address':'0x'+'0'*40}]}
+    async def key(self):return 'api-key-disposable-1234'
+    async def result(*args,**kwargs):
+        return {'address':lab.owner.address,'stages':[{'stage_uuid':str(uuid.UUID(uid)),'eligible':True,
+            'max_total_mintable_by_wallet':1,'remaining':None,'price_wei':0}]}
+    monkeypatch.setattr(OpenSeaClient,'get_drop',detail)
+    monkeypatch.setattr(OpenSeaClient,'_key',key)
+    monkeypatch.setattr('app.api.opensea_access.broker',result)
+    response=await lab.client.get('/api/mint-plans/'+plan['id']+'/stages')
+    assert response.status_code==200,response.text
+    stage=response.json()['stages'][0]
+    assert stage['id']==uid and stage['eligibility']=='eligible'
+    assert stage['wallet_total_limit']==1 and stage['remaining']==1
+
+
+def test_stage_uuid_matching_preserves_non_uuid_ids_and_distinct_phases():
+    from app.services.mint_stage_choice import stage_key
+    assert stage_key('3130702a-a765-47c5-95b5-0fc33fcf35c1')==stage_key('3130702aa76547c595b50fc33fcf35c1')
+    assert stage_key('legacy-public')=='legacy-public'
+    assert stage_key('3130702aa76547c595b50fc33fcf35c1')!=stage_key('39a3ea976e6d4ee8adcadda82243ef78')
