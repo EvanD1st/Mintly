@@ -34,7 +34,7 @@ class _AutomationControlState extends ConsumerState<AutomationControl> {
     try {
       final status = await ref.read(apiServiceProvider).setAutomationPaused(paused);
       if (mounted) {
-        setState(() => _status = Future.value(status));
+        setState(() { _status = Future.value(status); });
         MintlyNotice.show(context, SnackBar(content: Text(paused ? 'All automation paused.' : 'Automation available. Review your paused actions.')));
       }
       await ref.read(mintlyProvider.notifier).loadInitialData();
@@ -56,7 +56,7 @@ class _AutomationControlState extends ConsumerState<AutomationControl> {
       if (snapshot.hasError) {
         return ListTile(
         title: const Text('Automation status unavailable'),
-        trailing: TextButton(onPressed: () => setState(() => _status = ref.read(apiServiceProvider).fetchAutomationStatus()), child: const Text('Retry')),
+        trailing: TextButton(onPressed: () => setState(() { _status = ref.read(apiServiceProvider).fetchAutomationStatus(); }), child: const Text('Retry')),
         );
       }
       final paused = snapshot.data?['paused'] == true;

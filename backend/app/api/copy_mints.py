@@ -521,6 +521,8 @@ async def retry_funded(event_id: str, user=Depends(get_current_user), db=Depends
             grant.reserved_wei += total
             rule.reserved_wei += total
             task.status, task.failure_reason, task.next_attempt_at = 'armed', None, None
+            from app.services.daily_budget import reserve
+            await reserve(db,task,auth,user.id,now=datetime.now(timezone.utc))
             task.preparation_attempts = 0
             event.status, event.note = 'armed', None
         record(db, user.id, 'Copy mint retry requested', 'Retry checked against the same wallet and approved limits.')

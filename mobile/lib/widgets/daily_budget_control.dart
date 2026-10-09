@@ -63,12 +63,12 @@ class _DailyBudgetControlState extends ConsumerState<DailyBudgetControl> {
     try {
       final result = await ref.read(apiServiceProvider).setDailyLimit(_enabled ? value : null);
       if (mounted) {
-        setState(() => _data = Future.value(result));
+        setState(() { _data = Future.value(result); });
         MintlyNotice.show(context, const SnackBar(content: Text('Daily spending limit saved.')));
       }
     } catch (error) {
       if (mounted) {
-        setState(() => _data = _load());
+        setState(() { _data = _load(); });
         MintlyNotice.show(context, SnackBar(content: Text('$error')));
       }
     } finally {
@@ -84,7 +84,7 @@ class _DailyBudgetControlState extends ConsumerState<DailyBudgetControl> {
     builder: (context, snapshot) {
       if (snapshot.hasError) {
         return ListTile(title: const Text('Daily limit unavailable'), trailing: TextButton(
-          onPressed: () => setState(() => _data = _load()), child: const Text('Retry')));
+          onPressed: () => setState(() { _data = _load(); }), child: const Text('Retry')));
       }
       final data = snapshot.data;
       return Padding(padding: const EdgeInsets.all(16), child: Column(

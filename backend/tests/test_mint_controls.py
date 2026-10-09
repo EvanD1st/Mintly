@@ -182,6 +182,22 @@ async def test_daily_journal_commit_loss_cannot_create_a_second_liability(lab,li
     journal.close()
 
 
+@pytest.mark.parametrize('settled',[False,True])
+async def test_preupgrade_signatures_are_backfilled_without_resetting_costs(lab,limits,settled):
+    tid=(await lab.client.post('/api/tasks/arm',json=lab.request)).json()['id']
+    chain_open(lab);await lab.sign(tid)
+    if settled:
+        await lab.due();await lab.tick();lab.w.provider.make_request('evm_mine',[])
+        await lab.due();await lab.tick()
+    journal=CustodyVault().journal()
+    journal.execute('DELETE FROM daily_signed');journal.commit();journal.close()
+    result=await limits('0.0006')
+    assert int(result['spent_wei'])>0 if settled else int(result['reserved_wei'])==500000000000020
+    journal=CustodyVault().journal()
+    assert journal.execute('SELECT COUNT(*) FROM daily_signed').fetchone()[0]==1
+    journal.close()
+
+
 async def test_resolved_daily_signature_charges_actual_once_and_releases_unused_cap(lab,limits):
     await limits('0.0006')
     tid=(await lab.client.post('/api/tasks/arm',json=lab.request)).json()['id']
@@ -328,6 +344,30 @@ async def test_entering_check_mode_pauses_existing_rules_and_unsigned_tasks(chec
         assert (await db.get(CopyRule,c['request']['request_id'])).status=='paused'
 
 
+async def test_funding_retry_restores_the_same_daily_reservation(copying,limits,monkeypatch):
+    c=copying;lab=c['lab']
+    await limits('0.0006')
+    await c['approve']();await c['mint'](1);await c['scan']()
+    async with lab.factory() as db:
+        event=await db.scalar(select(CopyEvent));tid=event.task_id;eid=event.id
+    lab.w.provider.make_request('hardhat_setBalance',[lab.owner.address,'0x0'])
+    await lab.due();await lab.tick()
+    async with lab.factory() as db:
+        assert (await db.get(MintTask,tid)).status=='failed'
+        assert (await db.get(DailyDebit,tid)).actual_wei==0
+    lab.w.provider.make_request('hardhat_setBalance',[lab.owner.address,hex(10**18)])
+    async def unsigned(task_id):
+        result=await lab.signer_client.get(f'/tasks/{task_id}/unsigned')
+        assert result.json()=={'unsigned':True}
+    monkeypatch.setattr('app.api.copy_mints.confirm_unsigned',unsigned)
+    retry=await lab.client.post('/api/copy-mints/events/'+eid+'/retry')
+    assert retry.status_code==200,retry.text
+    async with lab.factory() as db:
+        row=await db.get(DailyDebit,tid)
+        assert row.actual_wei is None and row.maximum_wei==500000000000010
+        assert await db.scalar(select(func.count()).select_from(DailyDebit))==1
+
+
 @pytest.mark.parametrize('reason',['price','gas','funding','stage_ended'])
 async def test_check_only_explains_skips_without_creating_tasks(checks,reason):
     c,request,enable=checks;lab=c['lab']
@@ -363,6 +403,16 @@ async def test_check_only_can_be_started_without_signing_policy(checks):
         await db.commit()
     await enable();await c['mint'](1);await c['scan']()
     assert (await lab.client.get('/api/copy-mints/check-results')).json()['results'][0]['status']=='would_copy'
+
+
+async def test_check_only_cannot_be_bypassed_by_manual_copy_review(checks):
+    c,request,enable=checks;lab=c['lab']
+    await enable();await c['mint'](1);await c['scan']()
+    event=(await lab.client.get('/api/copy-mints/activity')).json()['events'][0]
+    context=(await lab.client.get('/api/copy-mints/events/'+event['id']+'/context')).json()
+    body={**lab.request,'copy_event_id':event['id'],'drop_id':context['drop']['id'],'stage_id':context['drop']['stages'][0]['id']}
+    assert (await lab.client.post('/api/tasks/arm',json=body)).status_code==409
+    async with lab.factory() as db:assert await db.scalar(select(func.count()).select_from(MintTask))==0
 
 
 async def test_wallet_alerts_dedupe_recover_and_stay_on_owned_devices(lab,monkeypatch):
@@ -407,6 +457,37 @@ async def test_muted_alerts_and_removed_wallets_do_not_send(lab):
     await lab.client.delete('/api/wallets/'+lab.wallet.id)
     await wallet_alerts.poll(lab.factory,balance);await wallet_alerts.deliver(lab.factory,forbidden)
     async with lab.factory() as db:assert not any(a.pending for a in (await db.scalars(select(WalletAlert))).all())
+
+
+async def test_renewed_approval_clears_expiry_alert_without_sending_stale_message(lab):
+    async def balance(*args):return 10**18
+    await wallet_alerts.poll(lab.factory,balance)
+    async with lab.factory() as db:
+        assert (await db.scalar(select(WalletAlert).where(WalletAlert.kind=='approval_expiry'))).active
+        (await db.get(AutomaticGrant,lab.grant.id)).expires_at=datetime.now(timezone.utc)+timedelta(days=3)
+        await db.commit()
+    await wallet_alerts.poll(lab.factory,balance)
+    async with lab.factory() as db:
+        alert=await db.scalar(select(WalletAlert).where(WalletAlert.kind=='approval_expiry'))
+        assert not alert.active and not alert.pending
+
+
+async def test_alert_version_change_during_delivery_does_not_acknowledge_new_alert(lab):
+    async def balance(*args):return 10**18
+    async with lab.factory() as db:
+        db.add(NotificationDevice(user_id=lab.user.id,device_token='versioned-alert-token-long',platform='android',is_active=True,preferences={'wallet_alerts':True}))
+        await db.commit()
+    await wallet_alerts.poll(lab.factory,balance)
+    async def notify(*args,**kwargs):
+        async with lab.factory() as db:
+            alert=await db.scalar(select(WalletAlert).where(WalletAlert.kind=='approval_expiry'))
+            alert.version+=1
+            alert.pending=True
+            await db.commit()
+        return True
+    await wallet_alerts.deliver(lab.factory,notify)
+    async with lab.factory() as db:
+        assert (await db.scalar(select(WalletAlert).where(WalletAlert.kind=='approval_expiry'))).pending
 
 
 async def test_no_wallet_alert_can_be_broadcast_without_an_owner():

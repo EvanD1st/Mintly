@@ -263,6 +263,7 @@ void main() {
         await reveal(find.byType(CheckboxListTile));
         await tester.tap(find.byType(CheckboxListTile));
         await reveal(find.text('Free mints only'), up: true);
+        await tester.pumpAndSettle();
         await tester.tap(find.text('Free mints only'));
         await tester.pumpAndSettle();
         await reveal(find.text('Maximum available for my wallet'), up: true);
