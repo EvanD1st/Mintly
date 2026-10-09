@@ -85,7 +85,19 @@ class _AutomaticReviewState extends ConsumerState<AutomaticReviewScreen> {
     _review = null;
     _request = null;
     _consent = false;
-    _mintAt = WatTime.defaultForStage(_stage.startTimeUtc,DateTime.now().toUtc());
+    _mintAt = _defaultMintTime();
+  }
+
+  bool get _scheduledWhitelist => widget.plan != null &&
+      (widget.initialMintKind != 'public' ||
+          (widget.plan!.stageType != null && widget.plan!.stageType != 'public_sale'));
+
+  DateTime _defaultMintTime() {
+    final now = DateTime.now().toUtc();
+    if (_scheduledWhitelist && _stage.startTimeUtc.toUtc().isAfter(now)) {
+      return _stage.startTimeUtc.toUtc().add(const Duration(seconds:15));
+    }
+    return WatTime.defaultForStage(_stage.startTimeUtc,now);
   }
 
   Future<void> _pickMintTime() async {
@@ -313,9 +325,9 @@ class _AutomaticReviewState extends ConsumerState<AutomaticReviewScreen> {
             )),
             if (_stage.startTimeUtc.toUtc().isAfter(DateTime.now().toUtc()))
               TextButton(onPressed:_busy ? null : () => setState(() {
-                _mintAt = WatTime.defaultForStage(_stage.startTimeUtc,DateTime.now().toUtc());
+                _mintAt = _defaultMintTime();
                 _consent = false;
-              }),child:const Text('Use stage opening time')),
+              }),child:Text(_scheduledWhitelist ? 'Use opening time + 15 seconds' : 'Use stage opening time')),
             const Text('Time is always WAT. Confirmation can be later than the selected time.',style:TextStyle(fontSize:12)),
             TextField(controller:_quantity,enabled:!_busy,keyboardType:TextInputType.number,
               decoration:const InputDecoration(labelText:'NFT quantity')),
@@ -384,7 +396,11 @@ class _AutomaticReviewState extends ConsumerState<AutomaticReviewScreen> {
                     Text(
                       'Approval ends: ${WatTime.label(DateTime.fromMillisecondsSinceEpoch((snapshot['expiry'] as int) * 1000, isUtc: true))}',
                     ),
-                    Text('Eligibility: ${_review!['eligibility']}'),
+                    Text(_review!['eligibility'] == 'verified_waiting_for_instructions'
+                        ? 'Eligibility verified. Mint instructions will be checked when the stage opens.'
+                        : 'Eligibility: ${_review!['eligibility']}'),
+                    if (_review!['execution_ready'] == false)
+                      const Text('The server will attempt this selected phase at the approved time, even with the app closed. If instructions arrive late, it retries within your approval window. No public fallback.'),
                   ],
                 ),
               ),

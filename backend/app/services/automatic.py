@@ -20,7 +20,7 @@ from web3 import AsyncWeb3
 from app.config import settings
 from app.models import AutomaticGrant, AutomaticLock, Drop, MintStage, Wallet, MintTask, MintAuthorization, MintPlan
 from app.services.mint_plans import aware
-from app.services.opensea import OpenSeaClient, OpenSeaUnavailable, collection_slug, CHAINS
+from app.services.opensea import OpenSeaClient, OpenSeaUnavailable, collection_slug, CHAINS, stage_schedule
 from app.services.seadrop_mint import decode_mint, verify_presale
 from app.services.signer.base import SEADROP_V1_ADDRESS, MINT_PUBLIC_SELECTOR
 
@@ -153,8 +153,12 @@ async def make_snapshot(db, req, user_id, *, presale_mint=None):
         raise HTTPException(409, 'Drop chain or contract integration is unsupported for this signer.')
     if not allows_collection(grant.scope, drop.contract_address) or req.mint_kind not in grant.scope['mint_kinds']:
         raise HTTPException(409, 'Contract or mint method is outside the signer policy.')
+    deferred_stage=None
     if req.mint_kind != 'public' and req.conditional_eligibility and req.onchain_stage_index is None:
-        raise HTTPException(409, 'A conditional presale needs the verified on-chain stage index before arming; an ambiguous stage label is insufficient.')
+        if not req.guided or req.copy_event_id:
+            raise HTTPException(409, 'A conditional presale needs a verified selected phase before arming.')
+        from app.services.mint_stage_choice import deferred_presale
+        deferred_stage,_=await deferred_presale(db,req,user_id)
     stage_price, stage_limit = stage.price_wei, stage.limit_per_wallet
     if presale_mint is not None:
         p = presale_mint['params']
@@ -201,6 +205,12 @@ async def make_snapshot(db, req, user_id, *, presale_mint=None):
         'conditional_eligibility': req.conditional_eligibility,
         'onchain_stage_index': req.onchain_stage_index,
     }
+    if deferred_stage is not None:
+        snapshot['selected_phase']=deferred_stage
+        # The reviewed, persisted target is at least 15 seconds after opening.
+        execute_at=max(execute_at or 0,int(start.timestamp())+15)
+        if execute_at>=int(expiry.timestamp()):
+            raise HTTPException(409,'The phase closes before the delayed submission time.')
     if execute_at is not None:
         snapshot['execute_at'] = execute_at
     if getattr(req, 'copy_event_id', None):
@@ -260,6 +270,16 @@ async def validate_mint(web3, snapshot, transaction):
         if minted + s['quantity'] > limit or supply + s['quantity'] > maximum:
             raise ValueError('Public wallet limit or collection supply is insufficient')
     else:
+        if s.get('selected_phase'):
+            from app.services.mint_stage_choice import pinned
+            from app.services.seadrop_mint import match_stage
+            detail=await OpenSeaClient().get_drop(collection_slug(s['mint_page_url']))
+            if (CHAINS.get(detail.get('chain'),(None,))[0]!=s['chain_id']
+                    or detail['contract_address'].lower()!=s['contract'].lower()):
+                raise OpenSeaUnavailable('The approved phase network or collection changed.',409)
+            selected=match_stage(mint,stage_schedule(detail))
+            if pinned(selected)!=s['selected_phase']:
+                raise OpenSeaUnavailable('Mint instructions differ from the approved phase. No phase fallback is allowed.',409)
         if s.get('onchain_stage_index') is not None and mint['params'][4] != s['onchain_stage_index']:
             raise ValueError('Upstream selected a different on-chain presale stage index')
         stage = SimpleNamespace(starts_at=datetime.fromtimestamp(s['start'], timezone.utc),

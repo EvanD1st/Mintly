@@ -300,7 +300,7 @@ class MintlyWorker:
             await session.commit()
             return
         try:
-            await refresh_mint_plan(plan, wallet, now=now)
+            await refresh_mint_plan(plan, wallet, now=now, db=session)
         except OpenSeaUnavailable as error:
             plan.status = "error"
             plan.status_note = str(error)
