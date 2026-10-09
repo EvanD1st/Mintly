@@ -60,7 +60,8 @@ class _StagesState extends ConsumerState<MintStagesScreen> {
           Text('${{'eligible':'Eligible','not_eligible':'Not eligible','unverified':'Not yet verified'}[raw['eligibility']]} · ${raw['timing']}'),
           Text('Opens ${WatTime.label(DateTime.parse('${raw['starts_at']}'))}'),
           Text(_price(raw['price_wei'])),
-          Text(raw['remaining']==null?'Your remaining allowance: not verified':'Available for your wallet: ${raw['remaining']} NFTs'),
+          Text(raw['eligibility']=='not_eligible' ? 'No eligible allocation for this wallet'
+              : raw['remaining']==null ? 'Your remaining allowance: not verified' : 'Available for your wallet: ${raw['remaining']} NFTs'),
           Text('Stage default allocation: ${raw['default_limit']} NFTs',style:Theme.of(context).textTheme.bodySmall),
           OutlinedButton(onPressed:_busy || raw['timing']=='ended' || raw['eligibility']=='not_eligible'?null:()=>setState(()=>_selected='${raw['id']}'),
             child:Text(_selected==raw['id']?'Selected phase':'Choose this phase')),
@@ -68,7 +69,8 @@ class _StagesState extends ConsumerState<MintStagesScreen> {
       ],
       TextField(controller:_quantity,enabled:!_busy,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'NFT quantity')),
       if(_error!=null) Text(_error!,style:TextStyle(color:Theme.of(context).colorScheme.error)),
-      FilledButton(onPressed:_busy || _selected==null?null:_save,child:const Text('Continue with this phase')),
-      const Text('Eligibility and remaining supply can change. Exact wallet proofs and spending limits must pass before arming. A GTD label does not guarantee transaction success.'),
+      FilledButton(onPressed:_busy || _selected==null ||
+          (_data?['stages'] as List? ?? []).any((s)=>s['id']==_selected && (s['eligibility']=='not_eligible' || s['timing']=='ended'))?null:_save,child:const Text('Continue with this phase')),
+      const Text('Eligibility and remaining supply can change. Eligible upcoming phases can be approved in advance. Exact wallet proofs and spending limits must pass before signing. A GTD label does not guarantee transaction success.'),
     ]));
 }
