@@ -2,10 +2,13 @@
 from datetime import datetime,timezone
 from sqlalchemy import select,func
 import pytest
+import uuid
+from eth_account import Account
 from app.models import Wallet,MintTask,MintAuthorization,AutomaticGrant,CopyRule,CopyEvent
 from app.services import automatic
 from app.services.custody import CustodyVault
-from test_automatic_evm import lab
+from test_automatic_evm import lab,importer
+from test_wallet_relink_networks_evm import new_wallet_request
 from test_copy_mints import copying
 from test_copy_presales import presale
 
@@ -138,3 +141,45 @@ async def test_paid_maximum_whitelist_uses_receiving_wallet_allowance(presale,ki
     journal=CustodyVault().journal()
     assert journal.execute('SELECT COUNT(*) FROM signed').fetchone()[0]==1
     journal.close()
+
+
+async def test_address_view_cannot_block_possession_verified_custody_owner(lab,importer):
+    client,base=importer
+    admin=(await lab.client.post('/api/auth/login',json={'username':'admin','password':'Admin test password 123'})).json()
+    watch=await lab.client.post('/api/wallets/watch',headers={'Authorization':'Bearer '+admin['token']},
+        json={'label':'Public view','address':lab.owner.address})
+    assert watch.status_code==200,watch.text
+    granted=await client.post('/api/automatic/import',json=base)
+    assert granted.status_code==200,granted.text
+    async with lab.factory() as db:
+        assert (await db.get(Wallet,watch.json()['id'])).signing_capability=='watch_only'
+        assert (await db.get(Wallet,lab.wallet.id)).user_id==lab.user.id
+
+
+async def test_owned_address_only_promotion_is_explicit_and_keeps_wallet_identity(lab,importer):
+    client,base=importer
+    account=Account.create()
+    added=await lab.client.post('/api/wallets/watch',json={'label':'Dedicated minting account','address':account.address})
+    wid=added.json()['id']
+    granted=await client.post('/api/automatic/import',json={**new_wallet_request(base,account),'wallet_id':wid})
+    assert granted.status_code==200,granted.text
+    assert granted.json()['wallet_id']==wid
+    async with lab.factory() as db:
+        assert (await db.get(Wallet,wid)).signing_capability=='custodial'
+        grants=(await db.scalars(select(AutomaticGrant).where(AutomaticGrant.wallet_id==wid))).all()
+        assert len(grants)==1 and grants[0].user_id==lab.user.id
+
+
+async def test_address_only_promotion_cannot_bypass_unresolved_signature(copying,importer):
+    c=copying;lab=c['lab'];client,base=importer
+    await c['approve']();await c['mint'](1);await c['scan']()
+    async with lab.factory() as db:
+        event=await db.scalar(select(CopyEvent));tid=event.task_id
+    await lab.sign(tid)
+    await lab.client.delete('/api/wallets/'+lab.wallet.id)
+    added=await lab.client.post('/api/wallets/watch',json={'label':'Read-only view','address':lab.owner.address})
+    assert added.status_code==200
+    promote=await client.post('/api/automatic/import',json={**new_wallet_request(base,lab.owner),'wallet_id':added.json()['id']})
+    assert promote.status_code==409 and 'unresolved' in promote.text
+    async with lab.factory() as db:
+        assert (await db.get(Wallet,added.json()['id'])).signing_capability=='watch_only'
