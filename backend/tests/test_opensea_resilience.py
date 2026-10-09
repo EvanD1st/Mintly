@@ -148,7 +148,7 @@ async def test_cached_proof_is_rejected_when_onchain_allowlist_changes(lab,monke
     async with lab.factory() as db:await preflight_task(db,tid)
     _preflights.clear()
     lab.w.provider.make_request('hardhat_impersonateAccount',[lab.nft.address])
-    lab.sea.functions.updateAllowList(bytes.fromhex('11'*32),[],[]).transact({'from':lab.nft.address})
+    lab.sea.functions.updateAllowList((bytes.fromhex('11'*32),[],'')).transact({'from':lab.nft.address})
     lab.w.provider.make_request('hardhat_stopImpersonatingAccount',[lab.nft.address])
     async def unexpected(*args,**kwargs):raise AssertionError('The encrypted cache should be found')
     monkeypatch.setattr(OpenSeaClient,'build_mint',unexpected)
