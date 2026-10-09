@@ -1,0 +1,195 @@
+{
+  "status": "verified",
+  "source": "43c3dfb9caf3a48932370cc91347326f548546d6",
+  "checked_at_utc": "2026-10-09T09:50:10.505109+00:00",
+  "ci_url": "https://github.com/EvanD1st/Mintly/actions/runs/37910770572",
+  "ota_url": "https://github.com/EvanD1st/Mintly/actions/runs/37911774344",
+  "migration": "016_opensea_eligibility",
+  "server_release": "/home/ubuntu/Mintly/releases/opensea-eligibility-43c3dfb",
+  "tests": {
+    "backend": 356,
+    "postgresql": 178,
+    "flutter": 83,
+    "flutter_legacy_icons": 83,
+    "android_secure_session": 5,
+    "flutter_analyze": "No issues found"
+  },
+  "retention": {
+    "Wallet": {
+      "before": 4,
+      "after": 4,
+      "immutable_fingerprints_retained": true
+    },
+    "AutomaticGrant": {
+      "before": 19,
+      "after": 19,
+      "immutable_fingerprints_retained": true
+    },
+    "CopyRule": {
+      "before": 28,
+      "after": 28,
+      "immutable_fingerprints_retained": true
+    },
+    "MintTask": {
+      "before": 5,
+      "after": 5,
+      "immutable_fingerprints_retained": true
+    },
+    "MintPlan": {
+      "before": 3,
+      "after": 3,
+      "immutable_fingerprints_retained": true
+    },
+    "MintAuthorization": {
+      "before": 5,
+      "after": 5,
+      "immutable_fingerprints_retained": true
+    },
+    "MintPlanRecord": {
+      "before": 16,
+      "after": 16,
+      "immutable_fingerprints_retained": true
+    }
+  },
+  "read_only_production_checks": {
+    "read_only": true,
+    "migration": "016_opensea_eligibility",
+    "wallet_scope_checks": 3,
+    "consent_rows": 0,
+    "live_wallet_logins_requested": 0,
+    "mainnet_test_transactions": 0,
+    "deployment_opt_ins": 0
+  },
+  "patches": [
+    {
+      "version": "1.1.2+5",
+      "patch_id": 706703,
+      "patch_number": 1,
+      "track": "stable",
+      "rolled_back": false,
+      "audit": {
+        "changed_assets": [],
+        "font_compatibility": {
+          "installed_glyphs": 26,
+          "required_glyphs": 26
+        },
+        "installed_sha256": "5b90c2916bf4ddecbc5b472251cad26002a33e425211f49765a95621de66cf68",
+        "built_sha256": "a648d1382c821719fd330319faf9351cc4a15c9a36329b00243d37377529f971",
+        "release_version": "1.1.2+5",
+        "track": "stable",
+        "legacy_icons": false,
+        "browser_links": "native launcher",
+        "preserved_installed_launcher": false,
+        "native_checks": "Shorebird enabled; no override"
+      }
+    },
+    {
+      "version": "1.1.1+4",
+      "patch_id": 706711,
+      "patch_number": 16,
+      "track": "stable",
+      "rolled_back": false,
+      "audit": {
+        "changed_assets": [
+          "base/assets/flutter_assets/fonts/MaterialIcons-Regular.otf"
+        ],
+        "font_compatibility": {
+          "installed_glyphs": 34,
+          "required_glyphs": 26
+        },
+        "installed_sha256": "40180a4e181a25c9194ee50e58d3487040bc48c09e079fefb8e74841fa034e9b",
+        "built_sha256": "3d7f4bcb62f899b7007b5abb64f81574760b8676e1e90d96e5da4c5c6bacbaa2",
+        "release_version": "1.1.1+4",
+        "track": "stable",
+        "legacy_icons": false,
+        "browser_links": "native launcher",
+        "preserved_installed_launcher": false,
+        "native_checks": "Shorebird enabled; no override"
+      }
+    },
+    {
+      "version": "1.1.0+3",
+      "patch_id": 706715,
+      "patch_number": 26,
+      "track": "stable",
+      "rolled_back": false,
+      "audit": {
+        "changed_assets": [
+          "base/assets/flutter_assets/NOTICES.Z",
+          "base/assets/flutter_assets/fonts/MaterialIcons-Regular.otf"
+        ],
+        "font_compatibility": {
+          "installed_glyphs": 33,
+          "required_glyphs": 26
+        },
+        "installed_sha256": "a0cb1f84d3a50b55983285ff1ea762d51fc4b5b3d0a048a4d0b718e84970d28c",
+        "built_sha256": "3d7f4bcb62f899b7007b5abb64f81574760b8676e1e90d96e5da4c5c6bacbaa2",
+        "release_version": "1.1.0+3",
+        "track": "stable",
+        "legacy_icons": false,
+        "browser_links": "native launcher",
+        "preserved_installed_launcher": false,
+        "native_checks": "Shorebird enabled; no override"
+      }
+    },
+    {
+      "version": "1.0.1+2",
+      "patch_id": 706720,
+      "patch_number": 16,
+      "track": "stable",
+      "rolled_back": false,
+      "audit": {
+        "changed_assets": [
+          "base/assets/flutter_assets/NOTICES.Z",
+          "base/assets/flutter_assets/fonts/MaterialIcons-Regular.otf"
+        ],
+        "font_compatibility": {
+          "installed_glyphs": 28,
+          "required_glyphs": 19
+        },
+        "installed_sha256": "ce1aa4d6e315d2ac28630c82f3e6c6f74b671558d388008a436528f9fd29cb76",
+        "built_sha256": "0623e37eeba0d5e1cb587e2f80ca102a5f4e931e4b4d87789fed8b1811264d36",
+        "release_version": "1.0.1+2",
+        "track": "stable",
+        "legacy_icons": true,
+        "browser_links": "copy and paste",
+        "preserved_installed_launcher": false,
+        "native_checks": "Shorebird enabled; no override"
+      }
+    },
+    {
+      "version": "1.0.0+1",
+      "patch_id": 706728,
+      "patch_number": 16,
+      "track": "stable",
+      "rolled_back": false,
+      "audit": {
+        "changed_assets": [
+          "base/assets/flutter_assets/NOTICES.Z",
+          "base/assets/flutter_assets/fonts/MaterialIcons-Regular.otf"
+        ],
+        "font_compatibility": {
+          "installed_glyphs": 28,
+          "required_glyphs": 19
+        },
+        "installed_sha256": "74b532a2c2eea51fd585a2dd9ab65d366cb722d0613642ddeb2823bccd4efff8",
+        "built_sha256": "94bd72153d0546229f90283a63b66fd17b4b7c7b1abca6e7a6f6275035ef5f2b",
+        "release_version": "1.0.0+1",
+        "track": "stable",
+        "legacy_icons": true,
+        "browser_links": "copy and paste",
+        "preserved_installed_launcher": true,
+        "native_checks": "Shorebird enabled; no override"
+      }
+    }
+  ],
+  "real_wallet_authentication": "Not invoked by the agent; each wallet owner must accept in-app consent before first live lookup.",
+  "existing_approvals_expanded": false,
+  "native_installer_required": false,
+  "phone_activation": "Not observed; installed online apps apply downloaded patches on a subsequent restart.",
+  "behavior": {
+    "auth": "Canonical nonce-bound OpenSea-only sign-in; read:eligibility only; bounded consent; encrypted credentials remain inside isolated signer; no mint/nonce/reservation created.",
+    "ownership": "Consent and credentials bound to user/wallet/address/revision/expiry; address-only and foreign wallet requests rejected; unlink disables local access and initiates revocation.",
+    "phases": "Per-wallet eligibility and remaining allowance; explicit immutable phase selection; no fallback to another stage; unsupported/ambiguous or unavailable proofs fail closed."
+  }
+}
