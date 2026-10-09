@@ -6,7 +6,7 @@ import httpx,pytest
 from sqlalchemy import select
 from app.services import mint_diagnostics as diag
 from app.services.opensea import OpenSeaClient,OpenSeaUnavailable
-from app.models import MintAttemptDiagnostic,MintTask
+from app.models import MintAttemptDiagnostic,MintTask,MintAuthorization
 from app.automatic_worker import step,preflight_step
 from test_automatic_evm import lab
 
@@ -73,6 +73,12 @@ async def test_signer_mapping_and_worker_retain_original_code_and_retry_deadline
     armed=await lab.client.post('/api/tasks/arm',json={**lab.request,'mint_kind':'allowlist'})
     assert armed.status_code==200,armed.text
     tid=armed.json()['id']
+    # Simulate an approved upcoming task whose proof is fetched at execution.
+    async with lab.factory() as db:
+        task=await db.get(MintTask,tid)
+        auth=await db.get(MintAuthorization,task.authorization_id)
+        auth.snapshot={**auth.snapshot,'execution':None}
+        await db.commit()
     from app.services.opensea import OpenSeaClient
     async def unavailable(*args,**kwargs):
         diag.record_http('POST','/drops/test/mint',code,'37',time.monotonic())
