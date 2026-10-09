@@ -200,4 +200,43 @@ void main() {
       expect(find.textContaining('Automatic mint armed.'), findsNothing);
     },
   );
+
+  testWidgets('missing signing prerequisite has a working setup link and retains draft fields', (tester) async {
+    tester.view.physicalSize = const Size(900, 1800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    var loads = 0;
+    final now = DateTime.now().toUtc();
+    final drop = DropModel.fromJson({'id':'d','name':'Draft collection','chain_id':4663,
+      'stages':[{'id':'s','stage_name':'Public stage','start_time_utc':now.add(const Duration(hours:1)).toIso8601String(),
+        'end_time_utc':now.add(const Duration(hours:2)).toIso8601String(),'price_wei':0,'price_eth_str':'0','limit_per_wallet':10}]});
+    final api = ApiService(client:MockClient((r) async {
+      if (r.url.path.endsWith('/auth/login')) { return http.Response('{"token":"test","user":{"username":"member"}}',200); }
+      loads++;
+      expect(r.url.path.endsWith('/automatic/policies'),true);
+      return http.Response('[]',200);
+    }));
+    await api.login('member','password');
+    await tester.pumpWidget(ProviderScope(overrides:[apiServiceProvider.overrideWith((ref)=>api)],
+      child:MaterialApp(home:AutomaticReviewScreen(drop:drop))));
+    await tester.pumpAndSettle();
+    expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton,'Review limits')).onPressed,isNull);
+    Finder field(String label)=>find.byWidgetPredicate((w)=>w is TextField && w.decoration?.labelText==label);
+    await tester.enterText(field('NFT quantity'),'3');
+    await tester.enterText(field('Maximum total spend (ETH)'),'0.004');
+    final time = tester.widget<Text>(find.byKey(const Key('automatic-mint-time'))).data;
+    await tester.tap(find.text('Set up wallet'));
+    await tester.pumpAndSettle();
+    expect(find.text('Add address only'),findsOneWidget);
+    expect(find.text('Continue to automatic signing'),findsOneWidget);
+    expect(find.text('Secret recovery phrase'),findsNothing);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(loads,2);
+    expect(tester.widget<TextField>(field('NFT quantity')).controller!.text,'3');
+    expect(tester.widget<TextField>(field('Maximum total spend (ETH)')).controller!.text,'0.004');
+    expect(tester.widget<Text>(find.byKey(const Key('automatic-mint-time'))).data,time);
+    await tester.pumpWidget(const SizedBox());
+  });
 }

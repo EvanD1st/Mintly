@@ -37,6 +37,7 @@ final networks = [
 Future<ApiService> apiFor({
   void Function(Map<String, dynamic>)? approved,
   bool populated = true,
+  bool active = false,
 }) async {
   final api = ApiService(
     client: MockClient((r) async {
@@ -52,7 +53,7 @@ Future<ApiService> apiFor({
         data = {
           'enabled': true,
           'networks': networks,
-          'watches': populated ? [watch] : [],
+          'watches': populated ? [{...watch, if(active) 'rules':[{'status':'active'}]}] : [],
         };
       } else if (r.url.path.endsWith('/copy-mints/activity')) {
         data = {
@@ -210,9 +211,9 @@ void main() {
     },
   );
 
-  for (final keepFree in [true, false]) {
+  for (final (keepFree, paidMax) in [(true,false), (false,false), (false,true)]) {
     testWidgets(
-      'Free mints only approves max; toggling off restores fixed quantity: $keepFree',
+      'Free mints only approves max; toggling off restores fixed quantity: $keepFree / paid maximum $paidMax',
       (tester) async {
         tester.view.physicalSize = const Size(390, 844);
         tester.view.devicePixelRatio = 1;
@@ -290,14 +291,15 @@ void main() {
           await reveal(find.text('Custom'), up: true);
           expect(find.text('Custom'), findsOneWidget);
           await enter('Max mint price per NFT', '0.00001');
+          if (paidMax) { await reveal(find.text('Max mint'),up:true); await tester.tap(find.text('Max mint')); await tester.pumpAndSettle(); }
         }
         await reveal(find.byType(CheckboxListTile));
         await tester.tap(find.byType(CheckboxListTile));
         await reveal(find.text('Enable copy minting'));
         await tester.tap(find.text('Enable copy minting'));
         await tester.pumpAndSettle();
-        expect(approved?['quantity_mode'], keepFree ? 'max_free' : 'fixed');
-        expect(approved?['quantity'], keepFree ? 100 : 2);
+        expect(approved?['quantity_mode'], keepFree ? 'max_free' : paidMax ? 'max_available' : 'fixed');
+        expect(approved?['quantity'], keepFree || paidMax ? 100 : 2);
         expect(approved?['price_cap_eth'], keepFree ? '0' : '0.00001');
         expect(approved?['free_only'], keepFree);
         expect(approved?['fee_cap_eth'], '0.0001');
@@ -423,6 +425,26 @@ void main() {
       },
     );
   }
+
+  testWidgets('active copying is clearly labelled and opens management', (tester) async {
+    tester.view.physicalSize = const Size(390,844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final api = await apiFor(active:true);
+    await tester.pumpWidget(ProviderScope(overrides:[apiServiceProvider.overrideWith((ref)=>api)],
+      child:MaterialApp(theme:MintlyTheme.light(),home:const CopyMintsScreen())));
+    await tester.pumpAndSettle();
+    expect(find.text('Set up copy'),findsNothing);
+    expect(find.text('Copying active · Manage'),findsOneWidget);
+    await tester.ensureVisible(find.text('Copying active · Manage'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Copying active · Manage'));
+    await tester.pumpAndSettle();
+    expect(find.text('Copy settings'),findsOneWidget);
+    expect(tester.takeException(),isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
 
   testWidgets(
     'empty copy screen does not fabricate followed wallets or mints',
