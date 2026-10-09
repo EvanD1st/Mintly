@@ -3,7 +3,7 @@ from datetime import datetime,timezone,timedelta
 import pytest
 from sqlalchemy import select
 from app.models import CopyEvent,MintTask
-from app.services import copy_mints as copying
+from app.services import copy_mints as copy_service
 from app.services.opensea import OpenSeaUnavailable
 from test_copy_presales import presale
 from test_copy_mints import copying
@@ -14,11 +14,11 @@ async def prepared_events(presale):
     c,state,_,mint_source=presale
     await c['approve']();await mint_source()
     lab=c['lab']
-    original=copying.arm_event
+    original=copy_service.arm_event
     # Observe the real source while temporarily holding preparation.
     async def wait(*args):raise OpenSeaUnavailable('temporary fixture hold',retry_after_seconds=1)
     from unittest.mock import patch
-    with patch.object(copying,'arm_event',wait):await c['scan']()
+    with patch.object(copy_service,'arm_event',wait):await c['scan']()
     async with lab.factory() as db:
         event=await db.scalar(select(CopyEvent).where(CopyEvent.watch_id==c['watch_id']))
         event.next_attempt_at=None;event.note=None;event.last_error_category=None
@@ -37,8 +37,8 @@ async def test_deferral_does_not_rollback_previous_event_or_block_later_event(pr
     async def process(db,event,rule,web3):
         if event.id=='1'*64:raise OpenSeaUnavailable('provider cooldown',retry_after_seconds=600)
         event.status='skipped';event.note='Persisted independently.'
-    monkeypatch.setattr(copying,'arm_event',process)
-    async with lab.factory() as db:await copying.process_copy_events(db,c['watch_id'],31337)
+    monkeypatch.setattr(copy_service,'arm_event',process)
+    async with lab.factory() as db:await copy_service.process_copy_events(db,c['watch_id'],31337)
     async with lab.factory() as db:
         rows=(await db.scalars(select(CopyEvent).where(CopyEvent.watch_id==c['watch_id']).order_by(CopyEvent.created_at))).all()
         assert [e.status for e in rows]==['skipped','detected','skipped']
@@ -52,8 +52,8 @@ async def test_expired_phase_skips_without_upstream_call(presale,monkeypatch):
     async with lab.factory() as db:
         e=await db.get(CopyEvent,eid);e.observation={**o,'end':int(datetime.now(timezone.utc).timestamp())-1};await db.commit()
     async def unexpected(*args):raise AssertionError('Expired phase must not be prepared')
-    monkeypatch.setattr(copying,'arm_event',unexpected)
-    async with lab.factory() as db:await copying.process_copy_events(db,c['watch_id'],31337)
+    monkeypatch.setattr(copy_service,'arm_event',unexpected)
+    async with lab.factory() as db:await copy_service.process_copy_events(db,c['watch_id'],31337)
     async with lab.factory() as db:
         e=await db.get(CopyEvent,eid);assert e.status=='skipped' and e.last_error_category=='phase_ended'
         assert e.next_attempt_at is None and e.task_id is None
@@ -64,7 +64,7 @@ async def test_temporary_422_retries_and_never_claims_ineligible(presale,monkeyp
     from app.services.opensea import OpenSeaClient
     async def unavailable(*args,**kwargs):return 422,None
     monkeypatch.setattr(OpenSeaClient,'build_mint',unavailable)
-    async with lab.factory() as db:await copying.process_copy_events(db,c['watch_id'],31337)
+    async with lab.factory() as db:await copy_service.process_copy_events(db,c['watch_id'],31337)
     async with lab.factory() as db:
         e=await db.get(CopyEvent,eid)
         assert e.status=='detected' and e.task_id is None and e.next_attempt_at is not None
