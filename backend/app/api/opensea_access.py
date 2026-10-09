@@ -79,7 +79,7 @@ async def change(wallet_id:str,req:AccessRequest,user=Depends(get_current_user),
         if result.get('revision')!=revision or result.get('scopes')!=SCOPES:raise ValueError('Consent confirmation differs')
     except Exception:
         # Disabled consent blocks locally immediately, even when remote revocation is pending.
-        if not req.enabled:return {'wallet_id':wallet.id,'enabled':False,'status':'revocation_pending','scopes':SCOPES}
+        if not req.enabled:return {**public(row,wallet),'enabled':False,'status':'revocation_pending'}
         raise HTTPException(503,'Consent saved; OpenSea connection is pending. Retry to confirm.') from None
     await automatic.lock_execution(db);await db.refresh(row);await db.refresh(wallet)
     if row.revision!=revision or wallet.archived_at:raise HTTPException(409,'Wallet access changed. Reload this screen.')

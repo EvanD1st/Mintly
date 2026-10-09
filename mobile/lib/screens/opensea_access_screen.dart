@@ -18,7 +18,7 @@ class _AccessState extends ConsumerState<OpenSeaAccessScreen> {
   void initState(){super.initState();_load();}
   Future<void> _load() async {
     try { final result=await ref.read(apiServiceProvider).fetchOpenSeaAccess(widget.walletId);
-      if(mounted) setState(()=>_data=result);
+      if(mounted) setState((){_data=result;_error=null;});
     } catch(error){if(mounted) setState(()=>_error='$error');}
   }
   Future<void> _change(bool enabled) async {
