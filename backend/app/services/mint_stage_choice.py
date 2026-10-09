@@ -90,8 +90,11 @@ async def select_stage(db,plan,body,user_id):
     await automatic.lock_execution(db);await db.refresh(plan)
     wallet=await db.get(Wallet,plan.wallet_id,populate_existing=True)
     if plan.user_id!=user_id or plan.archived_at or wallet.archived_at:raise HTTPException(409,'The plan or wallet changed.')
-    pending=await db.scalar(select(MintTask.id).where(MintTask.plan_id==plan.id,MintTask.status.not_in(automatic.TERMINAL)).limit(1))
-    if pending:raise HTTPException(409,'The plan was armed while checking its phases.')
+    pending=await db.scalar(select(MintTask.id).where(MintTask.plan_id==plan.id,or_(
+        MintTask.status.not_in(automatic.TERMINAL),MintTask.signed_tx_raw.is_not(None)&MintTask.status.not_in(('confirmed','reverted')))).limit(1))
+    legacy=await db.scalar(select(MintPermission.id).where(MintPermission.plan_id==plan.id,
+        MintPermission.status.in_(('awaiting_signature','armed','prepared','submitted','uncertain'))).limit(1))
+    if pending or legacy:raise HTTPException(409,'The plan was armed while checking its phases.')
     plan.selected_stage=pinned(stage);plan.quantity=body.quantity
     plan.stage_uuid=stage['uuid'];plan.stage_name=stage['name'];plan.stage_type=stage['type']
     plan.starts_at=stage['starts_at'];plan.ends_at=stage['ends_at'];plan.price_wei=stage['price_wei']
