@@ -6,6 +6,8 @@ from app.models import CopyEvent,MintTask
 from app.services import copy_mints as copying
 from app.services.opensea import OpenSeaUnavailable
 from test_copy_presales import presale
+from test_copy_mints import copying
+from test_automatic_evm import lab
 
 
 async def prepared_events(presale):

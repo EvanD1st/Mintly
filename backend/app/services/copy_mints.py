@@ -610,7 +610,10 @@ async def process_copy_events(db,watch_id,chain):
                     event.last_upstream_status=next((e['http_status'] for e in reversed(events) if e.get('http_status') is not None),None)
                 except HTTPException as error:
                     await db.refresh(event);await db.refresh(rule)
-                    if error.status_code>=500 or error.status_code==429:
+                    from app.services.daily_budget import LIMIT_NOTE
+                    if error.status_code==429 and error.detail==LIMIT_NOTE:
+                        event.status='skipped';event.note=LIMIT_NOTE;event.next_attempt_at=None;event.last_error_category='daily_limit'
+                    elif error.status_code>=500 or error.status_code==429:
                         event.next_attempt_at=min(datetime.now(timezone.utc)+timedelta(seconds=60),end,aware(rule.expires_at))
                         event.note='Copy checks temporarily unavailable. Mintly will retry within this phase.'
                         event.last_error_category='temporary_checks_unavailable'

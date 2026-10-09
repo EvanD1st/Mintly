@@ -136,7 +136,7 @@ async def test_paid_maximum_whitelist_uses_receiving_wallet_allowance(presale,ki
         assert auth.quantity==7 and auth.snapshot['price_wei']==5
         assert auth.snapshot['copy_quantity_mode']=='max_available'
         assert auth.snapshot['onchain_stage_index']==7
-    assert (lab.owner.address.lower(),7) in state.calls
+    assert state.calls==[(lab.owner.address.lower(),1)]  # Reuse the verified proof for the permitted quantity.
     await lab.sign(task.id)
     journal=CustodyVault().journal()
     assert journal.execute('SELECT COUNT(*) FROM signed').fetchone()[0]==1
