@@ -459,6 +459,8 @@ async def activity(watch_id: str | None = None, offset: int = Query(0, ge=0), li
             'observed_at': event.created_at, 'observation': o,
             'status': 'skipped' if funding and unsigned else (task.status if task else event.status),
             'note': note, 'task_id': event.task_id,
+            'next_attempt_at':event.next_attempt_at,'last_checked_at':event.last_checked_at,
+            'last_error_category':event.last_error_category,'last_upstream_status':event.last_upstream_status,
             'retryable': funding and unsigned and (task is None or task.status == 'failed') and not watch.archived_at
                 and o.get('end', 0) > int(datetime.now(timezone.utc).timestamp()),
             'transaction_hash': task.transaction_hash if task else None,
