@@ -104,8 +104,8 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
       context,
       MaterialPageRoute(
         builder: (_) => wallet == null ? const WalletSetupScreen() : CustodyImportScreen(
-          walletId: wallet?['id'] as String?,
-          address: wallet?['address'] as String?,
+          walletId: wallet['id'] as String?,
+          address: wallet['address'] as String?,
         ),
       ),
     );

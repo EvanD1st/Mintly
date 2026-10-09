@@ -47,7 +47,7 @@ async def list_wallets(user=Depends(get_current_user), db=Depends(get_db)):
 
 @router.post('/pairings')
 async def start_pairing(user=Depends(get_current_user)):
-    raise HTTPException(410, 'Add your wallet using its recovery phrase in the Mintly app.')
+    raise HTTPException(410, 'Open Set up wallet in Mintly to add an address or explicitly enable automatic signing.')
 
 
 @router.get('/readiness')

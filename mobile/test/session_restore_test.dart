@@ -60,9 +60,9 @@ void main() {
     test('$method session expiry clears identity and secure storage', () async {
       final vault = MemoryVault();
       final api = ApiService(vault: vault, client: MockClient((r) async {
-        if (r.url.path.endsWith('/auth/login')) return http.Response(jsonEncode({
+        if (r.url.path.endsWith('/auth/login')) { return http.Response(jsonEncode({
           ...credential(), 'user': {'id': 'owner', 'username': 'member'},
-        }), 200);
+        }), 200); } }
         expect(r.method, method);
         return http.Response('{"detail":"Session expired"}', 401);
       }));
@@ -83,9 +83,9 @@ void main() {
     final stale = Completer<http.Response>();
     var loginCount = 0;
     final api = ApiService(vault: vault, client: MockClient((r) async {
-      if (r.url.path.endsWith('/auth/login')) return http.Response(jsonEncode({
+      if (r.url.path.endsWith('/auth/login')) { return http.Response(jsonEncode({
         ...credential(), 'user': {'id': '${++loginCount}', 'username': 'member'},
-      }), 200);
+      }), 200); }
       return stale.future;
     }));
     await api.login('member', 'password');

@@ -87,9 +87,42 @@ jobs:
       - run: flutter analyze
       - run: flutter test
 
+  secure-session:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.8'
+          channel: stable
+          cache: true
+      - run: |
+          sudo chmod 666 /dev/kvm
+          cd mobile
+          flutter pub get
+          flutter build apk --debug
+          cd android
+          ./gradlew app:assembleDebugAndroidTest
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          profile: pixel_2
+          disable-animations: true
+          script: |
+            adb install -r mobile/build/app/outputs/flutter-apk/app-debug.apk
+            adb install -r mobile/build/app/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+            adb shell am instrument -w com.mintly.mintly.test/com.mintly.mintly.test.SecureSessionInstrumentation | tee session-tests.txt
+            grep -q 'Secure session: round-trip, encrypted disk, restart, tamper, clear passed.' session-tests.txt
+
   deploy-ubuntu:
     name: Deploy verified revision to Ubuntu
-    needs: [backend-tests, mobile-tests]
+    needs: [backend-tests, mobile-tests, secure-session]
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     concurrency:

@@ -7,6 +7,7 @@ from app.services import automatic
 from app.services.custody import CustodyVault
 from test_automatic_evm import lab
 from test_copy_mints import copying
+from test_copy_presales import presale
 
 
 async def test_address_only_wallet_creates_no_signing_authority(lab):
@@ -117,3 +118,23 @@ async def test_legacy_idempotency_digest_is_preserved(lab):
         task=await db.get(MintTask,result.json()['id'])
         assert task.request_hash==automatic.digest(body.model_dump(mode='json',exclude={'idempotency_key','guided'}))
     assert (await lab.client.post('/api/tasks/arm',json=lab.request)).json()['id']==result.json()['id']
+
+
+@pytest.mark.parametrize('kind',['allowlist','signed'])
+async def test_paid_maximum_whitelist_uses_receiving_wallet_allowance(presale,kind):
+    c,state,_,mint_source=presale
+    lab=c['lab'];state.kind=kind
+    c['request'].update(quantity=100,quantity_mode='max_available')
+    await c['approve']();await mint_source();await c['scan']()
+    async with lab.factory() as db:
+        event=await db.scalar(select(CopyEvent));task=await db.get(MintTask,event.task_id)
+        assert task is not None,event.note
+        auth=await db.get(MintAuthorization,task.authorization_id)
+        assert auth.quantity==7 and auth.snapshot['price_wei']==5
+        assert auth.snapshot['copy_quantity_mode']=='max_available'
+        assert auth.snapshot['onchain_stage_index']==7
+    assert (lab.owner.address.lower(),7) in state.calls
+    await lab.sign(task.id)
+    journal=CustodyVault().journal()
+    assert journal.execute('SELECT COUNT(*) FROM signed').fetchone()[0]==1
+    journal.close()
