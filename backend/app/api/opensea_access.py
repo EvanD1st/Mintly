@@ -38,7 +38,11 @@ async def broker(wallet_id,operation,*,slug=None,key=None):
     async with httpx.AsyncClient(timeout=75,trust_env=False) as client:
         r=await client.post(settings.AUTOMATIC_SIGNER_URL+path,headers={'Authorization':'Bearer '+token},
             json={'api_key':key} if operation!='register' else None)
-        if r.status_code==409:raise HTTPException(409,'Reconnect this wallet’s OpenSea eligibility access.')
+        if r.status_code==409:
+            mismatch='OpenSea returned another linked wallet. Reconnect eligibility access for this receiving wallet.'
+            try:detail=r.json().get('detail')
+            except Exception:detail=None
+            raise HTTPException(409,mismatch if detail==mismatch else 'Reconnect this wallet’s OpenSea eligibility access.')
         if r.status_code!=200:raise HTTPException(503,'OpenSea eligibility access is unavailable. Try again.')
         return r.json()
 

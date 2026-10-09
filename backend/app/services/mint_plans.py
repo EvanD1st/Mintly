@@ -74,6 +74,8 @@ async def refresh_mint_plan(plan: MintPlan, wallet: Wallet, client: OpenSeaClien
                         plan.status_note=f"{selected['name'].strip()} eligibility verified. Waiting for the stage to open."
                     elif item and item['eligibility']=='not_eligible':
                         plan.status_note=f"This wallet is not eligible for {selected['name'].strip()}. Choose another phase."
+                    elif result.get('note'):
+                        plan.status_note=result['note']
                 except Exception:
                     pass  # Verification failure must never become invented eligibility.
             plan.next_check_at = selected["starts_at"]

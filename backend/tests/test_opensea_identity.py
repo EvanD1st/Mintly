@@ -1,5 +1,5 @@
 """Real custody key -> fixed off-chain login -> encrypted read-only identity -> stage data."""
-import json,uuid,time
+import json,uuid,time,base64
 from pathlib import Path
 from datetime import datetime,timezone
 from eth_account import Account
@@ -12,6 +12,11 @@ from app.models import Wallet,OpenSeaAccess,MintTask,AutomaticNonce,MintPlan,Aut
 from app.services import opensea_identity as identity,automatic
 from app.services.custody import CustodyVault
 from test_automatic_evm import lab,plan_context
+
+
+def wallet_jwt(address):
+    payload=base64.urlsafe_b64encode(json.dumps({'wallet':address}).encode()).decode().rstrip('=')
+    return 'eyJhbGciOiJSUzI1NiJ9.'+payload+'.jwt-disposable-secret-123456'
 
 
 @pytest.fixture
@@ -40,12 +45,12 @@ async def auth_lab(lab,monkeypatch):
             if path.endswith('/tokens/exchange'):
                 assert body=={'subjectToken':'pat-disposable-secret-123456','subjectTokenType':'ACCESS_TOKEN'}
                 assert not headers  # Session cookies never accompany the scoped token exchange.
-                return {'accessToken':'jwt-disposable-secret-123456','expiresIn':3600,'tokenScopes':['read:eligibility']},{}
+                return {'accessToken':wallet_jwt(faults.get('jwt_wallet',lab.owner.address)),'expiresIn':3600,'tokenScopes':['read:eligibility']},{}
             if path.endswith('/session/refresh'):
                 return {},{'access_token':'cookie-rotated-disposable-123456','refresh_token':'cookie-refresh-disposable-123456'}
             if method=='DELETE':return {},{}
             if path.endswith('/eligibility'):
-                assert headers['Authorization']=='Bearer jwt-disposable-secret-123456'
+                assert headers['Authorization']=='Bearer '+wallet_jwt(lab.owner.address)
                 assert 'Cookie' not in headers
                 return {'wallet_address':lab.owner.address,'stages':[{'stage_uuid':'gtd','is_eligible':True,
                     'price':'5','max_total_mintable_by_wallet':'7'}],'accessToken':'must-not-leak'},{}
@@ -266,9 +271,11 @@ async def selected_upcoming(lab,monkeypatch,*,eligible=True,remaining=1,duplicat
     return plan,body
 
 
-async def test_verified_upcoming_phase_can_be_approved_without_proof_and_executes_once_offline(auth_lab,monkeypatch):
+@pytest.mark.parametrize('quantity',[1,2])
+async def test_verified_upcoming_phase_can_be_approved_without_proof_and_executes_once_offline(auth_lab,monkeypatch,quantity):
     lab,_,_=auth_lab
-    plan,body=await selected_upcoming(lab,monkeypatch)
+    plan,body=await selected_upcoming(lab,monkeypatch,remaining=quantity)
+    body['quantity']=quantity
     lab.kind='signed'
     result=await lab.client.post('/api/tasks/guided-preview',json=body)
     assert result.status_code==200,result.text
@@ -299,7 +306,7 @@ async def test_verified_upcoming_phase_can_be_approved_without_proof_and_execute
     await lab.due();await lab.tick();await lab.due();await lab.tick()
     lab.w.provider.make_request('evm_mine',[]);await lab.due();await lab.tick()
     async with lab.factory() as db:assert (await db.get(MintTask,tid)).status=='confirmed'
-    assert lab.nft.functions.totalSupply().call()==1
+    assert lab.nft.functions.totalSupply().call()==quantity
     assert lab.nft.functions.ownerOf(1).call()==lab.owner.address
     journal=CustodyVault().journal();assert journal.execute('SELECT COUNT(*) FROM signed').fetchone()[0]==1;journal.close()
 
@@ -368,3 +375,37 @@ async def test_ambiguous_upcoming_whitelist_phases_cannot_be_armed(auth_lab,monk
     _,response=await selected_upcoming(lab,monkeypatch,duplicate=True)
     assert response.status_code==409,response.text
     async with lab.factory() as db:assert await db.scalar(select(func.count()).select_from(MintTask))==0
+
+
+async def test_primary_wallet_drift_is_repaired_once_within_existing_read_only_consent(auth_lab):
+    lab,calls,_=auth_lab;await enable(lab)
+    journal=CustodyVault().journal();pin=journal.execute('SELECT * FROM opensea_identity').fetchone()
+    state=identity.unseal(pin);state['access_token']=wallet_jwt('0x'+'22'*20)
+    journal.execute('UPDATE opensea_identity SET state=?',(identity.seal(state,pin),));journal.commit();journal.close()
+    async with lab.factory() as db:
+        result=await identity.connection(db,lab.wallet.id,'stages',slug='example',key='api-disposable-key-1234')
+    assert result['address'].lower()==lab.owner.address.lower()
+    assert len([c for c in calls if c[1].endswith('/siwe/verify')])==2
+    journal=CustodyVault().journal();assert journal.execute('SELECT COUNT(*) FROM signed').fetchone()[0]==0;journal.close()
+
+
+async def test_primary_wallet_drift_that_cannot_be_repaired_is_blocked_without_foreign_eligibility(auth_lab):
+    lab,calls,faults=auth_lab;await enable(lab)
+    faults['jwt_wallet']='0x'+'22'*20
+    journal=CustodyVault().journal();pin=journal.execute('SELECT * FROM opensea_identity').fetchone()
+    state=identity.unseal(pin);state['expires_at']=0
+    journal.execute('UPDATE opensea_identity SET state=?',(identity.seal(state,pin),));journal.commit();journal.close()
+    before=len([c for c in calls if c[1].endswith('/eligibility')])
+    async with lab.factory() as db:
+        with pytest.raises(identity.IdentityWalletMismatch):
+            await identity.connection(db,lab.wallet.id,'stages',slug='example',key='api-disposable-key-1234')
+    async with lab.factory() as db:
+        with pytest.raises(ValueError):await identity.connection(db,lab.wallet.id,'stages',slug='example',key='api-disposable-key-1234')
+    assert len([c for c in calls if c[1].endswith('/eligibility')])==before
+    assert len([c for c in calls if c[1].endswith('/siwe/verify')])==2
+    journal=CustodyVault().journal();assert journal.execute('SELECT COUNT(*) FROM signed').fetchone()[0]==0;journal.close()
+
+
+@pytest.mark.parametrize('token',['opaque-token','a.e30.signature',wallet_jwt('0x'+'22'*20)])
+def test_missing_or_other_wallet_claim_is_never_used_for_eligibility(token):
+    with pytest.raises(identity.IdentityUnavailable):identity.require_wallet(token,'0x'+'11'*20)

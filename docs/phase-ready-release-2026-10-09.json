@@ -1,0 +1,109 @@
+{
+  "source_commit": "ddf244de68f02196a8246b4e672ca7ad1c744ba3",
+  "checked_at": "2026-10-09T12:10:51.631665+00:00",
+  "ci": {
+    "run_id": 37924486013,
+    "url": "https://github.com/EvanD1st/Mintly/actions/runs/37924486013",
+    "backend_passed": 376,
+    "postgresql_passed": 198,
+    "flutter_passed": 84,
+    "flutter_analysis": "clean",
+    "native_session_tests": "passed"
+  },
+  "server": {
+    "release": "phase-ready-ddf244d",
+    "deployment_exit_code": 0,
+    "services_healthy": true,
+    "ethereum_base_robinhood_enabled": true
+  },
+  "ota": {
+    "run_id": 37925706153,
+    "url": "https://github.com/EvanD1st/Mintly/actions/runs/37925706153",
+    "compatibility_audits": "passed for all installed versions",
+    "patches": [
+      {
+        "version": "1.1.2+5",
+        "release_id": 886581,
+        "patch_id": 706995,
+        "patch_number": 2,
+        "track": "stable",
+        "rolled_back": false,
+        "architectures": [
+          "arm",
+          "aarch64",
+          "x86_64"
+        ]
+      },
+      {
+        "version": "1.1.1+4",
+        "release_id": 873625,
+        "patch_id": 706998,
+        "patch_number": 17,
+        "track": "stable",
+        "rolled_back": false,
+        "architectures": [
+          "arm",
+          "aarch64",
+          "x86_64"
+        ]
+      },
+      {
+        "version": "1.1.0+3",
+        "release_id": 865993,
+        "patch_id": 707001,
+        "patch_number": 27,
+        "track": "stable",
+        "rolled_back": false,
+        "architectures": [
+          "arm",
+          "aarch64",
+          "x86_64"
+        ]
+      },
+      {
+        "version": "1.0.1+2",
+        "release_id": 865414,
+        "patch_id": 707004,
+        "patch_number": 17,
+        "track": "stable",
+        "rolled_back": false,
+        "architectures": [
+          "arm",
+          "aarch64",
+          "x86_64"
+        ]
+      },
+      {
+        "version": "1.0.0+1",
+        "release_id": 865318,
+        "patch_id": 707008,
+        "patch_number": 17,
+        "track": "stable",
+        "rolled_back": false,
+        "architectures": [
+          "arm",
+          "aarch64",
+          "x86_64"
+        ]
+      }
+    ]
+  },
+  "live_checks": {
+    "wallet_jwt_matches_receiving_address": true,
+    "receiving_wallet_identity_blocked": false,
+    "selected_phase_eligibility_verified": true,
+    "selected_phase_remaining_quantity": 1,
+    "allowance_read_error": false,
+    "plan_status_note": "GTD eligibility verified. Waiting for the stage to open.",
+    "diagnostic_plan_armed_tasks": 0,
+    "diagnostic_plan_signed_mints": 0
+  },
+  "execution": {
+    "advance_approval": "explicit user consent with finite quantity, selected phase, gas and total limits",
+    "default_whitelist_target": "15 seconds after stage opening, or a later user-selected WAT time",
+    "late_instructions_max_preparation_attempts": 6,
+    "public_fallback": false,
+    "confirmation_guaranteed": false,
+    "existing_approvals_modified": false
+  }
+}
