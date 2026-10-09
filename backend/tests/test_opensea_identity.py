@@ -8,7 +8,7 @@ from sqlalchemy import select,func
 import pytest
 from fastapi import HTTPException
 from app.config import settings
-from app.models import Wallet,OpenSeaAccess,MintTask,AutomaticNonce,MintPlan,AutomaticGrant
+from app.models import Wallet,OpenSeaAccess,MintTask,AutomaticNonce,MintPlan,AutomaticGrant,User
 from app.services import opensea_identity as identity,automatic
 from app.services.custody import CustodyVault
 from test_automatic_evm import lab,plan_context
@@ -156,7 +156,7 @@ async def test_api_database_or_cipher_tampering_cannot_expand_authentication(aut
     else:
         async with lab.factory() as db:
             row=await db.get(OpenSeaAccess,lab.wallet.id)
-            if fault=='owner':row.user_id='other-owner'
+            if fault=='owner':row.user_id=await db.scalar(select(User.id).where(User.username=='admin'))
             elif fault=='scope':row.terms_version='other-terms'
             else:row.expires_at=datetime.fromtimestamp(1,timezone.utc)
             await db.commit()
