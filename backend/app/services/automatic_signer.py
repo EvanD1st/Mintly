@@ -637,8 +637,11 @@ class EligibilityLookup(BaseModel):
 
 @app.post('/opensea/{wallet_id}/stages/{slug}',dependencies=[Depends(authenticate)])
 async def opensea_stages(wallet_id:str,slug:str,req:EligibilityLookup,db=Depends(get_db)):
-    from app.services.opensea_identity import connection,IdentityUnavailable
+    from app.services.opensea_identity import connection,IdentityUnavailable,IdentityWalletMismatch
     try:return await connection(db,wallet_id,'stages',slug=slug,key=req.api_key)
+    except IdentityWalletMismatch:
+        await db.rollback()
+        raise HTTPException(409,'OpenSea returned another linked wallet. Reconnect eligibility access for this receiving wallet.') from None
     except IdentityUnavailable as error:
         await db.rollback()
         code=409 if error.status in (401,403) else 503

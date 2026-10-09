@@ -3,7 +3,7 @@
 Wire format follows ProjectOpenSea/opensea-sdk src/auth/index.ts (MIT).
 No arbitrary message, scope, host, cookie, signature or token crosses the API boundary.
 """
-import asyncio,hashlib,hmac,json,re,secrets,time,math
+import asyncio,hashlib,hmac,json,re,secrets,time,math,base64
 from weakref import WeakValueDictionary
 from datetime import datetime,timezone
 from urllib.parse import quote
@@ -28,6 +28,24 @@ _locks=WeakValueDictionary()
 
 class IdentityUnavailable(Exception):
     def __init__(self,status=503):self.status=status;super().__init__('OpenSea eligibility access is unavailable.')
+
+class IdentityWalletMismatch(IdentityUnavailable):
+    def __init__(self):super().__init__(409)
+
+
+def require_wallet(token,address):
+    # Token came directly from OpenSea over TLS. This extra check prevents an
+    # account's primary/linked wallet from replacing the consented wallet.
+    try:
+        parts=token.split('.')
+        if len(parts)!=3 or not parts[2]:raise ValueError()
+        claims=json.loads(base64.urlsafe_b64decode(parts[1]+'='*(-len(parts[1])%4)))
+        actual=claims.get('wallet')
+        if not isinstance(actual,str) or not re.fullmatch(r'0x[0-9a-fA-F]{40}',actual):raise ValueError()
+        if actual.lower()!=address.lower():raise IdentityWalletMismatch()
+    except IdentityWalletMismatch:raise
+    except Exception:raise IdentityUnavailable() from None
+
 
 def configuration(row,wallet):
     return dict(user_id=row.user_id,wallet_id=row.wallet_id,account=wallet.address.lower(),revision=row.revision,
@@ -165,6 +183,7 @@ async def login(db,wallet_id,journal,expected,vault,transport):
         if created.get('scopes')!=SCOPES:raise IdentityUnavailable()
         data,_=await transport.request('POST','/api/v2/auth/tokens/exchange',body={'subjectToken':state['pat'],'subjectTokenType':'ACCESS_TOKEN'})
         state['access_token'],state['expires_at']=exchanged(data,created['scopes'])
+        require_wallet(state['access_token'],wallet.address)
         await automatic.lock_execution(db)
         await check_pin(db,wallet_id,journal,expected)
         journal.execute('UPDATE opensea_identity SET state=? WHERE wallet=? AND intent=?',(seal(state,{'intent':expected}),wallet_id,expected))
@@ -223,6 +242,23 @@ async def connection(db,wallet_id,operation,*,slug=None,key=None):
                         raise
                     await check_pin(db,wallet_id,journal,expected)
                     journal.execute('UPDATE opensea_identity SET state=? WHERE wallet=? AND intent=?',(seal(state,pin),wallet_id,expected));journal.commit()
+                try:
+                    require_wallet(state['access_token'],wallet.address)
+                except IdentityWalletMismatch:
+                    # One fixed-purpose reauthentication under the still-active
+                    # consent can repair primary-wallet drift. No wider scope.
+                    old=state
+                    try:
+                        state=await login(db,wallet_id,journal,expected,vault,transport)
+                    except Exception:
+                        await db.rollback()
+                        clean=await revoke(transport,old)
+                        journal.execute('UPDATE opensea_identity SET blocked=1,state=? WHERE wallet=?',
+                            (None if clean else seal(old,pin),wallet_id));journal.commit()
+                        raise IdentityWalletMismatch() from None
+                    if not await revoke(transport,old):
+                        journal.execute('INSERT OR IGNORE INTO opensea_revocations VALUES (?,?,?,?)',
+                            (expected+'-'+old['pat_id'],wallet_id,expected,seal(old,pin)));journal.commit()
                 if operation=='register':return {'status':'active','revision':row.revision,'scopes':SCOPES,'expires_at':aware(row.expires_at).isoformat()}
                 if not slug or not SLUG_RE.fullmatch(slug):raise ValueError('Invalid collection')
                 try:
