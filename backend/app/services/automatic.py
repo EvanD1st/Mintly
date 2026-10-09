@@ -153,13 +153,15 @@ async def make_snapshot(db, req, user_id, *, presale_mint=None):
         raise HTTPException(409, 'Drop chain or contract integration is unsupported for this signer.')
     if not allows_collection(grant.scope, drop.contract_address) or req.mint_kind not in grant.scope['mint_kinds']:
         raise HTTPException(409, 'Contract or mint method is outside the signer policy.')
-    deferred_stage=None
+    deferred_stage=deferred_item=None
     if req.mint_kind != 'public' and req.conditional_eligibility and req.onchain_stage_index is None:
         if not req.guided or req.copy_event_id:
             raise HTTPException(409, 'A conditional presale needs a verified selected phase before arming.')
         from app.services.mint_stage_choice import deferred_presale
-        deferred_stage,_=await deferred_presale(db,req,user_id)
+        deferred_stage,deferred_item=await deferred_presale(db,req,user_id)
     stage_price, stage_limit = stage.price_wei, stage.limit_per_wallet
+    if deferred_item is not None:
+        stage_limit=deferred_item['remaining']
     if presale_mint is not None:
         p = presale_mint['params']
         if (req.mint_kind == 'public' or presale_mint['kind'] != req.mint_kind

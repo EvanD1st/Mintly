@@ -266,9 +266,11 @@ async def selected_upcoming(lab,monkeypatch,*,eligible=True,remaining=1,duplicat
     return plan,body
 
 
-async def test_verified_upcoming_phase_can_be_approved_without_proof_and_executes_once_offline(auth_lab,monkeypatch):
+@pytest.mark.parametrize('quantity',[1,2])
+async def test_verified_upcoming_phase_can_be_approved_without_proof_and_executes_once_offline(auth_lab,monkeypatch,quantity):
     lab,_,_=auth_lab
-    plan,body=await selected_upcoming(lab,monkeypatch)
+    plan,body=await selected_upcoming(lab,monkeypatch,remaining=quantity)
+    body['quantity']=quantity
     lab.kind='signed'
     result=await lab.client.post('/api/tasks/guided-preview',json=body)
     assert result.status_code==200,result.text
@@ -299,7 +301,7 @@ async def test_verified_upcoming_phase_can_be_approved_without_proof_and_execute
     await lab.due();await lab.tick();await lab.due();await lab.tick()
     lab.w.provider.make_request('evm_mine',[]);await lab.due();await lab.tick()
     async with lab.factory() as db:assert (await db.get(MintTask,tid)).status=='confirmed'
-    assert lab.nft.functions.totalSupply().call()==1
+    assert lab.nft.functions.totalSupply().call()==quantity
     assert lab.nft.functions.ownerOf(1).call()==lab.owner.address
     journal=CustodyVault().journal();assert journal.execute('SELECT COUNT(*) FROM signed').fetchone()[0]==1;journal.close()
 
