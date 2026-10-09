@@ -216,3 +216,147 @@ def test_stage_uuid_matching_preserves_non_uuid_ids_and_distinct_phases():
     assert stage_key('3130702a-a765-47c5-95b5-0fc33fcf35c1')==stage_key('3130702aa76547c595b50fc33fcf35c1')
     assert stage_key('legacy-public')=='legacy-public'
     assert stage_key('3130702aa76547c595b50fc33fcf35c1')!=stage_key('39a3ea976e6d4ee8adcadda82243ef78')
+
+
+@pytest.mark.parametrize('public_failure',[False,True])
+async def test_lowercase_collection_allowance_survives_optional_public_read_failure(auth_lab,monkeypatch,public_failure):
+    lab,_,_=auth_lab
+    plan,_=await plan_context(lab,monkeypatch)
+    await enable(lab)
+    async with lab.factory() as db:
+        row=await db.get(MintPlan,plan['id']);uid=row.stage_uuid
+        row.contract_address=row.contract_address.lower();await db.commit()
+    async def result(*args,**kwargs):return {'address':lab.owner.address,'stages':[{'stage_uuid':uid,
+        'eligible':True,'max_total_mintable_by_wallet':20,'remaining':None,'price_wei':10}]}
+    monkeypatch.setattr('app.api.opensea_access.broker',result)
+    if public_failure:
+        async def unavailable(*args,**kwargs):raise RuntimeError('public RPC unavailable')
+        monkeypatch.setattr('app.services.copy_mints.public_stage',unavailable)
+    response=await lab.client.get('/api/mint-plans/'+plan['id']+'/stages')
+    assert response.status_code==200,response.text
+    assert response.json()['stages'][0]['remaining']==20
+    assert response.json()['note'] is None
+
+
+async def selected_upcoming(lab,monkeypatch,*,eligible=True,remaining=1,duplicate=False):
+    plan,_=await plan_context(lab,monkeypatch)
+    await enable(lab)
+    from app.services.opensea import OpenSeaClient
+    uid='3130702aa76547c595b50fc33fcf35c1'
+    async def detail(self,slug):
+        row={'uuid':uid,'stage_type':'signed_presale','label':'GTD','start_time':datetime.fromtimestamp(lab.start,timezone.utc).isoformat(),
+            'end_time':datetime.fromtimestamp(lab.end,timezone.utc).isoformat(),'price':'10','max_per_wallet':'1','price_currency_address':'0x'+'0'*40}
+        return {'chain':'local-test','contract_address':lab.nft.address,'collection_name':'GTD test',
+            'opensea_url':'https://opensea.io/collection/local-test','stages':[row,{**row,'uuid':'another'}] if duplicate else [row]}
+    async def key(self):return 'api-key-disposable-1234'
+    async def result(*args,**kwargs):
+        return {'address':lab.owner.address,'stages':[{'stage_uuid':str(uuid.UUID(uid)),'eligible':eligible,
+            'max_total_mintable_by_wallet':remaining,'remaining':None,'price_wei':10}]}
+    monkeypatch.setattr(OpenSeaClient,'get_drop',detail);monkeypatch.setattr(OpenSeaClient,'_key',key)
+    monkeypatch.setattr('app.api.opensea_access.broker',result)
+    response=await lab.client.post('/api/mint-plans/'+plan['id']+'/stage',json={'stage_uuid':uid,'quantity':1})
+    assert response.status_code==200,response.text
+    context=await lab.client.post('/api/mint-plans/'+plan['id']+'/automatic-context')
+    if duplicate:return plan,context
+    assert context.status_code==200,context.text
+    assert context.json()['plan']['status_note']=='GTD eligibility verified. Waiting for the stage to open.'
+    body={'wallet_id':lab.wallet.id,'grant_id':lab.grant.id,'plan_id':plan['id'],
+        'drop_id':context.json()['drop']['id'],'stage_id':context.json()['drop']['stages'][0]['id'],
+        'quantity':1,'maximum_total_eth':'0.0005','scheduled_for_utc':datetime.fromtimestamp(lab.start,timezone.utc).isoformat()}
+    return plan,body
+
+
+async def test_verified_upcoming_phase_can_be_approved_without_proof_and_executes_once_offline(auth_lab,monkeypatch):
+    lab,_,_=auth_lab
+    plan,body=await selected_upcoming(lab,monkeypatch)
+    lab.kind='signed'
+    result=await lab.client.post('/api/tasks/guided-preview',json=body)
+    assert result.status_code==200,result.text
+    preview=result.json()
+    assert preview['eligibility']=='verified_waiting_for_instructions' and not preview['execution_ready']
+    assert preview['snapshot']['execute_at']==lab.start+15
+    assert preview['snapshot']['onchain_stage_index'] is None
+    assert preview['snapshot']['selected_phase']['uuid']=='3130702aa76547c595b50fc33fcf35c1'
+    async with lab.factory() as db:assert await db.scalar(select(func.count()).select_from(MintTask))==0
+    request={**preview['request'],'review_hash':preview['review_hash'],'user_consent_confirmed':True,'idempotency_key':'future-gtd-explicit-consent'}
+    armed=await lab.client.post('/api/tasks/arm',json=request)
+    assert armed.status_code==200,armed.text
+    tid=armed.json()['id']
+    assert (await lab.client.post('/api/tasks/arm',json=request)).json()['id']==tid
+    early=await lab.signer_client.post('/tasks/'+tid+'/prepare')
+    assert early.status_code==200 and early.json()['status']=='armed'
+    journal=CustodyVault().journal();assert journal.execute('SELECT COUNT(*) FROM signed').fetchone()[0]==0;journal.close()
+    from app.automatic_worker import step
+    called=[]
+    async def unexpected(tid):called.append(tid)
+    assert not await step(lab.factory,unexpected,now=datetime.fromtimestamp(lab.start+14,timezone.utc))
+    assert not called
+    lab.w.provider.make_request('evm_setNextBlockTimestamp',[lab.start+15]);lab.w.provider.make_request('evm_mine',[])
+    class Clock(datetime):
+        @classmethod
+        def now(cls,tz=None):return datetime.fromtimestamp(lab.start+15,tz)
+    monkeypatch.setattr('app.services.automatic_signer.datetime',Clock)
+    await lab.due();await lab.tick();await lab.due();await lab.tick()
+    lab.w.provider.make_request('evm_mine',[]);await lab.due();await lab.tick()
+    async with lab.factory() as db:assert (await db.get(MintTask,tid)).status=='confirmed'
+    assert lab.nft.functions.totalSupply().call()==1
+    assert lab.nft.functions.ownerOf(1).call()==lab.owner.address
+    journal=CustodyVault().journal();assert journal.execute('SELECT COUNT(*) FROM signed').fetchone()[0]==1;journal.close()
+
+
+@pytest.mark.parametrize('fault',['eligibility','quantity','allowance','phase_changed','no_selection','public_fallback','late_instructions'])
+async def test_delayed_phase_checks_fail_closed_and_never_sign_early(auth_lab,monkeypatch,fault):
+    lab,_,_=auth_lab
+    plan,body=await selected_upcoming(lab,monkeypatch)
+    from app.services.opensea import OpenSeaClient
+    if fault in ('eligibility','allowance'):
+        async def result(*args,**kwargs):return {'address':lab.owner.address,'stages':[{'stage_uuid':'3130702aa76547c595b50fc33fcf35c1',
+            'eligible':False if fault=='eligibility' else True,'max_total_mintable_by_wallet':None if fault=='allowance' else 1,'remaining':None,'price_wei':10}]}
+        monkeypatch.setattr('app.api.opensea_access.broker',result)
+    elif fault=='quantity':body['quantity']=2
+    elif fault=='no_selection':
+        async with lab.factory() as db:
+            row=await db.get(MintPlan,plan['id']);row.selected_stage=None;await db.commit()
+        async def unavailable(*args):return 409,None
+        monkeypatch.setattr(OpenSeaClient,'build_mint',unavailable)
+    result=await lab.client.post('/api/tasks/guided-preview',json=body)
+    if fault in ('eligibility','quantity','allowance','no_selection'):
+        assert result.status_code==409,result.text
+    else:
+        assert result.status_code==200,result.text
+        request={**result.json()['request'],'review_hash':result.json()['review_hash'],'user_consent_confirmed':True,'idempotency_key':'guarded-'+fault}
+        if fault=='phase_changed':
+            async with lab.factory() as db:
+                row=await db.get(MintPlan,plan['id']);row.selected_stage={**row.selected_stage,'price_wei':11};await db.commit()
+            denied=await lab.client.post('/api/tasks/arm',json=request);assert denied.status_code==409,denied.text
+        else:
+            armed=await lab.client.post('/api/tasks/arm',json=request);assert armed.status_code==200,armed.text
+            tid=armed.json()['id']
+            lab.w.provider.make_request('evm_setNextBlockTimestamp',[lab.start+15]);lab.w.provider.make_request('evm_mine',[])
+            class Clock(datetime):
+                @classmethod
+                def now(cls,tz=None):return datetime.fromtimestamp(lab.start+15,tz)
+            monkeypatch.setattr('app.services.automatic_signer.datetime',Clock)
+            if fault=='public_fallback':
+                from eth_abi import encode
+                from app.services.signer.base import MINT_PUBLIC_SELECTOR,SEADROP_V1_ADDRESS
+                async def fallback(*args):return 200,{'to':SEADROP_V1_ADDRESS,'chain':'local-test','value':'10',
+                    'data':'0x'+MINT_PUBLIC_SELECTOR+encode(['address','address','address','uint256'],[lab.nft.address,lab.w.eth.accounts[1],lab.owner.address,1]).hex()}
+                monkeypatch.setattr(OpenSeaClient,'build_mint',fallback)
+            else:
+                async def unavailable(*args):return 409,None
+                monkeypatch.setattr(OpenSeaClient,'build_mint',unavailable)
+            await lab.due();await lab.tick()
+            async with lab.factory() as db:
+                task=await db.get(MintTask,tid)
+                assert task.signed_tx_raw is None
+                assert task.status=='failed' if fault=='public_fallback' else task.status=='armed'
+                if fault=='late_instructions':assert task.preparation_attempts==1 and task.next_attempt_at is not None
+    journal=CustodyVault().journal();assert journal.execute('SELECT COUNT(*) FROM signed').fetchone()[0]==0;journal.close()
+
+
+async def test_ambiguous_upcoming_whitelist_phases_cannot_be_armed(auth_lab,monkeypatch):
+    lab,_,_=auth_lab
+    _,response=await selected_upcoming(lab,monkeypatch,duplicate=True)
+    assert response.status_code==409,response.text
+    async with lab.factory() as db:assert await db.scalar(select(func.count()).select_from(MintTask))==0

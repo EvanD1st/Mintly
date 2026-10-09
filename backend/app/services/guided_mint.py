@@ -1,5 +1,6 @@
 """Resolve verified instructions; users never supply a proof or guessed stage index."""
 from types import SimpleNamespace
+from datetime import datetime,timezone
 from fastapi import HTTPException
 from app.models import Wallet,Drop,MintStage,CopyEvent,CopyWatch,MintPlan
 from app.services import automatic
@@ -40,11 +41,13 @@ async def prepare(db,body,user_id):
         raise HTTPException(409,'This stage’s closing time is not verified yet.')
     source_kind=None
     force_presale=False
+    deferred=False
     if body.plan_id:
         plan=await db.get(MintPlan,body.plan_id)
         if not plan or plan.user_id!=user_id or plan.archived_at or plan.wallet_id!=wallet.id:
             raise HTTPException(404,'Mint plan not found.')
         force_presale=plan.stage_type is not None and plan.stage_type!='public_sale'
+        deferred=bool(force_presale and plan.selected_stage and aware(stage.start_time_utc)>datetime.now(timezone.utc))
     if body.copy_event_id:
         event=await db.get(CopyEvent,body.copy_event_id)
         watch=await db.get(CopyWatch,event.watch_id) if event else None
@@ -56,12 +59,18 @@ async def prepare(db,body,user_id):
     try:
         from app.services.copy_mints import public_stage
         try:
-            public=await public_stage(web3,drop.contract_address)
-            is_public=(public['start'],public['end'],public['price_wei'])==(
+            public=None if deferred else await public_stage(web3,drop.contract_address)
+            is_public=bool(public) and (public['start'],public['end'],public['price_wei'])==(
                 int(aware(stage.start_time_utc).timestamp()),int(aware(stage.end_time_utc).timestamp()),stage.price_wei)
         except ValueError:
             is_public=False
-        if is_public and not force_presale and source_kind in (None,'public'):
+        if deferred:
+            kind={'signed_presale':'signed','signed_sale':'signed','signed':'signed',
+                'allowlist':'allowlist','allowlist_sale':'allowlist'}.get(plan.stage_type)
+            if kind is None or body.copy_event_id:
+                raise HTTPException(409,'This phase cannot be approved in advance.')
+            price,index=stage.price_wei,None
+        elif is_public and not force_presale and source_kind in (None,'public'):
             kind,price,index='public',stage.price_wei,None
         else:
             candidate=SimpleNamespace(wallet_id=wallet.id,drop_id=drop.id,stage_id=stage.id,quantity=body.quantity,mint_kind=source_kind or 'auto')
@@ -77,12 +86,12 @@ async def prepare(db,body,user_id):
         req=DraftTaskRequest(guided=True,plan_id=body.plan_id,copy_event_id=body.copy_event_id,wallet_id=wallet.id,
             grant_id=grant.id,drop_id=drop.id,stage_id=stage.id,quantity=body.quantity,mint_kind=kind,
             price_cap_eth=format_wei_to_eth(price),fee_cap_eth=format_wei_to_eth(fee),total_cap_eth=format_wei_to_eth(total),
-            scheduled_for_utc=body.scheduled_for_utc,onchain_stage_index=index)
+            scheduled_for_utc=body.scheduled_for_utc,onchain_stage_index=index,conditional_eligibility=deferred)
         grant,snapshot=await automatic.make_snapshot(db,req,user_id,presale_mint=presale)
-        execution=presale['execution'] if presale else await automatic.prepare_mint(web3,snapshot)
+        execution=None if deferred else presale['execution'] if presale else await automatic.prepare_mint(web3,snapshot)
         await automatic.signer_ready(grant.id)
         return {'snapshot':snapshot,'request':req.model_dump(mode='json'),'review_hash':automatic.digest(snapshot),
-            'eligibility':'verified','execution_ready':True,'is_signer_ready':True,'policy':automatic.public_grant(grant),
+            'eligibility':'verified_waiting_for_instructions' if deferred else 'verified','execution_ready':execution is not None,'is_signer_ready':True,'policy':automatic.public_grant(grant),
             'breakdown':{'mint_value_wei':str(mint_value),'gas_limit_wei':str(fee),'maximum_total_wei':str(total)}}
     finally:
         await web3.provider.disconnect()

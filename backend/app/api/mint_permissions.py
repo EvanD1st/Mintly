@@ -70,7 +70,7 @@ async def create_permission(req:CreatePermission,user:User=Depends(get_current_u
             raise OpenSeaUnavailable('The operator relayer must be separate from the user wallet.',409)
         client=OpenSeaClient()
         tx={}
-        await refresh_mint_plan(plan,wallet,client,transaction_out=tx)
+        await refresh_mint_plan(plan,wallet,client,transaction_out=tx,db=db)
         if plan.status not in ['ready_for_approval','scheduled']:
             raise OpenSeaUnavailable('The wallet has no verified mint transaction to authorize. Refresh its eligibility.',409)
         now=datetime.now(timezone.utc)

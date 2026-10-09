@@ -44,6 +44,9 @@ async def guided_preview(req:GuidedRequest,user=Depends(get_current_user),db=Dep
 
 async def resolved_snapshot(db,req,user_id):
     presale=None
+    if req.guided and req.mint_kind!='public' and req.conditional_eligibility and req.onchain_stage_index is None:
+        # make_snapshot independently revalidates the selected phase and allowance.
+        return await automatic.make_snapshot(db,req,user_id)
     if req.guided and req.mint_kind!='public':
         grant=await automatic.grant_for(db,req.grant_id,user_id)
         web3=await automatic.provider_for(grant.chain_id)
@@ -64,8 +67,8 @@ async def draft_task_preview(req: DraftTaskRequest, user: User = Depends(get_cur
         if req.copy_event_id:
             from app.services.copy_mints import verify_source
             await verify_source(web3, snapshot['copy_source'])
-        execution = await automatic.prepare_mint(web3, snapshot)
-        eligibility = 'verified'
+        execution = None if snapshot.get('selected_phase') else await automatic.prepare_mint(web3, snapshot)
+        eligibility = 'verified_waiting_for_instructions' if snapshot.get('selected_phase') else 'verified'
     except Exception as error:
         if (snapshot['mint_kind'] == 'public' or not req.conditional_eligibility
                 or not isinstance(error, OpenSeaUnavailable) or error.status not in (429, 503)):
@@ -108,7 +111,7 @@ async def arm_mint_task(req: ArmTaskRequest, user: User = Depends(get_current_us
         if req.copy_event_id:
             from app.services.copy_mints import verify_source
             await verify_source(web3, snapshot['copy_source'])
-        execution = await automatic.prepare_mint(web3, snapshot)
+        execution = None if snapshot.get('selected_phase') else await automatic.prepare_mint(web3, snapshot)
     except Exception as error:
         if (snapshot['mint_kind'] == 'public' or not req.conditional_eligibility
                 or not isinstance(error, OpenSeaUnavailable) or error.status not in (429, 503)):

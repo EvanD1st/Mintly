@@ -107,7 +107,7 @@ async def import_open_sea_plan(req: ImportMintPlanRequest,
         plan.archived_at = None
         plan.quantity = req.quantity
         plan.notified_stage_uuid = None
-        await refresh_mint_plan(plan, wallet, client, detail=detail)
+        await refresh_mint_plan(plan, wallet, client, detail=detail, db=db)
         await db.flush()
         record_plan(db, plan, wallet, "saved")
         await db.commit()
@@ -145,7 +145,7 @@ async def refresh_open_sea_plan(plan_id: str, user: User = Depends(get_current_u
         return response(plan, wallet)
     try:
         before = jsonable_encoder(response(plan, wallet))
-        await refresh_mint_plan(plan, wallet)
+        await refresh_mint_plan(plan, wallet, db=db)
         after = jsonable_encoder(response(plan, wallet))
         keys = ("stage_name", "starts_at", "ends_at", "price_eth", "status", "quantity")
         if any(before[k] != after[k] for k in keys):
@@ -179,7 +179,7 @@ async def automatic_context(plan_id: str, user: User = Depends(get_current_user)
         detail = await client.get_drop(plan.collection_slug)
         before = jsonable_encoder(response(plan, wallet))
         transaction = {}
-        await refresh_mint_plan(plan, wallet, client, detail=detail, transaction_out=transaction)
+        await refresh_mint_plan(plan, wallet, client, detail=detail, transaction_out=transaction, db=db)
         selected = next((s for s in stage_schedule(detail) if s['uuid'] == plan.stage_uuid), None)
         if plan.selected_stage:
             from app.services.mint_stage_choice import pinned

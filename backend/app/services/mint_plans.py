@@ -16,7 +16,7 @@ def aware(value: datetime | None) -> datetime | None:
 
 async def refresh_mint_plan(plan: MintPlan, wallet: Wallet, client: OpenSeaClient | None = None,
                             now: datetime | None = None, detail: dict | None = None,
-                            transaction_out: dict | None = None) -> MintPlan:
+                            transaction_out: dict | None = None, db=None) -> MintPlan:
     """The only path to ready_for_approval is a successful OpenSea mint check."""
     now = now or datetime.now(timezone.utc)
     client = client or OpenSeaClient()
@@ -62,9 +62,20 @@ async def refresh_mint_plan(plan: MintPlan, wallet: Wallet, client: OpenSeaClien
     if not active:
         if future:
             plan.status = "scheduled"
-            plan.status_note = ("Allowlist eligibility cannot be confirmed until its stage opens."
+            plan.status_note = ("Whitelist phase is scheduled. Check wallet eligibility in Choose mint phase; mint instructions are checked when it opens."
                                 if selected["type"] != "public_sale" else
                                 "Public stage is scheduled; wallet readiness will be checked when it opens.")
+            if db is not None and selected["type"] != "public_sale" and plan.id:
+                try:
+                    from app.services.mint_stage_choice import stages as wallet_stages
+                    result,_=await wallet_stages(db,plan,plan.user_id)
+                    item=next((row for row in result['stages'] if row['id']==selected['uuid']),None)
+                    if item and item['eligibility']=='eligible':
+                        plan.status_note=f"{selected['name'].strip()} eligibility verified. Waiting for the stage to open."
+                    elif item and item['eligibility']=='not_eligible':
+                        plan.status_note=f"This wallet is not eligible for {selected['name'].strip()}. Choose another phase."
+                except Exception:
+                    pass  # Verification failure must never become invented eligibility.
             plan.next_check_at = selected["starts_at"]
         else:
             plan.status = "ended"

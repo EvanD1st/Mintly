@@ -50,10 +50,14 @@ async def stages(db,plan,user_id):
         from eth_utils import keccak,to_checksum_address
         web3=await automatic.provider_for(plan.chain_id)
         try:
-            minted,supply,maximum=decode(['uint256']*3,await web3.eth.call({'to':plan.contract_address,
+            minted,supply,maximum=decode(['uint256']*3,await web3.eth.call({'to':to_checksum_address(plan.contract_address),
                 'data':keccak(text='getMintStats(address)')[:4]+encode(['address'],[to_checksum_address(wallet.address)])}))
-            from app.services.copy_mints import public_stage
-            public=await public_stage(web3,plan.contract_address)
+            # Public metadata is optional; it must not invalidate the wallet mint count.
+            try:
+                from app.services.copy_mints import public_stage
+                public=await public_stage(web3,to_checksum_address(plan.contract_address))
+            except Exception:
+                pass
         finally:await web3.provider.disconnect()
     except Exception:
         if note is None:note='Eligibility found; remaining allowance could not be checked on-chain. It will be checked before signing.'
@@ -115,3 +119,35 @@ async def select_stage(db,plan,body,user_id):
     from app.api.mint_plans import record_plan
     record_plan(db,plan,wallet,'phase_selected');await db.commit()
     return plan,wallet
+
+
+async def deferred_presale(db,req,user_id):
+    """Authorize only a verified, uniquely identifiable selected upcoming phase."""
+    from app.models import MintPlan,Drop,MintStage
+    plan=await db.get(MintPlan,req.plan_id) if req.plan_id else None
+    drop=await db.get(Drop,req.drop_id)
+    stage=await db.get(MintStage,req.stage_id)
+    if (not plan or plan.user_id!=user_id or plan.archived_at or not plan.selected_stage
+            or plan.wallet_id!=req.wallet_id or plan.automatic_drop_id!=req.drop_id
+            or plan.automatic_stage_id!=req.stage_id or not drop or not stage or stage.drop_id!=drop.id
+            or plan.chain_id!=drop.chain_id or plan.contract_address.lower()!=drop.contract_address.lower()):
+        raise HTTPException(409,'Select and verify your wallet’s upcoming whitelist phase before approving it.')
+    result,schedule=await stages(db,plan,user_id)
+    selected=next((row for row in schedule if row['uuid']==plan.selected_stage['uuid']),None)
+    item=next((row for row in result['stages'] if row['id']==plan.selected_stage['uuid']),None)
+    kinds={'signed_presale':'signed','signed_sale':'signed','signed':'signed',
+        'allowlist':'allowlist','allowlist_sale':'allowlist'}
+    if (not selected or pinned(selected)!=plan.selected_stage or not item
+            or item['timing']!='upcoming' or item['eligibility']!='eligible'
+            or item['remaining'] is None or req.quantity>item['remaining']
+            or kinds.get(selected['type'])!=req.mint_kind
+            or selected['price_wei'] is None or item['price_wei']!=str(selected['price_wei'])
+            or (int(aware(stage.start_time_utc).timestamp()),int(aware(stage.end_time_utc).timestamp()),stage.price_wei)
+                !=(plan.selected_stage['starts_at'],plan.selected_stage['ends_at'],plan.selected_stage['price_wei'])):
+        raise HTTPException(409,'This wallet’s selected phase, price or remaining quantity could not be verified. Review the phase again.')
+    matches=[row for row in schedule if row['type']!='public_sale'
+        and (row['starts_at'],row['ends_at'],row['price_wei'])==
+            (selected['starts_at'],selected['ends_at'],selected['price_wei'])]
+    if len(matches)!=1:
+        raise HTTPException(409,'Overlapping whitelist phases cannot be distinguished safely. No automatic mint was approved.')
+    return dict(plan.selected_stage),item
