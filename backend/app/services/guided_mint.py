@@ -1,8 +1,7 @@
 """Resolve verified instructions; users never supply a proof or guessed stage index."""
-from datetime import datetime,timezone
 from types import SimpleNamespace
 from fastapi import HTTPException
-from app.models import Wallet,Drop,MintStage
+from app.models import Wallet,Drop,MintStage,CopyEvent,CopyWatch
 from app.services import automatic
 from app.services.mint_plans import aware
 from app.services.opensea import OpenSeaClient,OpenSeaUnavailable,collection_slug,CHAINS
@@ -39,6 +38,13 @@ async def prepare(db,body,user_id):
         raise HTTPException(404,'Choose your wallet and a verified mint stage.')
     if not stage.end_time_utc:
         raise HTTPException(409,'This stage’s closing time is not verified yet.')
+    source_kind=None
+    if body.copy_event_id:
+        event=await db.get(CopyEvent,body.copy_event_id)
+        watch=await db.get(CopyWatch,event.watch_id) if event else None
+        if not event or not watch or watch.user_id!=user_id:
+            raise HTTPException(404,'Copied mint not found.')
+        source_kind=event.observation.get('mint_kind','public')
     web3=await automatic.provider_for(grant.chain_id)
     presale=None
     try:
@@ -49,10 +55,10 @@ async def prepare(db,body,user_id):
                 int(aware(stage.start_time_utc).timestamp()),int(aware(stage.end_time_utc).timestamp()),stage.price_wei)
         except ValueError:
             is_public=False
-        if is_public:
+        if is_public and source_kind in (None,'public'):
             kind,price,index='public',stage.price_wei,None
         else:
-            candidate=SimpleNamespace(wallet_id=wallet.id,drop_id=drop.id,stage_id=stage.id,quantity=body.quantity,mint_kind='auto')
+            candidate=SimpleNamespace(wallet_id=wallet.id,drop_id=drop.id,stage_id=stage.id,quantity=body.quantity,mint_kind=source_kind or 'auto')
             presale=await own_presale(db,candidate,user_id,web3)
             kind,price,index=presale['kind'],presale['params'][0],presale['params'][4]
         total=automatic.wei(body.maximum_total_eth)

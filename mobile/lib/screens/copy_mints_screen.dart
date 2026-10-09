@@ -10,6 +10,7 @@ import '../widgets/automation_control.dart';
 import '../theme/colors.dart';
 import 'automatic_review_screen.dart';
 import 'history_screen.dart';
+import 'wallet_setup_screen.dart';
 
 // Drawn icons keep this section compatible with installed OTA font subsets.
 class CopyGlyph extends StatelessWidget {
@@ -1275,6 +1276,20 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
     super.dispose();
   }
 
+  bool get _needsSigningApproval => !_checkOnly && (_policy == null || (_policy!['policies'] as List).isEmpty || (_policy!['policies'] as List).any((p) => !{'public','allowlist','signed'}.every((kind) => ((p['scope'] as Map)['mint_kinds'] as List).contains(kind))));
+
+  Future<void> _setupWallet() async {
+    final selected = _policy;
+    await Navigator.push(context,MaterialPageRoute(builder: (_) => WalletSetupScreen(walletId:selected?['id'] as String?,address:selected?['account'] as String?)));
+    if (!mounted) return;
+    final future = _loadPolicies();
+    setState(() { _policies = future; _policy = null; _consent = false; });
+    final wallets = await future;
+    if (!mounted || selected == null) return;
+    final match = wallets.where((wallet) => wallet['id'] == selected['id']).firstOrNull;
+    if (match != null) setState(() { _policy = match; _setExpiry(); });
+  }
+
   void _setExpiry() {
     final policies = _policy!['policies'] as List<Map<String, dynamic>>;
     if (_checkOnly || policies.isEmpty) {
@@ -1368,7 +1383,7 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
           if (!snapshot.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
-          final policies = snapshot.data!.where((p) => _checkOnly || (p['policies'] as List).isNotEmpty).toList();
+          final policies = snapshot.data!;
           return Form(
             key: _form,
             child: ListView(
@@ -1424,9 +1439,7 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
                   }),
                 ),
                 if (policies.isEmpty)
-                  const _Panel(
-                    child: Text('Add a receiving wallet in Wallets first.'),
-                  ),
+                  Column(children:[const _Panel(child:Text('Add a receiving wallet to continue.')),OutlinedButton(onPressed:locked ? null : _setupWallet,child:const Text('Set up wallet'))]),
                 if (policies.isNotEmpty) ...[
                   DropdownButtonFormField<String>(
                     icon: const CopyGlyph('down'),
@@ -1465,6 +1478,10 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
                             ? _network(chain) : '${_network(chain)} · ${_checkOnly ? 'Check only' : 'Not approved'}'),
                     ]),
                     const SizedBox(height: 8),
+                    if (_needsSigningApproval) ...[
+                      const Text('This wallet needs approval for public and eligible whitelist signing.'),
+                      OutlinedButton(onPressed:locked ? null : _setupWallet,child:const Text('Set up wallet')),
+                    ],
                     Text(_checkOnly ? 'Results are checks only. No transaction will be sent.' : 'Copies on the mint’s network. Add ETH there for gas.',
                         style: TextStyle(fontSize: 12)),
                   ],
@@ -1600,7 +1617,7 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
                       ),
                     ),
                   FilledButton(
-                    onPressed: _busy || !_consent || _policy == null
+                    onPressed: _busy || !_consent || _policy == null || _needsSigningApproval
                         ? null
                         : _enable,
                     child: Text(

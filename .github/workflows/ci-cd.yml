@@ -86,6 +86,7 @@ jobs:
       - run: flutter pub get
       - run: flutter analyze
       - run: flutter test
+        if: success() || failure()
 
   secure-session:
     runs-on: ubuntu-24.04
@@ -117,7 +118,10 @@ jobs:
           script: |
             adb install -r mobile/build/app/outputs/flutter-apk/app-debug.apk
             adb install -r mobile/build/app/outputs/apk/androidTest/debug/app-debug-androidTest.apk
-            adb shell am instrument -w com.mintly.mintly.test/com.mintly.mintly.test.SecureSessionInstrumentation | tee session-tests.txt
+            adb shell am instrument -w -e phase save com.mintly.mintly.test/com.mintly.mintly.test.SecureSessionInstrumentation | tee session-save.txt
+            grep -q 'Session saved for restart test.' session-save.txt
+            adb shell am force-stop com.mintly.mintly
+            adb shell am instrument -w -e phase verify com.mintly.mintly.test/com.mintly.mintly.test.SecureSessionInstrumentation | tee session-tests.txt
             grep -q 'Secure session: round-trip, encrypted disk, restart, tamper, clear passed.' session-tests.txt
 
   deploy-ubuntu:

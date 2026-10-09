@@ -62,7 +62,7 @@ void main() {
       final api = ApiService(vault: vault, client: MockClient((r) async {
         if (r.url.path.endsWith('/auth/login')) { return http.Response(jsonEncode({
           ...credential(), 'user': {'id': 'owner', 'username': 'member'},
-        }), 200); } }
+        }), 200); }
         expect(r.method, method);
         return http.Response('{"detail":"Session expired"}', 401);
       }));

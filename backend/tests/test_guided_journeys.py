@@ -81,7 +81,7 @@ async def test_guided_whitelist_rejects_provider_public_fallback(lab,monkeypatch
 
 async def test_paid_maximum_public_quantity_obeys_wallet_and_spending_limits(copying):
     c=copying;lab=c['lab']
-    c['request'].update(quantity=100,quantity_mode='max_available',include_presales=True)
+    c['request'].update(quantity=100,quantity_mode='max_available',include_presales=True,fee_cap_eth='0.00099',budget_eth='0.002')
     result=await c['approve']()
     assert result['status']=='active'
     await c['mint'](1);await c['scan']()
@@ -124,7 +124,7 @@ async def test_legacy_idempotency_digest_is_preserved(lab):
 async def test_paid_maximum_whitelist_uses_receiving_wallet_allowance(presale,kind):
     c,state,_,mint_source=presale
     lab=c['lab'];state.kind=kind
-    c['request'].update(quantity=100,quantity_mode='max_available')
+    c['request'].update(quantity=100,quantity_mode='max_available',fee_cap_eth='0.0009')
     await c['approve']();await mint_source();await c['scan']()
     async with lab.factory() as db:
         event=await db.scalar(select(CopyEvent));task=await db.get(MintTask,event.task_id)
