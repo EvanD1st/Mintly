@@ -255,7 +255,11 @@ async def prepare_presale_copy(web3, observation, rule):
         slug = await client.collection_for_contract(observation['chain_id'], observation['contract'])
         async def build(quantity):
             status, transaction = await client.build_mint(slug, rule['account'], quantity)
-            if status in (409,422):
+            if status==422:
+                from app.services.mint_diagnostics import MINT_REASONS
+                reason=getattr(client,'last_mint_reason',None) or 'precondition_unknown'
+                raise OpenSeaUnavailable(MINT_REASONS[reason],retry_after_seconds=60,mint_reason=reason)
+            if status==409:
                 raise OpenSeaUnavailable('Wallet-specific whitelist instructions are not available yet.',retry_after_seconds=60)
             if status != 200 or transaction is None:
                 raise OpenSeaUnavailable('Whitelist mint preparation is temporarily unavailable.',retry_after_seconds=60)
@@ -566,7 +570,8 @@ async def process_copy_events(db,watch_id,chain):
     now=datetime.now(timezone.utc)
     ids=(await db.scalars(select(CopyEvent.id).where(CopyEvent.watch_id==watch_id,
         CopyEvent.status=='detected',CopyEvent.task_id.is_(None),CopyEvent.observation['chain_id'].as_integer()==chain,
-        or_(CopyEvent.next_attempt_at.is_(None),CopyEvent.next_attempt_at<=now)).order_by(CopyEvent.created_at).limit(50))).all()
+        or_(CopyEvent.next_attempt_at.is_(None),CopyEvent.next_attempt_at<=now)).order_by(
+            CopyEvent.observation['end'].as_integer(),CopyEvent.created_at,CopyEvent.id).limit(50))).all()
     await db.commit()
     web3=await automatic.provider_for(chain)
     try:
@@ -596,17 +601,25 @@ async def process_copy_events(db,watch_id,chain):
                 await db.commit();continue
             for rule in rules:
                 events=[]
+                attempts=event.preparation_attempts+1
                 try:
-                    with mint_diagnostics.capture('','copy') as events:
+                    with mint_diagnostics.capture('','copy',event_id=event.id) as events:
                         async with db.begin_nested():await arm_event(db,event,rule,web3)
                     event.last_error_category=None;event.last_upstream_status=None;event.next_attempt_at=None
                 except OpenSeaUnavailable as error:
                     await db.refresh(event);await db.refresh(rule)
                     checked=datetime.now(timezone.utc)
                     delay=max(30,error.retry_after_seconds or 0,*[e.get('retry_after_seconds') or 0 for e in events])
+                    if error.mint_reason=='precondition_unknown':delay=max(delay,min(900,60*2**min(attempts-1,4)))
                     event.next_attempt_at=min(checked+timedelta(seconds=delay),end,aware(rule.expires_at))
-                    event.note='Waiting for wallet-specific mint instructions. Retry at '+(event.next_attempt_at+timedelta(hours=1)).strftime('%H:%M:%S WAT')+'.'
-                    event.last_error_category=mint_diagnostics.category(mint_diagnostics.clean_events(events),503,error)
+                    category=error.mint_reason or mint_diagnostics.category(mint_diagnostics.clean_events(events),503,error)
+                    event.note=('Waiting: OpenSea rejected a mint precondition; its specific reason is unknown. ' if error.mint_reason=='precondition_unknown' else
+                        'OpenSea rate limit is delaying mint instructions. ' if category=='upstream_rate_limited' else
+                        'Waiting for wallet-specific mint instructions. ')+ 'Retry at '+(event.next_attempt_at+timedelta(hours=1)).strftime('%H:%M:%S WAT')+'.'
+                    if error.mint_reason in mint_diagnostics.MINT_REASONS and error.mint_reason!='precondition_unknown':
+                        event.status='skipped';event.next_attempt_at=None
+                        event.note=funding_note(chain,int(event.observation['price_wei'])>0) if error.mint_reason=='insufficient_funds' else mint_diagnostics.MINT_REASONS[error.mint_reason]
+                    event.last_error_category=category
                     event.last_upstream_status=next((e['http_status'] for e in reversed(events) if e.get('http_status') is not None),None)
                 except HTTPException as error:
                     await db.refresh(event);await db.refresh(rule)
@@ -629,6 +642,9 @@ async def process_copy_events(db,watch_id,chain):
                     event.note='Copy preparation temporarily unavailable. Mintly will retry within this phase.'
                     event.last_error_category='temporary_preparation_error'
                 event.last_checked_at=datetime.now(timezone.utc)
+                event.preparation_attempts=attempts
+                event.upstream_events=mint_diagnostics.clean_events(events)
+                event.last_upstream_status=next((e['http_status'] for e in reversed(event.upstream_events) if e.get('http_status') is not None),None)
                 if event.task_id or event.status=='skipped' or event.next_attempt_at:break
             await db.commit()
     finally:await web3.provider.disconnect()

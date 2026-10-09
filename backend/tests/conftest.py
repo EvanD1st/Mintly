@@ -51,7 +51,7 @@ async def test_db():
 
 @pytest.fixture(autouse=True)
 def isolate_opensea_memory_caches():
-    from app.services.opensea import _drop_cache,_verified_mints
-    _drop_cache.clear();_verified_mints.clear()
+    from app.services.opensea import _drop_cache,_verified_mints,_contract_cache
+    _drop_cache.clear();_verified_mints.clear();_contract_cache.clear()
     yield
-    _drop_cache.clear();_verified_mints.clear()
+    _drop_cache.clear();_verified_mints.clear();_contract_cache.clear()

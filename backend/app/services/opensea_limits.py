@@ -27,6 +27,29 @@ async def acquire(path,*,factory=None,now=None):
     if not settings.OPENSEA_COORDINATE_REQUESTS:return 0,None
     now=now or datetime.now(timezone.utc);name=group(path)
     async with (factory or AsyncSessionLocal)() as db:
+        from app.services.mint_diagnostics import current_phase
+        if name=='mint' and current_phase()=='preflight':
+            from app.models import CopyEvent,CopyRule,CopyWatch,CopyCheck,MintTask,Wallet,User
+            from app.services.automatic import MODE
+            from sqlalchemy import or_
+            pending_copy=await db.scalar(select(CopyEvent.id).join(CopyWatch,CopyWatch.id==CopyEvent.watch_id)
+                .join(CopyRule,CopyRule.watch_id==CopyEvent.watch_id).join(User,User.id==CopyEvent.user_id)
+                .outerjoin(CopyCheck,CopyCheck.watch_id==CopyEvent.watch_id).where(CopyEvent.status=='detected',CopyEvent.task_id.is_(None),
+                CopyWatch.archived_at.is_(None),CopyRule.status=='active',CopyRule.expires_at>now,
+                CopyRule.chain_id==CopyEvent.observation['chain_id'].as_integer(),
+                CopyRule.resume_after_block<CopyEvent.observation['block_number'].as_integer(),
+                User.automation_paused.is_(False),User.is_active.is_(True),User.deleted_at.is_(None),
+                or_(CopyCheck.watch_id.is_(None),CopyCheck.active.is_(False)),
+                CopyEvent.observation['start'].as_integer()<=int(now.timestamp()),
+                CopyEvent.observation['end'].as_integer()>int(now.timestamp()),
+                or_(CopyEvent.next_attempt_at.is_(None),CopyEvent.next_attempt_at<=now)).limit(1))
+            pending_task=await db.scalar(select(MintTask.id).join(Wallet,Wallet.id==MintTask.wallet_id).join(User,User.id==Wallet.user_id)
+                .where(MintTask.status=='armed',MintTask.execution_mode==MODE,User.automation_paused.is_(False),
+                User.is_active.is_(True),User.deleted_at.is_(None),Wallet.archived_at.is_(None),
+                MintTask.scheduled_for_utc<=now,MintTask.expires_at_utc>now).limit(1))
+            if pending_copy or pending_task:
+                await db.commit()
+                return 30,'execution_priority'
         gates=await rows(db,['all',name])
         blocked=max(aware(g.blocked_until) for g in gates)
         due=max([blocked]+[aware(g.next_request_at) for g in gates])

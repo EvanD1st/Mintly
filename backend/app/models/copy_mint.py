@@ -48,3 +48,5 @@ class CopyEvent(Base):
     last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True),nullable=True)
     last_error_category: Mapped[str | None] = mapped_column(String(40),nullable=True)
     last_upstream_status: Mapped[int | None] = mapped_column(Integer,nullable=True)
+    upstream_events: Mapped[list | None] = mapped_column(JSON,nullable=True)
+    preparation_attempts: Mapped[int] = mapped_column(Integer,default=0,server_default='0')

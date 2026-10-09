@@ -48,10 +48,11 @@ def transaction_value_wei(value: str) -> int:
 
 
 class OpenSeaUnavailable(Exception):
-    def __init__(self, message: str, status: int = 503, *, retry_after_seconds: int | None = None):
+    def __init__(self, message: str, status: int = 503, *, retry_after_seconds: int | None = None, mint_reason: str | None = None):
         super().__init__(message)
         self.status = status
         self.retry_after_seconds = retry_after_seconds
+        self.mint_reason = mint_reason
 
 
 def collection_slug(url: str) -> str:
@@ -109,6 +110,7 @@ def stage_schedule(drop: dict) -> list[dict]:
 
 _drop_cache={}
 _verified_mints={}
+_contract_cache={}
 
 def remember_verified_mint(slug,address,quantity,tx,end):
     # Called only after contract/wallet/proof validation. Never cache arbitrary replies.
@@ -122,7 +124,7 @@ class OpenSeaClient:
                        key: str | None = None) -> tuple[int, dict]:
         import time
         from app.services.mint_diagnostics import record_http
-        started=time.monotonic();status=None;retry_after=None;failure=None
+        started=time.monotonic();status=None;retry_after=None;failure=None;mint_reason=None
         from app.services import opensea_limits
         delay,reason=await opensea_limits.acquire(path)
         if reason=='paced' and delay<=6:
@@ -154,12 +156,16 @@ class OpenSeaClient:
                     if not isinstance(data, dict):
                         failure='invalid_response'
                         raise OpenSeaUnavailable("OpenSea returned an unexpected response.")
+                    if status==422 and path.endswith('/mint'):
+                        from app.services.mint_diagnostics import mint_rejection_reason
+                        mint_reason=mint_rejection_reason(data)
+                        self.last_mint_reason=mint_reason
                     return response.status, data
         except (aiohttp.ClientError, TimeoutError, ValueError) as error:
             failure='timeout' if isinstance(error,TimeoutError) else 'invalid_response' if isinstance(error,ValueError) else 'network_error'
             raise OpenSeaUnavailable("OpenSea is temporarily unavailable.") from error
         finally:
-            try:record_http(method,path,status,retry_after,started,failure)
+            try:record_http(method,path,status,retry_after,started,failure,mint_reason=mint_reason)
             except Exception:pass  # Diagnostic logging never changes the HTTP outcome.
 
     async def _key(self, min_validity_seconds=60) -> str:
@@ -246,18 +252,27 @@ class OpenSeaClient:
         chain = chains.get(chain_id)
         if not chain or not is_address(contract):
             raise OpenSeaUnavailable('Whitelist discovery is unavailable for this contract or network.', 409)
-        status, data = await self._request('GET', f'/chain/{chain}/contract/{to_checksum_address(contract)}', key=await self._key())
-        slug = data.get('collection')
-        if (status != 200 or data.get('chain') != chain or data.get('address', '').lower() != contract.lower()
-                or data.get('contract_standard') != 'erc721' or not isinstance(slug, str) or not SLUG_RE.fullmatch(slug)):
-            raise OpenSeaUnavailable('Whitelist collection metadata could not be verified.', 409 if status in (400,404) else 503)
+        cache_key=(chain_id,contract.lower())
+        cached=_contract_cache.get(cache_key)
+        if cached and cached[0]>time.monotonic():slug=cached[1]
+        else:
+            status, data = await self._request('GET', f'/chain/{chain}/contract/{to_checksum_address(contract)}', key=await self._key())
+            slug = data.get('collection')
+            if (status != 200 or data.get('chain') != chain or data.get('address', '').lower() != contract.lower()
+                    or data.get('contract_standard') != 'erc721' or not isinstance(slug, str) or not SLUG_RE.fullmatch(slug)):
+                raise OpenSeaUnavailable('Whitelist collection metadata could not be verified.', 409 if status in (400,404) else 503)
         detail = await self.get_drop(slug)
         if detail['chain'] != chain or detail['contract_address'].lower() != contract.lower():
+            _contract_cache.pop(cache_key,None)
             raise OpenSeaUnavailable('Whitelist drop does not match the followed NFT.', 409)
+        if not cached or cached[0]<=time.monotonic():
+            _contract_cache[cache_key]=(time.monotonic()+300,slug)
+            if len(_contract_cache)>128:_contract_cache.pop(next(iter(_contract_cache)))
         return slug
 
     async def build_mint(self, slug: str, wallet_address: str, quantity: int = 1) -> tuple[int, dict | None]:
         """Read-only preparation: OpenSea returns calldata; this never signs or sends it."""
+        self.last_mint_reason=None
         if not SLUG_RE.fullmatch(slug) or not is_address(wallet_address) or type(quantity) is not int or not 1 <= quantity <= 100:
             raise OpenSeaUnavailable("Invalid drop or wallet address.", 400)
         cached=_verified_mints.get((slug,wallet_address.lower(),quantity))
