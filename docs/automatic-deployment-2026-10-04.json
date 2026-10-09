@@ -1,0 +1,195 @@
+{
+  "containers": [
+    {
+      "name": "mintly-backend-1",
+      "image": "mintly-backend:automatic-969f84d",
+      "running": true,
+      "health": "healthy",
+      "user": "",
+      "read_only_root": false,
+      "capabilities_dropped": null,
+      "security_options": null,
+      "mounts": [
+        {
+          "destination": "/run/opensea",
+          "writable": true
+        },
+        {
+          "destination": "/run/custody-token",
+          "writable": false
+        },
+        {
+          "destination": "/run/secrets/firebase-service-account.json",
+          "writable": false
+        }
+      ]
+    },
+    {
+      "name": "mintly-worker-1",
+      "image": "mintly-backend:automatic-969f84d",
+      "running": true,
+      "health": "not_configured",
+      "user": "",
+      "read_only_root": false,
+      "capabilities_dropped": null,
+      "security_options": null,
+      "mounts": [
+        {
+          "destination": "/run/opensea",
+          "writable": true
+        },
+        {
+          "destination": "/run/secrets/firebase-service-account.json",
+          "writable": false
+        }
+      ]
+    },
+    {
+      "name": "mintly-automatic-signer-1",
+      "image": "mintly-backend:automatic-969f84d",
+      "running": true,
+      "health": "healthy",
+      "user": "10001:10001",
+      "read_only_root": true,
+      "capabilities_dropped": [
+        "ALL"
+      ],
+      "security_options": [
+        "no-new-privileges:true"
+      ],
+      "mounts": [
+        {
+          "destination": "/var/lib/custody",
+          "writable": true
+        },
+        {
+          "destination": "/run/custody-vault",
+          "writable": false
+        },
+        {
+          "destination": "/run/custody-password",
+          "writable": false
+        },
+        {
+          "destination": "/run/custody-token",
+          "writable": false
+        }
+      ]
+    },
+    {
+      "name": "mintly-custody-import-1",
+      "image": "mintly-backend:automatic-969f84d",
+      "running": true,
+      "health": "not_configured",
+      "user": "10001:10001",
+      "read_only_root": true,
+      "capabilities_dropped": [
+        "ALL"
+      ],
+      "security_options": [
+        "no-new-privileges:true"
+      ],
+      "mounts": [
+        {
+          "destination": "/run/custody-vault",
+          "writable": true
+        },
+        {
+          "destination": "/run/custody-password",
+          "writable": false
+        }
+      ]
+    },
+    {
+      "name": "mintly-automatic-worker-1",
+      "image": "mintly-backend:automatic-969f84d",
+      "running": true,
+      "health": "healthy",
+      "user": "10001:10001",
+      "read_only_root": true,
+      "capabilities_dropped": [
+        "ALL"
+      ],
+      "security_options": [
+        "no-new-privileges:true"
+      ],
+      "mounts": [
+        {
+          "destination": "/run/custody-token",
+          "writable": false
+        }
+      ]
+    },
+    {
+      "name": "mintly-automatic-notifications-1",
+      "image": "mintly-backend:automatic-969f84d",
+      "running": true,
+      "health": "not_configured",
+      "user": "10001:10001",
+      "read_only_root": true,
+      "capabilities_dropped": [
+        "ALL"
+      ],
+      "security_options": [
+        "no-new-privileges:true"
+      ],
+      "mounts": [
+        {
+          "destination": "/run/secrets/firebase-service-account.json",
+          "writable": false
+        }
+      ]
+    },
+    {
+      "name": "mintly-postgres-1",
+      "image": "postgres:16-alpine",
+      "running": true,
+      "health": "healthy",
+      "user": "",
+      "read_only_root": false,
+      "capabilities_dropped": null,
+      "security_options": null,
+      "mounts": [
+        {
+          "destination": "/var/lib/postgresql/data",
+          "writable": true
+        }
+      ]
+    }
+  ],
+  "private_permissions": {
+    "vault": {
+      "mode": "0o700",
+      "uid": 10001,
+      "gid": 10001
+    },
+    "password": {
+      "mode": "0o700",
+      "uid": 10001,
+      "gid": 10001
+    },
+    "token": {
+      "mode": "0o700",
+      "uid": 10001,
+      "gid": 10001
+    },
+    "journal": {
+      "mode": "0o700",
+      "uid": 10001,
+      "gid": 10001
+    },
+    "notifications": {
+      "mode": "0o700",
+      "uid": 10001,
+      "gid": 10001
+    }
+  },
+  "active_release": "/home/ubuntu/Mintly/releases/automatic-969f84d",
+  "activation_flags": {
+    "CUSTODY_TASK_ARMING": "true",
+    "CUSTODY_AUTOMATIC_WORKER": "true"
+  },
+  "checked_at": "2026-10-04T06:31:58.378111+00:00",
+  "backend_source_commit": "969f84d",
+  "security_audit": "not performed; deployment isolation checks only"
+}

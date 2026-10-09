@@ -47,6 +47,12 @@ if [[ -f "$APP_DIR/shared/firebase-service-account.json" ]]; then
     chmod 600 "$APP_DIR/shared/firebase-service-account.json"
     export MINTLY_FIREBASE_FILE="$APP_DIR/shared/firebase-service-account.json"
     COMPOSE+=(-f "$RELEASE_DIR/backend/docker-compose.firebase.yml")
+    if [[ -f "$APP_DIR/shared/custody.env" ]] && grep -qx 'CUSTODY_AUTOMATIC_WORKER=true' "$APP_DIR/shared/custody.env"; then
+        # Independent delivery service has its own protected credential copy.
+        sudo -n install -d -o 10001 -g 10001 -m 700 /srv/mintly-custody/notifications
+        sudo -n install -o 10001 -g 10001 -m 600 "$MINTLY_FIREBASE_FILE" /srv/mintly-custody/notifications/firebase-service-account.json
+        COMPOSE+=(-f "$RELEASE_DIR/backend/docker-compose.automatic-firebase.yml")
+    fi
 fi
 if [[ -f "$APP_DIR/shared/x-cookies.json" ]]; then
     chmod 600 "$APP_DIR/shared/x-cookies.json"
@@ -55,9 +61,17 @@ if [[ -f "$APP_DIR/shared/x-cookies.json" ]]; then
 fi
 "${COMPOSE[@]}" config --quiet
 "${COMPOSE[@]}" build backend
+"${DOCKER[@]}" run --rm --read-only --user 10001:10001 --entrypoint python \
+    "mintly-backend:$MINTLY_RELEASE" -c 'from app.services.automatic_signer import app; from app.models import MintRecovery'
 "${COMPOSE[@]}" up -d --wait --wait-timeout 180
 if [[ -f "$APP_DIR/shared/custody.env" ]]; then
     "${COMPOSE[@]}" up -d --wait --wait-timeout 180 automatic-signer custody-import
+    if grep -qx 'CUSTODY_AUTOMATIC_WORKER=true' "$APP_DIR/shared/custody.env"; then
+        "${COMPOSE[@]}" up -d --wait --wait-timeout 180 automatic-worker automatic-notifications
+        if grep -qx 'ENABLE_COPY_MINTS=true' "$APP_DIR/shared/custody.env"; then
+            "${COMPOSE[@]}" up -d --wait --wait-timeout 180 copy-worker
+        fi
+    fi
 fi
 curl --fail --silent --show-error "http://127.0.0.1:$(sed -n 's/^MINTLY_PORT=//p' "$MINTLY_ENV_FILE")/healthz"
 if [[ "$RELEASE_DIR" != "$APP_DIR" ]]; then

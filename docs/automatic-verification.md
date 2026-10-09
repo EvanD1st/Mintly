@@ -1,5 +1,30 @@
 # Automatic execution verification — 2 October 2026
 
+## Update — 4 October 2026
+
+Production Robinhood automation is explicitly activated. Mint plans now arm
+reviewed exact-stage tasks; Remove archives records and safely cancels unsigned
+work; Settings → History paginates all versions, approvals and receipts.
+The final full backend suite passed **178 tests in 204.97 seconds**, with real local
+EVM execution enabled and no skips. Flutter passed **23 tests** and analysis;
+the OTA guard passed **10 tests**. The final suite includes
+**10 recovery tests**, covering reverted receipts and expired
+original submission windows. The local consent clock follows the deliberately
+advanced test chain; production retains real wall-time and chain expiry checks.
+
+The real owner-approved Robinhood test minted NFT #316 using nonce 7, for
+0.000039195327232 ETH including gas. The separately approved recovery preserved
+the same NFT call, recipient, value and finite debit ceiling. Both signatures
+remain in the protected journal and app history. [Live receipt evidence](automatic-mainnet-proof-2026-10-04.json)
+records receipt status, token ownership, finality and single-reservation accounting.
+The live task reached `confirmed` at 06:40:49 UTC after canonical finalized
+coverage. Reserved budget is zero and spent budget equals the exact receipt
+debit, 39195327232000 wei. The protected signer journal retains both valid
+signatures, the same nonce and one original lifetime liability; it reconciles
+the finalized winner before any later fresh signing.
+
+The sections below record the earlier 2 October verification and its limits.
+
 ## Outcome
 
 The explicitly provisioned **custodial** route performs unattended SeaDrop public,

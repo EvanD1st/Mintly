@@ -33,6 +33,180 @@ from app.services import automatic
 from app.services.custody import private_write
 from app.services.seadrop_mint import PARAM_TYPE, ALLOW_SELECTOR, SIGNED_SELECTOR, signed_mint_typed_data
 from app.services.signer.base import SEADROP_V1_ADDRESS
+from app.models import MintRecovery
+from app.services.custody import CustodyVault
+from app.services.custody_recovery import recover_task
+
+
+@pytest.fixture
+def recovery_clock(lab, monkeypatch):
+    # EVM time is deliberately advanced by local stage/reorg tests. Snapshot
+    # restoration does not restore Hardhat's wall-clock offset; align the test
+    # consent clock with chain time without relaxing production expiry checks.
+    class ChainClock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime.fromtimestamp(max(int(datetime.now(timezone.utc).timestamp()),
+                lab.w.eth.get_block('latest').timestamp), tz)
+    monkeypatch.setattr('app.services.custody_recovery.datetime', ChainClock)
+
+
+async def unresolved(lab):
+    response = await lab.client.post('/api/tasks/arm', json={**lab.request,
+        'expires_at': datetime.fromtimestamp(lab.start + 30, timezone.utc).isoformat()})
+    assert response.status_code == 200, response.text
+    task_id = response.json()['id']
+    lab.w.provider.make_request('evm_setNextBlockTimestamp', [lab.start])
+    lab.w.provider.make_request('evm_mine', [])
+    await lab.sign(task_id)
+    lab.w.provider.make_request('evm_setNextBlockTimestamp', [lab.start + 45])
+    lab.w.provider.make_request('evm_mine', [])  # original finite submission authorization is now expired
+    async with lab.factory() as db:
+        task = await db.get(MintTask, task_id)
+        task.status, task.broadcast_attempts = 'uncertain', 4
+        previous = (task.transaction_hash, task.signed_tx_raw, task.assigned_nonce, task.expires_at_utc)
+        await db.commit()
+    return task_id, previous
+
+
+@pytest.mark.parametrize('winner', ['replacement', 'original', 'replacement_reverted'])
+async def test_recovery_mints_once_same_nonce_and_reconciles_either_hash(lab, winner, recovery_clock):
+    task_id, previous = await unresolved(lab)
+    expiry = datetime.fromtimestamp(lab.end, timezone.utc)
+    async with lab.factory() as db:
+        result = await recover_task(db, task_id, lab.user.id, expiry, 'explicit-local-owner-consent')
+        retry = await recover_task(db, task_id, lab.user.id, expiry, 'explicit-local-owner-consent')
+        assert retry['hash'] == result['hash'] and result['hash'] != previous[0]
+        task = await db.get(MintTask, task_id)
+        assert task.assigned_nonce == previous[2] and task.broadcast_attempts == 4
+        assert task.expires_at_utc == previous[3]
+        assert Account.recover_transaction(task.signed_tx_raw) == lab.owner.address
+        from eth_account._utils.legacy_transactions import Transaction
+        replacement = Transaction.from_bytes(bytes.fromhex(task.signed_tx_raw[2:]))
+        old = Transaction.from_bytes(bytes.fromhex(previous[1][2:]))
+        assert (replacement.nonce, replacement.to, replacement.data, replacement.value) == (old.nonce, old.to, old.data, old.value)
+        assert replacement.gasPrice > old.gasPrice
+        assert replacement.gas * replacement.gasPrice <= (await db.get(MintAuthorization, task.authorization_id)).max_fee_wei
+        assert (await db.get(AutomaticGrant, lab.grant.id)).reserved_wei == 500000000000020
+    journal = CustodyVault().journal()
+    assert journal.execute('SELECT count(*) FROM signed').fetchone()[0] == 1
+    assert journal.execute('SELECT count(*) FROM recoveries').fetchone()[0] == 1
+    journal.close()
+    if winner == 'original':
+        lab.w.eth.send_raw_transaction(previous[1])
+    elif winner == 'replacement_reverted':
+        # Price changes after signing; chain reverts the saved mint without a second attempt.
+        lab.w.provider.make_request('hardhat_impersonateAccount', [lab.nft.address])
+        lab.sea.functions.updatePublicDrop((11, lab.start, lab.end, 20, 500, True)).transact({'from': lab.nft.address})
+        lab.w.provider.make_request('hardhat_stopImpersonatingAccount', [lab.nft.address])
+    await lab.due(); await lab.tick()
+    lab.w.provider.make_request('evm_mine', [])
+    await lab.due(); await lab.tick()
+    async with lab.factory() as db:
+        task = await db.get(MintTask, task_id)
+        recovery = await db.scalar(select(MintRecovery).where(MintRecovery.task_id == task_id))
+        expected = 'reverted' if winner == 'replacement_reverted' else 'confirmed'
+        assert task.status == expected, task.failure_reason
+        assert recovery.status == ('superseded' if winner == 'original' else expected)
+        assert task.transaction_hash == (previous[0] if winner == 'original' else result['hash'])
+        assert (await db.get(AutomaticGrant, lab.grant.id)).reserved_wei == 0
+    assert lab.nft.functions.totalSupply().call() == (0 if winner == 'replacement_reverted' else 2)
+    if winner != 'replacement_reverted':
+        assert lab.nft.functions.ownerOf(1).call() == lab.owner.address
+    else:
+        receipt = lab.w.eth.get_transaction_receipt(result['hash'])
+        assert task.actual_total_cost_wei == receipt.gasUsed * receipt.effectiveGasPrice
+        # Restore eligibility for the later distinct task, not a retry of this one.
+        lab.w.provider.make_request('hardhat_impersonateAccount', [lab.nft.address])
+        lab.sea.functions.updatePublicDrop((10, lab.start, lab.end, 20, 500, True)).transact({'from': lab.nft.address})
+        lab.w.provider.make_request('hardhat_stopImpersonatingAccount', [lab.nft.address])
+    history = (await lab.client.get('/api/history?section=mints')).json()['records'][0]
+    assert history['recoveries'][0]['previous_hash'] == previous[0]
+    assert history['recoveries'][0]['replacement_hash'] == result['hash']
+    assert 'signed_tx_raw' not in json.dumps(history) and previous[1] not in json.dumps(history)
+    # A later task settles the single independent liability against either winner.
+    other = await lab.client.post('/api/tasks/arm', json={**lab.request, 'idempotency_key': 'later-fresh-task'})
+    assert other.status_code == 200, other.text
+    await lab.sign(other.json()['id'])
+    journal = CustodyVault().journal()
+    actual = journal.execute('SELECT actual FROM signed WHERE task=?', (task_id,)).fetchone()[0]
+    assert actual == history['actual_total_cost_wei']
+    journal.close()
+
+
+async def test_recovery_journal_reuses_signature_after_database_commit_loss(lab, monkeypatch, recovery_clock):
+    task_id, previous = await unresolved(lab)
+    expiry = datetime.fromtimestamp(lab.end, timezone.utc)
+    async with lab.factory() as db:
+        real_commit = db.commit
+        count = 0
+        async def fail_activation():
+            nonlocal count
+            count += 1
+            if count == 2:
+                raise RuntimeError('simulated crash after journal fsync')
+            await real_commit()
+        monkeypatch.setattr(db, 'commit', fail_activation)
+        with pytest.raises(RuntimeError):
+            await recover_task(db, task_id, lab.user.id, expiry, 'crash-proof-owner-consent')
+        await db.rollback()
+    journal = CustodyVault().journal()
+    saved = dict(journal.execute('SELECT * FROM recoveries').fetchone())
+    journal.close()
+    async with lab.factory() as db:
+        result = await recover_task(db, task_id, lab.user.id, expiry, 'crash-proof-owner-consent')
+        assert result['hash'] == saved['hash'] and result['nonce'] == previous[2]
+        assert (await db.get(MintTask, task_id)).signed_tx_raw == saved['raw']
+
+
+@pytest.mark.parametrize('invalid', ['owner', 'expired', 'fee_cap', 'consumed_nonce', 'expensive_gas'])
+async def test_recovery_rejects_unapproved_or_unaffordable_scope_without_signing(lab, invalid, monkeypatch, recovery_clock):
+    task_id, _ = await unresolved(lab)
+    expiry = datetime.fromtimestamp(lab.end, timezone.utc)
+    owner = lab.user.id
+    if invalid == 'owner': owner = str(uuid.uuid4())
+    if invalid == 'expired': expiry = datetime.now(timezone.utc) - timedelta(seconds=1)
+    if invalid == 'fee_cap':
+        async with lab.factory() as db:
+            task = await db.get(MintTask, task_id)
+            (await db.get(MintAuthorization, task.authorization_id)).max_fee_wei = 1
+            await db.commit()
+    if invalid == 'consumed_nonce':
+        lab.w.provider.make_request('hardhat_setNonce', [lab.owner.address, '0x1'])
+    if invalid == 'expensive_gas':
+        async def expensive(*args): return 1000000, 10**12
+        monkeypatch.setattr('app.services.custody_recovery.quote_gas', expensive)
+    async with lab.factory() as db:
+        with pytest.raises(ValueError):
+            await recover_task(db, task_id, owner, expiry, 'rejected-consent')
+    journal = CustodyVault().journal()
+    assert journal.execute('SELECT count(*) FROM recoveries').fetchone()[0] == 0
+    journal.close()
+
+
+async def test_recovery_retries_are_finite_and_never_extend_original_consent(lab, monkeypatch, recovery_clock):
+    task_id, previous = await unresolved(lab)
+    expiry = datetime.fromtimestamp(lab.end, timezone.utc)
+    async with lab.factory() as db:
+        await recover_task(db, task_id, lab.user.id, expiry, 'finite-recovery-owner-consent')
+    real_provider = automatic.provider
+    attempted = []
+    async def rejecting_provider():
+        web3 = await real_provider()
+        async def reject(raw):
+            attempted.append(bytes(raw))
+            raise RuntimeError('simulated RPC rejection')
+        web3.eth.send_raw_transaction = reject
+        return web3
+    monkeypatch.setattr(automatic, 'provider', rejecting_provider)
+    for _ in range(4):
+        await lab.due(); await lab.tick()
+    assert len(attempted) == 2 and attempted[0] == attempted[1]
+    async with lab.factory() as db:
+        task = await db.get(MintTask, task_id)
+        assert task.status == 'uncertain' and task.broadcast_attempts == 6
+        assert task.expires_at_utc == previous[3] and task.assigned_nonce == previous[2]
+        assert (await db.get(AutomaticGrant, lab.grant.id)).reserved_wei == 500000000000020
 
 
 @pytest.fixture
@@ -211,6 +385,13 @@ async def test_future_api_mint_runs_unattended_with_real_receipt(lab,kind,delega
 async def importer(lab, monkeypatch):
     from app.custody_import import app as import_app
     monkeypatch.setattr(settings, 'ENABLE_CUSTODY_IMPORT', True)
+    async def signer_relink_ready(address):
+        response = await lab.signer_client.get(f'/accounts/{address}/relink-ready')
+        assert response.status_code == 200
+        if response.json() != {'ready': True}:
+            from fastapi import HTTPException
+            raise HTTPException(409, 'Independent signer has an unresolved signature.')
+    monkeypatch.setattr('app.custody_import.signer_relink_ready', signer_relink_ready)
     async def dependency():
         async with lab.factory() as db:
             yield db
@@ -226,15 +407,19 @@ async def importer(lab, monkeypatch):
     import_app.dependency_overrides.clear()
 
 
-async def test_import_encrypts_and_runs_unattended_without_duplicate_allowance(lab, importer):
+@pytest.mark.parametrize('automatic_collections', [False, True])
+async def test_import_encrypts_and_runs_unattended_without_duplicate_allowance(lab, importer, automatic_collections):
     client, request = importer
+    if automatic_collections:
+        request.pop('contract')
+        request['collection_scope'] = 'reviewed_mints'
     response = await client.post('/api/automatic/import', json=request)
     assert response.status_code == 200, response.text
     assert response.headers['cache-control'] == 'no-store'
     assert request['private_key'] not in response.text and request['password'] not in response.text
     grant_id = response.json()['id']
-    unlink = await lab.client.delete('/api/wallets/'+lab.wallet.id)
-    assert unlink.status_code == 409 and 'custody' in unlink.text
+    unlink = await lab.client.delete('/api/wallets/'+str(uuid.uuid4()))
+    assert unlink.status_code == 404
     keyfile = json.loads((lab.tmp/f'{grant_id}.keystore.json').read_text())
     assert keyfile['crypto']['kdfparams']['n'] == 262144
     assert Account.from_key(Account.decrypt(keyfile,(lab.tmp/'password').read_text())).address == lab.owner.address
@@ -254,7 +439,7 @@ async def test_import_encrypts_and_runs_unattended_without_duplicate_allowance(l
     assert lab.nft.functions.ownerOf(1).call() == lab.owner.address
 
 
-@pytest.mark.parametrize('failure',['wrong_key','wrong_password','other_wallet','consent','expired','malformed','oversized'])
+@pytest.mark.parametrize('failure',['wrong_key','wrong_password','other_wallet','consent','expired','malformed','oversized','empty_scope','mixed_scope','unknown_scope'])
 async def test_import_rejects_invalid_input_without_echoing_secrets(lab, importer, failure):
     client, request = importer
     if failure == 'wrong_key': request['private_key'] = '0x'+Account.create().key.hex()
@@ -264,6 +449,10 @@ async def test_import_rejects_invalid_input_without_echoing_secrets(lab, importe
     if failure == 'expired': request['expires_at'] = '2020-01-01T00:00:00Z'
     if failure == 'malformed': request['budget_eth'] = {'secret':request['private_key']}
     if failure == 'oversized': request['private_key'] *= 100
+    if failure == 'empty_scope': request.pop('contract')
+    if failure == 'mixed_scope': request['collection_scope'] = 'reviewed_mints'
+    if failure == 'unknown_scope':
+        request.pop('contract'); request['collection_scope'] = 'all_transactions'
     response = await client.post('/api/automatic/import',json=request)
     assert response.status_code in (403,404,409,413,422), response.text
     assert request['private_key'] not in response.text and request['password'] not in response.text
@@ -580,3 +769,167 @@ async def test_notification_failures_and_concurrent_status_change_preserve_outbo
     async with lab.factory() as db:
         assert not (await db.get(MintTask,task_id)).notification_pending
     assert calls==[lab.user.id,lab.user.id]
+
+
+async def plan_context(lab, monkeypatch):
+    async with lab.factory() as db:
+        wallet = await db.get(Wallet, lab.wallet.id)
+        wallet.supported_chains = ['Local EVM']
+        await db.commit()
+    from app.models import MintPlan
+    from app.services.opensea import OpenSeaClient
+    detail = {'collection_slug': 'example', 'collection_name': 'Plan collection',
+        'opensea_url': 'https://opensea.io/collection/example', 'chain': 'local-test',
+        'contract_address': lab.nft.address, 'drop_type': 'seadrop_v1_erc721',
+        'stages': [{'uuid': 'exact-public', 'stage_type': 'public_sale', 'label': 'Selected plan stage',
+            'start_time': datetime.fromtimestamp(lab.start, timezone.utc).isoformat(),
+            'end_time': datetime.fromtimestamp(lab.end, timezone.utc).isoformat(),
+            'price': '10', 'max_per_wallet': '20', 'price_currency_address': '0x' + '0' * 40}]}
+    async def get_drop(self, slug):
+        assert slug == 'example'
+        return detail
+    async def quote():
+        return '2500', datetime.now(timezone.utc)
+    monkeypatch.setattr(OpenSeaClient, 'get_drop', get_drop)
+    monkeypatch.setattr('app.services.mint_plans.eth_usdt_quote', quote)
+    r = await lab.client.post('/api/mint-plans', json={'url': detail['opensea_url'],
+        'wallet_id': lab.wallet.id, 'quantity': 2})
+    assert r.status_code == 200, r.text
+    plan = r.json()
+    assert plan['status'] == 'scheduled'
+    r = await lab.client.post('/api/mint-plans/' + plan['id'] + '/automatic-context')
+    assert r.status_code == 200, r.text
+    context = r.json()
+    assert context['plan']['quantity'] == 2
+    assert context['drop']['contract_address'] == lab.nft.address
+    request = {**lab.request, 'plan_id': plan['id'], 'drop_id': context['drop']['id'],
+        'stage_id': context['drop']['stages'][0]['id']}
+    r = await lab.client.post('/api/tasks/draft', json=request)
+    assert r.status_code == 200, r.text
+    request['review_hash'] = r.json()['review_hash']
+    return plan, request
+
+
+async def test_remove_plan_cancels_before_signing_preserves_owner_history_and_reimport(lab, monkeypatch):
+    from app.models import MintPlan, MintPlanRecord
+    plan, request = await plan_context(lab, monkeypatch)
+    r = await lab.client.post('/api/tasks/arm', json=request)
+    assert r.status_code == 200, r.text
+    task_id = r.json()['id']
+    duplicate = await lab.client.post('/api/tasks/arm', json={**request, 'idempotency_key': 'another-intent-key'})
+    assert duplicate.status_code == 409
+    assert (await lab.client.post('/api/tasks/arm', json=request)).json()['id'] == task_id
+    # Another account cannot see, arm, remove or read this plan's records.
+    other = await lab.client.post('/api/auth/login', json={'username': 'admin', 'password': 'Admin test password 123'})
+    headers = {'Authorization': 'Bearer ' + other.json()['token']}
+    assert (await lab.client.delete('/api/mint-plans/' + plan['id'], headers=headers)).status_code == 404
+    assert (await lab.client.get('/api/history?section=plans', headers=headers)).json()['records'] == []
+    removed = await lab.client.delete('/api/mint-plans/' + plan['id'])
+    assert removed.status_code == 200 and removed.json()['in_flight'] is False
+    assert (await lab.client.delete('/api/mint-plans/' + plan['id'])).status_code == 200
+    assert (await lab.client.get('/api/mint-plans')).json() == []
+    assert (await lab.client.get('/api/tasks/queue')).json()['tasks'] == []
+    history = (await lab.client.get('/api/history?section=mints')).json()['records']
+    assert history[0]['id'] == task_id and history[0]['status'] == 'disarmed'
+    assert history[0]['archived_at'] and 'signed_tx_raw' not in history[0]
+    page = (await lab.client.get('/api/history?section=plans&limit=1')).json()
+    assert page['records'][0]['event'] == 'removed' and page['next_offset'] == 1
+    earlier = (await lab.client.get('/api/history?section=plans&limit=1&offset=1')).json()
+    assert earlier['records'][0]['snapshot']['quantity'] == 2
+    async with lab.factory() as db:
+        assert (await db.get(AutomaticGrant, lab.grant.id)).reserved_wei == 0
+        assert (await db.get(MintTask, task_id)).signed_tx_raw is None
+        assert await db.get(MintPlan, plan['id']) is not None
+    lab.w.provider.make_request('evm_setNextBlockTimestamp', [lab.start]); lab.w.provider.make_request('evm_mine', [])
+    assert await lab.tick() is False
+    assert lab.nft.functions.totalSupply().call() == 0
+    # Reimport retains earlier quantity/removal records instead of overwriting history.
+    # Keep stage future relative to wall time; do not request live calldata here.
+    r = await lab.client.post('/api/mint-plans', json={'url': plan['opensea_url'], 'quantity': 1})
+    assert r.status_code == 200, r.text
+    records = (await lab.client.get('/api/history?section=plans')).json()['records']
+    assert any(x['event'] == 'removed' and x['snapshot']['quantity'] == 2 for x in records)
+    assert records[0]['event'] == 'saved' and records[0]['snapshot']['quantity'] == 1
+
+
+async def test_remove_prepared_plan_keeps_same_nonce_receipt_and_accounting_in_history(lab, monkeypatch):
+    plan, request = await plan_context(lab, monkeypatch)
+    r = await lab.client.post('/api/tasks/arm', json=request)
+    assert r.status_code == 200, r.text
+    task_id = r.json()['id']
+    lab.w.provider.make_request('evm_setNextBlockTimestamp', [lab.start]); lab.w.provider.make_request('evm_mine', [])
+    await lab.due(); await lab.tick()
+    async with lab.factory() as db:
+        task = await db.get(MintTask, task_id)
+        assert task.status == 'prepared'
+        original = task.transaction_hash, task.assigned_nonce, task.signed_tx_raw
+    r = await lab.client.delete('/api/mint-plans/' + plan['id'])
+    assert r.json()['in_flight'] is True
+    assert (await lab.client.get('/api/tasks/queue')).json()['tasks'] == []
+    async with lab.factory() as db:
+        assert (await db.get(AutomaticGrant, lab.grant.id)).reserved_wei > 0
+    await lab.due(); await lab.tick()
+    lab.w.provider.make_request('evm_mine', [])
+    await lab.due(); await lab.tick()
+    history = (await lab.client.get('/api/history?section=mints')).json()['records'][0]
+    assert history['id'] == task_id and history['status'] == 'confirmed'
+    assert history['transaction_hash'] == original[0] and history['actual_total_cost_wei'] > 0
+    assert lab.nft.functions.ownerOf(1).call() == lab.owner.address
+    assert lab.nft.functions.totalSupply().call() == 2
+    async with lab.factory() as db:
+        task = await db.get(MintTask, task_id)
+        assert (task.transaction_hash, task.assigned_nonce, task.signed_tx_raw) == original
+        assert (await db.get(AutomaticGrant, lab.grant.id)).reserved_wei == 0
+    assert await lab.tick() is False
+
+
+async def test_task_remove_is_idempotent_and_history_pagination_is_owner_scoped(lab):
+    r = await lab.client.post('/api/tasks/arm', json=lab.request)
+    assert r.status_code == 200, r.text
+    task_id = r.json()['id']
+    for _ in range(2):
+        assert (await lab.client.delete('/api/tasks/' + task_id)).json()['history_retained']
+    assert (await lab.client.get('/api/tasks/queue')).json()['tasks'] == []
+    async with lab.factory() as db:
+        assert (await db.get(AutomaticGrant, lab.grant.id)).reserved_wei == 0
+    assert (await lab.client.get('/api/history?section=activity&limit=0')).status_code == 422
+    assert (await lab.client.get('/api/history?section=activity&offset=-1')).status_code == 422
+    assert (await lab.client.get('/api/history?section=unknown')).status_code == 422
+    records = (await lab.client.get('/api/history?section=activity')).json()['records']
+    assert len([r for r in records if r['event_type'] == 'task_removed']) == 1
+
+
+async def test_low_balance_covers_mint_and_authorized_gas_without_block_gas_default(lab, monkeypatch):
+    # Hardhat omits Nitro's eth_call affordability check; emulate that RPC rule using real chain balances.
+    real_provider = automatic.provider
+    async def nitro_provider():
+        web3 = await real_provider()
+        call = web3.eth.call
+        async def affordable_call(tx, *args, **kwargs):
+            if tx.get('gasPrice') and tx.get('from', '').lower() == lab.owner.address.lower():
+                gas = tx.get('gas', (await web3.eth.get_block('latest')).gasLimit)
+                required = gas * tx['gasPrice'] + tx.get('value', 0)
+                if required > await web3.eth.get_balance(lab.owner.address, 'pending'):
+                    raise ValueError('RPC simulation requires sufficient balance for its supplied gas limit')
+            return await call(tx, *args, **kwargs)
+        web3.eth.call = affordable_call
+        return web3
+    monkeypatch.setattr(automatic, 'provider', nitro_provider)
+    # Enough for this bounded mint, far below the default RPC simulation's block-sized gas budget.
+    r = await lab.client.post('/api/tasks/arm', json=lab.request)
+    assert r.status_code == 200, r.text
+    task_id = r.json()['id']
+    lab.w.provider.make_request('hardhat_setBalance', [lab.owner.address, hex(10**15)])
+    lab.w.provider.make_request('evm_setNextBlockTimestamp', [lab.start]); lab.w.provider.make_request('evm_mine', [])
+    await lab.due(); await lab.tick()
+    async with lab.factory() as db:
+        task = await db.get(MintTask, task_id)
+        assert task.status == 'prepared', task.failure_reason
+    await lab.due(); await lab.tick()
+    lab.w.provider.make_request('evm_mine', [])
+    await lab.due(); await lab.tick()
+    async with lab.factory() as db:
+        task = await db.get(MintTask, task_id)
+        assert task.status == 'confirmed', task.failure_reason
+        assert task.actual_total_cost_wei <= 10**15
+    assert lab.nft.functions.ownerOf(1).call() == lab.owner.address

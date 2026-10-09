@@ -1,0 +1,7 @@
+# Include only with the custody overlay and explicit automatic worker activation.
+services:
+  automatic-notifications:
+    environment:
+      FIREBASE_CREDENTIALS_FILE: /run/secrets/firebase-service-account.json
+    volumes:
+      - /srv/mintly-custody/notifications/firebase-service-account.json:/run/secrets/firebase-service-account.json:ro

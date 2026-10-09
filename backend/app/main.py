@@ -3,7 +3,7 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.database import init_db
@@ -43,7 +43,7 @@ app.include_router(api_router)
 @app.middleware("http")
 async def prevent_sensitive_response_caching(request: Request, call_next):
     response = await call_next(request)
-    if request.url.path.startswith(("/api/auth/", "/api/admin/", "/api/wallet-link/", "/api/mint-permission")):
+    if request.url.path.startswith(("/api/auth/", "/api/admin/", "/api/wallet-link/", "/api/mint-permission", "/api/copy-mints")):
         response.headers["Cache-Control"] = "no-store"
     return response
 
@@ -58,12 +58,13 @@ _connect_headers = {
 
 @app.get("/connect", include_in_schema=False)
 async def connect_wallet_page():
-    return FileResponse(_web_dir / "connect.html", media_type="text/html", headers=_connect_headers)
+    return HTMLResponse('<p>Wallet setup has moved to the Mintly app. Open Wallets and choose Add wallet.</p>',
+        status_code=410, headers=_connect_headers)
 
 
 @app.get("/connect.js", include_in_schema=False)
 async def connect_wallet_script():
-    return FileResponse(_web_dir / "connect.js", media_type="application/javascript", headers=_connect_headers)
+    return HTMLResponse('Web wallet linking is retired.', status_code=410, headers=_connect_headers)
 
 
 @app.get('/authorize-mint',include_in_schema=False)

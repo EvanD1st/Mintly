@@ -45,6 +45,7 @@ class MintlyState {
   });
 
   MintlyState copyWith({
+    bool clearSelection = false,
     List<DropModel>? drops,
     String? filter,
     DropModel? selectedDrop,
@@ -66,8 +67,10 @@ class MintlyState {
     return MintlyState(
       drops: drops ?? this.drops,
       filter: filter ?? this.filter,
-      selectedDrop: selectedDrop ?? this.selectedDrop,
-      selectedStage: selectedStage ?? this.selectedStage,
+      selectedDrop: clearSelection ? null : selectedDrop ?? this.selectedDrop,
+      selectedStage: clearSelection
+          ? null
+          : selectedStage ?? this.selectedStage,
       selectedQty: selectedQty ?? this.selectedQty,
       feeCap: feeCap ?? this.feeCap,
       queue: queue ?? this.queue,
@@ -90,12 +93,22 @@ class MintlyNotifier extends StateNotifier<MintlyState> {
   int _loadGeneration = 0;
 
   MintlyNotifier(this._api)
-      : super(MintlyState(
-          drops: [],
-          queue: [],
-          activities: [],
-          isLoading: false,
-        ));
+    : super(
+        MintlyState(drops: [], queue: [], activities: [], isLoading: false),
+      ) {
+    _api.addListener(_accountChanged);
+  }
+
+  void _accountChanged() {
+    _loadGeneration++;
+    state = MintlyState(drops: [], queue: [], activities: []);
+  }
+
+  @override
+  void dispose() {
+    _api.removeListener(_accountChanged);
+    super.dispose();
+  }
 
   Future<void> loadInitialData() async {
     final generation = ++_loadGeneration;
@@ -105,10 +118,14 @@ class MintlyNotifier extends StateNotifier<MintlyState> {
     }
     state = state.copyWith(isLoading: true);
     final errors = <String>[];
-    bool isCurrent() => mounted && generation == _loadGeneration && _api.isLiveBackendConnected;
+    bool isCurrent() =>
+        mounted && generation == _loadGeneration && _api.isLiveBackendConnected;
 
-    Future<void> loadSection<T>(String label, Future<T> Function() fetch,
-        MintlyState Function(T) apply) async {
+    Future<void> loadSection<T>(
+      String label,
+      Future<T> Function() fetch,
+      MintlyState Function(T) apply,
+    ) async {
       try {
         final result = await fetch();
         if (isCurrent()) state = apply(result);
@@ -118,27 +135,61 @@ class MintlyNotifier extends StateNotifier<MintlyState> {
     }
 
     await Future.wait([
-      loadSection('Drops', () => _api.fetchDrops(state.filter), (drops) => state.copyWith(
-        drops: drops,
-        selectedDrop: drops.isNotEmpty ? drops.first : null,
-        selectedStage: drops.isNotEmpty && drops.first.stages.isNotEmpty ? drops.first.stages.first : null,
-        sourceStatusText: _api.sourceStatusText,
-        checkedWalletLabel: _api.checkedWalletLabel,
-        lastCheckedText: _api.lastCheckedText,
-      )),
-      loadSection('Mint tasks', _api.fetchQueue, (queue) => state.copyWith(queue: queue)),
-      loadSection('Mint plans', _api.fetchMintPlans, (plans) => state.copyWith(mintPlans: plans)),
-      loadSection('Mint permissions', _api.fetchMintPermissions,
-        (permissions) => state.copyWith(mintPermissions: permissions)),
-      loadSection('Activity', _api.fetchActivity, (activities) => state.copyWith(activities: activities)),
+      loadSection(
+        'Drops',
+        () => _api.fetchDrops(state.filter),
+        (drops) => state.copyWith(
+          drops: drops,
+          clearSelection: drops.isEmpty,
+          selectedDrop: drops.isNotEmpty ? drops.first : null,
+          selectedStage: drops.isNotEmpty && drops.first.stages.isNotEmpty
+              ? drops.first.stages.first
+              : null,
+          sourceStatusText: _api.sourceStatusText,
+          checkedWalletLabel: _api.checkedWalletLabel,
+          lastCheckedText: _api.lastCheckedText,
+        ),
+      ),
+      loadSection(
+        'Mint tasks',
+        _api.fetchQueue,
+        (queue) => state.copyWith(queue: queue),
+      ),
+      loadSection(
+        'Mint plans',
+        _api.fetchMintPlans,
+        (plans) => state.copyWith(mintPlans: plans),
+      ),
+      loadSection(
+        'Mint permissions',
+        _api.fetchMintPermissions,
+        (permissions) => state.copyWith(mintPermissions: permissions),
+      ),
+      loadSection(
+        'Activity',
+        _api.fetchActivity,
+        (activities) => state.copyWith(activities: activities),
+      ),
     ]);
     if (isCurrent()) {
-      state = state.copyWith(isLoading: false, error: errors.isEmpty ? null : errors.join('\n'));
+      state = state.copyWith(
+        isLoading: false,
+        error: errors.isEmpty ? null : errors.join('\n'),
+      );
     }
   }
 
   Future<void> setFilter(String filter) async {
     state = state.copyWith(filter: filter);
+    await loadInitialData();
+  }
+
+  Future<void> removeDrop(String id) async {
+    await _api.removeDrop(id);
+    state = state.copyWith(
+      drops: state.drops.where((drop) => drop.id != id).toList(),
+      clearSelection: state.selectedDrop?.id == id,
+    );
     await loadInitialData();
   }
 
@@ -179,7 +230,7 @@ class MintlyNotifier extends StateNotifier<MintlyState> {
 
   Future<MintTaskModel?> armCurrentTask() async {
     if (state.selectedDrop == null || state.selectedStage == null) return null;
-    
+
     final task = await _api.armTask(
       drop: state.selectedDrop!,
       stage: state.selectedStage!,
@@ -191,6 +242,12 @@ class MintlyNotifier extends StateNotifier<MintlyState> {
     final activities = await _api.fetchActivity();
     state = state.copyWith(queue: queue, activities: activities);
     return task;
+  }
+
+  Future<bool> removeTask(String id) async {
+    final result = await _api.removeTask(id);
+    await loadInitialData();
+    return result['in_flight'] == true;
   }
 
   Future<void> disarmTask(String taskId) async {
@@ -206,17 +263,27 @@ class MintlyNotifier extends StateNotifier<MintlyState> {
     return ok;
   }
 
-  Future<void> importOpenSeaMint(String url, {int quantity = 1, String? walletId}) async {
-    final plan = await _api.importOpenSeaMint(url, quantity: quantity, walletId: walletId);
+  Future<void> importOpenSeaMint(
+    String url, {
+    int quantity = 1,
+    String? walletId,
+  }) async {
+    final plan = await _api.importOpenSeaMint(
+      url,
+      quantity: quantity,
+      walletId: walletId,
+    );
     _saveMintPlan(plan);
     await loadInitialData();
   }
 
   void _saveMintPlan(MintPlanModel plan) {
-    state = state.copyWith(mintPlans: [
-      plan,
-      ...state.mintPlans.where((existing) => existing.id != plan.id),
-    ]);
+    state = state.copyWith(
+      mintPlans: [
+        plan,
+        ...state.mintPlans.where((existing) => existing.id != plan.id),
+      ],
+    );
   }
 
   Future<MintPlanModel> refreshMintPlan(String id) async {
@@ -226,16 +293,23 @@ class MintlyNotifier extends StateNotifier<MintlyState> {
     return plan;
   }
 
-  Future<void> removeMintPlan(String id) async {
-    await _api.removeMintPlan(id);
-    state = state.copyWith(mintPlans: state.mintPlans.where((plan) => plan.id != id).toList());
+  Future<bool> removeMintPlan(String id) async {
+    final result = await _api.removeMintPlan(id);
+    state = state.copyWith(
+      mintPlans: state.mintPlans.where((plan) => plan.id != id).toList(),
+    );
     await loadInitialData();
+    return result['in_flight'] == true;
   }
 
   Future<Map<String, dynamic>> requestMintPermission(MintPlanModel plan) async {
     final price = plan.mintValueEth ?? plan.priceEth;
     if (price == null) throw StateError('Check the exact mint price first.');
-    final result = await _api.requestMintPermission(plan.id, price, priceMultiplier: plan.mintValueEth == null ? plan.quantity : 1);
+    final result = await _api.requestMintPermission(
+      plan.id,
+      price,
+      priceMultiplier: plan.mintValueEth == null ? plan.quantity : 1,
+    );
     await loadInitialData();
     return result;
   }
@@ -244,7 +318,9 @@ class MintlyNotifier extends StateNotifier<MintlyState> {
     await _api.cancelMintPermission(id);
     await loadInitialData();
   }
-  Future<Map<String,dynamic>> requestMintRevocation(String id) => _api.requestMintRevocation(id);
+
+  Future<Map<String, dynamic>> requestMintRevocation(String id) =>
+      _api.requestMintRevocation(id);
 }
 
 final apiServiceProvider = ChangeNotifierProvider<ApiService>((ref) {
@@ -252,7 +328,9 @@ final apiServiceProvider = ChangeNotifierProvider<ApiService>((ref) {
   return api;
 });
 
-final mintlyProvider = StateNotifierProvider<MintlyNotifier, MintlyState>((ref) {
+final mintlyProvider = StateNotifierProvider<MintlyNotifier, MintlyState>((
+  ref,
+) {
   final api = ref.read(apiServiceProvider);
   return MintlyNotifier(api);
 });

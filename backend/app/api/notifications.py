@@ -23,6 +23,7 @@ class DevicePreferencesRequest(BaseModel):
     daily_list: bool = True
     mint_status: bool = True
     source_health: bool = True
+    wallet_alerts: bool | None = None
 
 
 @router.post("/register")
@@ -58,7 +59,12 @@ async def update_device_preferences(req: DevicePreferencesRequest, db: AsyncSess
     ))).scalar_one_or_none()
     if device is None:
         raise HTTPException(status_code=404, detail="Device is not registered.")
-    device.preferences = req.model_dump(exclude={"token"})
+    preferences=req.model_dump(exclude={"token","wallet_alerts"})
+    if req.wallet_alerts is not None:
+        preferences['wallet_alerts']=req.wallet_alerts
+    elif 'wallet_alerts' in (device.preferences or {}):
+        preferences['wallet_alerts']=device.preferences['wallet_alerts']
+    device.preferences = preferences
     await db.commit()
     return {"status": "ok", "preferences": device.preferences}
 

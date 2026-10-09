@@ -1,5 +1,16 @@
 # Robinhood signer adapter — 2026-10-02
 
+**4 October update:** the owner imported the linked wallet through the isolated
+service and explicitly activated the spending worker. A separately authorized
+same-nonce recovery minted one Robinhood Ape Club NFT (#316) for
+0.000039195327232 ETH total, within the USD 0.50 limit. See
+[current receipt and finality evidence](automatic-mainnet-proof-2026-10-04.json)
+and [plans/history behavior](automatic-plans-history.md). The account pinning,
+policy isolation and finalized settlement rules remain enforced. This is live
+execution evidence, not a production security audit.
+
+The following paragraphs are the original 2 October status:
+
 Implemented, but not activated on a funded mainnet wallet. No user key has been
 imported and no mainnet mint has been signed or broadcast by this work.
 

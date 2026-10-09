@@ -9,11 +9,12 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
-from app.models import ActivityEvent, Drop, MintAuthorization, MintStage, MintTask, User, Wallet
+from app.models import ActivityEvent, Drop, MintAuthorization, MintStage, MintTask, User, Wallet, MintRecovery
 from app.schemas.task import DraftTaskRequest, ArmTaskRequest, TaskSchema, QueueResponse
 from app.services.parser import format_wei_to_eth
 from app.services import automatic
 from app.services.opensea import OpenSeaUnavailable
+from app.services.mint_plans import aware
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -22,8 +23,11 @@ router = APIRouter(prefix="/tasks", tags=["tasks"])
 async def draft_task_preview(req: DraftTaskRequest, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     grant, snapshot = await automatic.make_snapshot(db, req, user.id)
     await automatic.signer_ready(grant.id)
-    web3 = await automatic.provider()
+    web3 = await automatic.provider_for(grant.chain_id)
     try:
+        if req.copy_event_id:
+            from app.services.copy_mints import verify_source
+            await verify_source(web3, snapshot['copy_source'])
         execution = await automatic.prepare_mint(web3, snapshot)
         eligibility = 'verified'
     except Exception as error:
@@ -52,10 +56,22 @@ async def arm_mint_task(req: ArmTaskRequest, user: User = Depends(get_current_us
         if existing.request_hash != request_hash:
             raise HTTPException(409, 'Idempotency key was already used for different task limits.')
         return await task_response(db, existing)
+    if req.plan_id:
+        pending = await db.scalar(select(MintTask.id).where(MintTask.plan_id == req.plan_id,
+            MintTask.status.not_in(automatic.TERMINAL)).limit(1))
+        if pending:
+            raise HTTPException(409, 'This plan already has an active automatic mint. Check its task before arming another.')
     grant, snapshot = await automatic.make_snapshot(db, req, user.id)
+    copy_key = None
+    if req.copy_event_id:
+        from app.services.copy_mints import no_duplicate
+        copy_key = await no_duplicate(db, snapshot)
     await automatic.signer_ready(grant.id)
-    web3 = await automatic.provider()
+    web3 = await automatic.provider_for(grant.chain_id)
     try:
+        if req.copy_event_id:
+            from app.services.copy_mints import verify_source
+            await verify_source(web3, snapshot['copy_source'])
         execution = await automatic.prepare_mint(web3, snapshot)
     except Exception as error:
         if (snapshot['mint_kind'] == 'public' or not req.conditional_eligibility
@@ -73,31 +89,44 @@ async def arm_mint_task(req: ArmTaskRequest, user: User = Depends(get_current_us
         recipient_address=snapshot['recipient'], user_consent_text='Arm exact custodial automatic mint with the displayed finite limits.',
         authorized_at=datetime.now(timezone.utc), grant_id=grant.id, snapshot=snapshot)
     task = MintTask(id=str(uuid.uuid4()), authorization_id=auth.id, wallet_id=req.wallet_id,
-        drop_id=req.drop_id, stage_id=req.stage_id, status='armed', is_demo=False,
+        drop_id=req.drop_id, stage_id=req.stage_id, plan_id=req.plan_id, copy_stage_key=copy_key, status='armed', is_demo=False,
         idempotency_key=key, request_hash=request_hash, execution_mode=automatic.MODE,
-        scheduled_for_utc=datetime.fromtimestamp(snapshot['start'], timezone.utc),
+        scheduled_for_utc=datetime.fromtimestamp(snapshot.get('execute_at', snapshot['start']), timezone.utc),
         expires_at_utc=datetime.fromtimestamp(snapshot['expiry'], timezone.utc))
     grant.reserved_wei += auth.total_spend_cap_wei
     db.add(auth)
     await db.flush()
     db.add(task)
+    await db.flush()
+    from app.services.daily_budget import reserve
+    await reserve(db,task,auth,user.id)
+    if req.copy_event_id:
+        from app.models import CopyEvent
+        await db.flush()
+        event = await db.get(CopyEvent, req.copy_event_id)
+        event.task_id, event.status, event.note = task.id, 'armed', None
+    db.add(ActivityEvent(user_id=user.id, event_type='automatic_armed', label='Automatic mint armed',
+                         detail=task.id, icon_name='gem', is_demo=False))
     await db.commit()
     return await task_response(db, task)
 
 
 async def task_response(db, task):
+    from app.services.mint_progress import progress
     auth = await db.get(MintAuthorization, task.authorization_id)
     s = auth.snapshot
+    recovery = await db.scalar(select(MintRecovery).where(MintRecovery.task_id == task.id))
     return TaskSchema(id=task.id, wallet_id=task.wallet_id, drop_id=task.drop_id,
         stage_id=task.stage_id, status=task.status, is_demo=task.is_demo,
-        scheduled_for_utc=task.scheduled_for_utc, expires_at_utc=task.expires_at_utc,
+        scheduled_for_utc=task.scheduled_for_utc,
+        expires_at_utc=recovery.expires_at if recovery and recovery.activated_at else task.expires_at_utc,
         quantity=auth.quantity, unit_price_eth=format_wei_to_eth(s['price_wei']),
         fee_cap_eth=format_wei_to_eth(auth.max_fee_wei), total_cap_eth=format_wei_to_eth(auth.total_spend_cap_wei),
         drop_name=s['drop_name'], chain=s['chain'], stage_name=s['stage_name'], icon_name='gem',
-        time_wat_label=datetime.fromtimestamp(s['start'], ZoneInfo('Africa/Lagos')).strftime('%H:%M WAT'),
+        time_wat_label=aware(task.scheduled_for_utc).astimezone(ZoneInfo('Africa/Lagos')).strftime('%d %b · %H:%M WAT'),
         transaction_hash=task.transaction_hash, explorer_url=task.explorer_url, failure_reason=task.failure_reason,
         submitted_at=task.submitted_at, confirmed_at=task.confirmed_at, actual_total_cost_wei=task.actual_total_cost_wei,
-        execution_mode=task.execution_mode, wallet_address=s['account'])
+        execution_mode=task.execution_mode, wallet_address=s['account'],progress=progress(task))
 
 
 @router.post("/{task_id}/disarm")
@@ -129,7 +158,7 @@ async def disarm_task(task_id: str, db: AsyncSession = Depends(get_db),
 @router.get("/queue", response_model=QueueResponse)
 async def list_mint_queue(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
     tasks = (await db.execute(select(MintTask).join(Wallet, Wallet.id == MintTask.wallet_id).where(
-        Wallet.user_id == user.id, MintTask.is_demo.is_(False),
+        Wallet.user_id == user.id, MintTask.is_demo.is_(False), MintTask.archived_at.is_(None),
     ).order_by(MintTask.scheduled_for_utc.asc()))).scalars().all()
     formatted = []
     for task in tasks:
@@ -157,3 +186,33 @@ async def list_mint_queue(db: AsyncSession = Depends(get_db), user: User = Depen
             actual_total_cost_wei=task.actual_total_cost_wei,
         ))
     return QueueResponse(tasks=formatted, total_count=len(formatted))
+
+
+async def archive_task(db, task, user_id, now):
+    """Caller holds lock_execution. Signed tasks retain bytes, status and reservation."""
+    in_flight = task.status not in automatic.TERMINAL and bool(
+        task.signed_tx_raw or task.status not in ('armed', 'preparing'))
+    if task.archived_at:
+        return in_flight
+    if task.status in ('armed', 'preparing') and not task.signed_tx_raw:
+        task.status = 'disarmed'
+        if task.execution_mode == automatic.MODE:
+            await automatic.release_reservation(db, task)
+    task.archived_at = now
+    db.add(ActivityEvent(user_id=user_id, event_type='task_removed', label='Mint task removed',
+        detail=task.id + ('; transaction tracking continues in History.' if in_flight else '; retained in History.'),
+        icon_name='gem', is_demo=False))
+    return in_flight
+
+
+@router.delete('/{task_id}')
+async def remove_task(task_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    await automatic.lock_execution(db)
+    task = (await db.execute(select(MintTask).join(Wallet, Wallet.id == MintTask.wallet_id).where(
+        MintTask.id == task_id, Wallet.user_id == user.id, MintTask.is_demo.is_(False),
+    ))).scalar_one_or_none()
+    if task is None:
+        raise HTTPException(404, 'Task not found.')
+    in_flight = await archive_task(db, task, user.id, datetime.now(timezone.utc))
+    await db.commit()
+    return {'status': 'removed', 'in_flight': in_flight, 'history_retained': True}

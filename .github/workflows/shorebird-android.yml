@@ -13,9 +13,13 @@ on:
         options: [release, patch]
         required: true
       release_version:
-        description: Existing Shorebird version to patch (for example 1.0.0+1)
+        description: Existing version to patch (audited wallet OTA also accepts comma separated versions)
         type: string
         required: false
+      audited_wallet_ota:
+        description: Audit installed assets and embed new wallet notices before patching
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -92,16 +96,36 @@ jobs:
         run: |
           curl --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/shorebirdtech/install/main/install.sh -sSf | bash
           echo "$HOME/.config/shorebird/bin" >> "$GITHUB_PATH"
+      - name: Test compatibility with earliest installed icon fonts
+        if: steps.scope.outputs.skip != 'true' && inputs.audited_wallet_ota == true
+        working-directory: mobile
+        run: flutter test --dart-define=MINTLY_LEGACY_ICONS=true
       - name: Create signed Android release
         if: steps.scope.outputs.skip != 'true' && inputs.operation == 'release'
         working-directory: mobile
         run: shorebird --json release android --artifact apk --flutter-version 3.44.8
       - name: Publish Dart patch
-        if: steps.scope.outputs.skip != 'true' && (github.event_name == 'push' || inputs.operation == 'patch')
+        if: steps.scope.outputs.skip != 'true' && (github.event_name == 'push' || inputs.operation == 'patch') && inputs.audited_wallet_ota != true
         working-directory: mobile
         run: |
           : "${RELEASE_VERSION:?Set MINTLY_SHOREBIRD_RELEASE_VERSION or dispatch with release_version}"
           shorebird --json patch android --release-version "$RELEASE_VERSION"
+      - name: Publish audited wallet OTA
+        if: steps.scope.outputs.skip != 'true' && inputs.operation == 'patch' && inputs.audited_wallet_ota == true
+        working-directory: mobile
+        run: |
+          : "${RELEASE_VERSION:?Dispatch with release_version}"
+          python -m pip install fonttools==4.63.0
+          python -m unittest discover -s ../deploy -p test_shorebird_wallet_ota.py
+          python ../deploy/shorebird-wallet-ota.py --release-version "$RELEASE_VERSION"
+      - name: Upload OTA compatibility audit
+        if: always() && inputs.audited_wallet_ota == true
+        uses: actions/upload-artifact@v4
+        with:
+          name: mintly-wallet-ota-audit
+          path: mobile/build/shorebird/wallet-ota-audit-*.json
+          if-no-files-found: warn
+          retention-days: 30
       - name: Upload signed installer
         if: steps.scope.outputs.skip != 'true' && inputs.operation == 'release'
         uses: actions/upload-artifact@v4

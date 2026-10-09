@@ -182,6 +182,21 @@ class OpenSeaClient:
         stage_schedule(data)
         return data
 
+    async def collection_for_contract(self, chain_id: int, contract: str) -> str:
+        chains = {cid: name for name, (cid, _) in CHAINS.items()}
+        chain = chains.get(chain_id)
+        if not chain or not is_address(contract):
+            raise OpenSeaUnavailable('Whitelist discovery is unavailable for this contract or network.', 409)
+        status, data = await self._request('GET', f'/chain/{chain}/contract/{to_checksum_address(contract)}', key=await self._key())
+        slug = data.get('collection')
+        if (status != 200 or data.get('chain') != chain or data.get('address', '').lower() != contract.lower()
+                or data.get('contract_standard') != 'erc721' or not isinstance(slug, str) or not SLUG_RE.fullmatch(slug)):
+            raise OpenSeaUnavailable('Whitelist collection metadata could not be verified.', 409 if status in (400,404) else 503)
+        detail = await self.get_drop(slug)
+        if detail['chain'] != chain or detail['contract_address'].lower() != contract.lower():
+            raise OpenSeaUnavailable('Whitelist drop does not match the followed NFT.', 409)
+        return slug
+
     async def build_mint(self, slug: str, wallet_address: str, quantity: int = 1) -> tuple[int, dict | None]:
         """Read-only preparation: OpenSea returns calldata; this never signs or sends it."""
         if not SLUG_RE.fullmatch(slug) or not is_address(wallet_address) or type(quantity) is not int or not 1 <= quantity <= 100:
@@ -225,8 +240,15 @@ async def estimate_network_fee(transaction: dict, wallet_address: str, chain: st
         tx = {"from": to_checksum_address(wallet_address),
               "to": to_checksum_address(transaction["to"]),
               "data": transaction["data"], "value": transaction_value_wei(transaction["value"])}
+        if CHAINS[chain][0] == 4663:
+            from app.services.automatic_fees import quote_gas
+            gas_units, gas_price = await quote_gas(web3, tx, 4663)
+            return gas_units * gas_price
         gas_units = await web3.eth.estimate_gas(tx)
         gas_price = await web3.eth.gas_price
+        if CHAINS[chain][0] == 8453:
+            from app.services.automatic_fees import maximum_fee
+            return await maximum_fee(web3, tx, 8453, gas_units, gas_price)
         return int(gas_units) * int(gas_price)
     except Exception:
         return None

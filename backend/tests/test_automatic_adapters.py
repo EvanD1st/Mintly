@@ -42,8 +42,8 @@ async def test_nitro_quote_includes_positive_parent_fee_once():
         call = AsyncMock(return_value=encode(['uint64','uint64','uint256','uint256'],[120000,20000,12,100]))
     gas, price = await quote_gas(SimpleNamespace(eth=Eth()),
         {'from':ADDRESS,'to':ADDRESS,'value':0,'data':'0x1234'},4663)
-    assert (gas,price)==(144000,12)
-    assert gas*price == 1728000
+    assert (gas,price)==(144000,15)
+    assert gas*price == 2160000
 
 
 async def test_robinhood_finality_waits_for_finalized_block(monkeypatch):

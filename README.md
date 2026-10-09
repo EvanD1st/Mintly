@@ -8,11 +8,20 @@ security limits, and the live feed.
 
 Users can prepare private [OpenSea mint plans](docs/opensea-mint-plans.md) or arm
 an exact mint through the explicitly provisioned [custodial automatic path](docs/automatic-custody.md).
+Mint plans → Set up automatic mint reviews the exact stage and finite spending
+limits before arming unattended execution. Remove archives plans and cancels
+unsigned work; Settings → History retains every plan version, authorization,
+transaction and receipt, including tracking for signed transactions after removal.
+See [automatic plans and history](docs/automatic-plans-history.md).
 Local EVM tests demonstrate unattended public, Merkle allowlist and signed-presale
 SeaDrop minting. Ethereum Sepolia is configuration-gated and has not been
 demonstrated with a real imported wallet. Robinhood chain 4663 has an explicit opt-in
-adapter for Nitro fees and finalized receipts, including pinned EIP-7702 accounts;
-see [verification and deployment limits](docs/robinhood-signer-adapter.md). Other mainnets remain blocked.
+adapter for Nitro fees and finalized receipts, including pinned EIP-7702 accounts.
+Robinhood automation was explicitly activated on 4 October 2026. The owner's
+one-NFT test minted Robinhood Ape Club token #316 for 0.000039195327232 ETH total,
+using an approved same-nonce recovery within the USD 0.50 cap. The
+[receipt evidence](docs/automatic-mainnet-proof-2026-10-04.json) distinguishes
+on-chain inclusion from finalized budget settlement. Other mainnets remain blocked.
 
 An admin creates accounts. Members must change their temporary passwords before
 using the app. A MetaMask address is linked through a short-lived, one-use message

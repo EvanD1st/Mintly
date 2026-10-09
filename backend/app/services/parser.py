@@ -24,7 +24,7 @@ def format_wei_to_eth(wei: int) -> str:
     if wei == 0:
         return "0"
     dec = Decimal(wei) / Decimal(10**18)
-    formatted = f"{dec:.6f}".rstrip("0").rstrip(".")
+    formatted = f"{dec:.18f}".rstrip("0").rstrip(".")
     return formatted if formatted else "0"
 
 

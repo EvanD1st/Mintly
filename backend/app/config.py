@@ -54,6 +54,9 @@ class Settings(BaseSettings):
     ENABLE_CUSTODY_IMPORT: bool = False
     AUTOMATIC_CHAIN_ID: int = 31337
     ENABLE_ROBINHOOD_AUTOMATIC: bool = False  # separate explicit mainnet opt-in
+    ENABLE_ETHEREUM_AUTOMATIC: bool = False
+    ENABLE_BASE_AUTOMATIC: bool = False
+    ENABLE_COPY_MINTS: bool = False
     AUTOMATIC_RPC: str = 'http://127.0.0.1:18545'
     AUTOMATIC_SIGNER_URL: str = 'http://127.0.0.1:18766'
     AUTOMATIC_SIGNER_TOKEN_FILE: str = ''

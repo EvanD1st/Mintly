@@ -7,6 +7,8 @@ from app.schemas.drop import DropSchema, MintStageSchema
 
 
 class DraftTaskRequest(BaseModel):
+    plan_id: str | None = None
+    copy_event_id: str | None = Field(default=None, min_length=64, max_length=64)
     wallet_id: str
     drop_id: str
     stage_id: str
@@ -17,6 +19,7 @@ class DraftTaskRequest(BaseModel):
     price_cap_eth: str | None = Field(default=None, pattern=r'^[0-9]+(\.[0-9]+)?$')
     total_cap_eth: str | None = Field(default=None, pattern=r'^[0-9]+(\.[0-9]+)?$')
     expires_at: datetime | None = None
+    scheduled_for_utc: datetime | None = None
     conditional_eligibility: bool = False
     onchain_stage_index: int | None = Field(default=None, ge=1, strict=True)
 
@@ -73,6 +76,7 @@ class TaskSchema(BaseModel):
     actual_total_cost_wei: Optional[int] = None
     execution_mode: Optional[str] = None
     wallet_address: Optional[str] = None
+    progress: dict | None = None
 
 
 class QueueResponse(BaseModel):

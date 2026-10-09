@@ -1,12 +1,25 @@
+import '../widgets/mintly_notice.dart';
+import '../theme/compatible_icons.dart';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/drop_model.dart';
+import '../models/mint_plan_model.dart';
 import '../state/app_state.dart';
+import '../services/wat_time.dart';
 
 class AutomaticReviewScreen extends ConsumerStatefulWidget {
   final DropModel drop;
-  const AutomaticReviewScreen({super.key, required this.drop});
+  final MintPlanModel? plan;
+  final String? copyEventId;
+  final String initialMintKind;
+  const AutomaticReviewScreen({
+    super.key,
+    required this.drop,
+    this.plan,
+    this.copyEventId,
+    this.initialMintKind = 'public',
+  });
   @override
   ConsumerState<AutomaticReviewScreen> createState() => _AutomaticReviewState();
 }
@@ -22,6 +35,7 @@ class _AutomaticReviewState extends ConsumerState<AutomaticReviewScreen> {
   final _expiry = TextEditingController();
   final _stageIndex = TextEditingController();
   String _kind = 'public';
+  late DateTime _mintAt;
   bool _conditional = false, _consent = false, _busy = false;
   Map<String, dynamic>? _review, _request;
   String? _error;
@@ -30,8 +44,41 @@ class _AutomaticReviewState extends ConsumerState<AutomaticReviewScreen> {
   void initState() {
     super.initState();
     _stage = widget.drop.stages.first;
+    _kind = widget.initialMintKind;
+    _quantity.text = '${widget.plan?.quantity ?? 1}';
     _setStage();
-    _policies = ref.read(apiServiceProvider).fetchAutomaticPolicies();
+    if (widget.plan?.estimatedNetworkFeeEth != null) {
+      final amount = widget.plan!.estimatedNetworkFeeEth!.split('.');
+      final wei =
+          BigInt.parse(amount.first) * BigInt.from(10).pow(18) +
+          BigInt.parse((amount.length > 1 ? amount[1] : '').padRight(18, '0'));
+      // Review a finite gas ceiling with room for changes after the displayed estimate.
+      _gas.text = _eth(
+        (wei * BigInt.from(125) + BigInt.from(99)) ~/ BigInt.from(100),
+      );
+    }
+    _policies = _loadPolicies();
+  }
+
+  Future<List<Map<String, dynamic>>> _loadPolicies() async {
+    final all = await ref.read(apiServiceProvider).fetchAutomaticPolicies();
+    final policies = all
+        .where(
+          (p) =>
+              p['status'] == 'enabled' &&
+              p['chain_id'] == widget.drop.chainId &&
+              (widget.plan == null || p['wallet_id'] == widget.plan!.walletId),
+        )
+        .toList();
+    if (mounted && widget.plan != null && policies.length == 1) {
+      setState(() => _policy = policies.single);
+      final expiry = DateTime.tryParse('${_policy!['expires_at']}');
+      final stageEnd = _stage.endTimeUtc;
+      if (expiry != null && stageEnd != null && expiry.isBefore(stageEnd)) {
+        _expiry.text = expiry.toUtc().toIso8601String();
+      }
+    }
+    return policies;
   }
 
   void _setStage() {
@@ -40,6 +87,61 @@ class _AutomaticReviewState extends ConsumerState<AutomaticReviewScreen> {
     _review = null;
     _request = null;
     _consent = false;
+    _mintAt = WatTime.defaultForStage(_stage.startTimeUtc,DateTime.now().toUtc());
+  }
+
+  Future<void> _pickMintTime() async {
+    if (_busy) return;
+    final now = DateTime.now().toUtc();
+    DateTime? end = DateTime.tryParse(_expiry.text)?.toUtc() ?? _stage.endTimeUtc?.toUtc();
+    for (final limit in [_stage.endTimeUtc?.toUtc(), DateTime.tryParse('${_policy?['expires_at']}')?.toUtc()]) {
+      if (limit != null && (end == null || limit.isBefore(end))) end = limit;
+    }
+    if (end == null || !end.isAfter(now)) {
+      setState(() => _error = 'This mint or wallet approval has ended.');
+      return;
+    }
+    final deadline = end;
+    final selected = WatTime.wall(_mintAt.isBefore(now) ? now : (_mintAt.isAfter(end) ? end : _mintAt));
+    final label = WatTime.label(selected.subtract(const Duration(hours:1))).split(' ');
+    final date = TextEditingController(text:label[0]);
+    final time = TextEditingController(text:label[1]);
+    final form = GlobalKey<FormState>();
+    final picked = await showDialog<DateTime>(context:context,builder:(context) => AlertDialog(
+      title:const Text('Mint time (WAT)'),
+      content:Form(key:form,child:Column(mainAxisSize:MainAxisSize.min,children:[
+        TextFormField(key:const Key('mint-date-input'),controller:date,keyboardType:TextInputType.datetime,
+          decoration:const InputDecoration(labelText:'Date (DD/MM/YYYY)'),
+          validator:(_) => WatTime.parseWall(date.text,time.text) == null ? 'Enter a valid date and time' : null),
+        const SizedBox(height:12),
+        TextFormField(key:const Key('mint-time-input'),controller:time,keyboardType:TextInputType.datetime,
+          decoration:const InputDecoration(labelText:'Time (24-hour HH:MM)',helperText:'WAT · UTC+1; seconds are optional'),
+          validator:(_) {
+            final value = WatTime.parseWall(date.text,time.text);
+            if (value == null) return 'Use HH:MM, for example 12:05';
+            if (!value.isAfter(DateTime.now().toUtc())) return 'Choose a future WAT time';
+            if (value.isBefore(_stage.startTimeUtc.toUtc())) return 'Stage opens ${WatTime.label(_stage.startTimeUtc)}';
+            if (!value.isBefore(deadline)) return 'Choose a time before ${WatTime.label(deadline)}';
+            return null;
+          }),
+      ])),
+      actions:[TextButton(onPressed:() => Navigator.pop(context),child:const Text('Cancel')),
+        FilledButton(onPressed:() {
+          if (form.currentState!.validate()) Navigator.pop(context,WatTime.parseWall(date.text,time.text));
+        },child:const Text('Save time'))],
+    ));
+    // Allow the dialog's closing animation to finish before disposing its input controllers.
+    await Future<void>.delayed(const Duration(milliseconds:250));
+    date.dispose();
+    time.dispose();
+    if (picked == null || !mounted) return;
+    setState(() {
+      _mintAt = picked;
+      _review = null;
+      _request = null;
+      _consent = false;
+      _error = null;
+    });
   }
 
   @override
@@ -63,7 +165,12 @@ class _AutomaticReviewState extends ConsumerState<AutomaticReviewScreen> {
     });
     try {
       final expiry = DateTime.parse(_expiry.text).toUtc();
+      if (!_mintAt.isAfter(DateTime.now().toUtc())) throw const FormatException('Choose a future mint time in WAT.');
+      if (_mintAt.isBefore(_stage.startTimeUtc.toUtc())) throw FormatException('Stage opens ${WatTime.label(_stage.startTimeUtc)}. Choose that time or later.');
+      if (!_mintAt.isBefore(expiry)) throw FormatException('Choose a mint time before ${WatTime.label(expiry)}.');
       final request = <String, dynamic>{
+        if (widget.plan != null) 'plan_id': widget.plan!.id,
+        if (widget.copyEventId != null) 'copy_event_id': widget.copyEventId,
         'wallet_id': _policy!['wallet_id'],
         'grant_id': _policy!['id'],
         'drop_id': widget.drop.id,
@@ -73,6 +180,7 @@ class _AutomaticReviewState extends ConsumerState<AutomaticReviewScreen> {
         'fee_cap_eth': _gas.text,
         if (_total.text.isNotEmpty) 'total_cap_eth': _total.text,
         'expires_at': expiry.toIso8601String(),
+        'scheduled_for_utc': _mintAt.toIso8601String(),
         'mint_kind': _kind,
         'conditional_eligibility': _conditional,
         if (_conditional && _kind != 'public')
@@ -96,7 +204,7 @@ class _AutomaticReviewState extends ConsumerState<AutomaticReviewScreen> {
         });
       }
     } catch (error) {
-      if (mounted) setState(() => _error = '$error');
+      if (mounted) setState(() => _error = error is FormatException ? error.message : '$error');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -115,7 +223,7 @@ class _AutomaticReviewState extends ConsumerState<AutomaticReviewScreen> {
           .armAutomaticTask(_request!);
       await ref.read(mintlyProvider.notifier).loadInitialData();
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
+      MintlyNotice.show(context,
         SnackBar(
           content: Text(
             task.status == 'armed'
@@ -171,14 +279,18 @@ class _AutomaticReviewState extends ConsumerState<AutomaticReviewScreen> {
                   return const Padding(
                     padding: EdgeInsets.symmetric(vertical: 16),
                     child: Text(
-                      'No enabled signer policy for this chain. Connect your wallet, then have the operator provision custody with explicit contract limits, budget and expiry. Mainnet and L2 execution are currently unsupported.',
+                      'Import a wallet for this network from Wallets → Set up automatic minting, then return to review this mint.',
                     ),
                   );
                 }
                 return DropdownButtonFormField<String>(
+                  icon: const RotatedBox(
+                    quarterTurns: 1,
+                    child: Icon(MintlyIcons.chevronRight),
+                  ),
                   initialValue: _policy?['id'] as String?,
                   decoration: const InputDecoration(
-                    labelText: 'Executing wallet policy',
+                    labelText: 'Minting wallet',
                   ),
                   isExpanded: true,
                   items: policies
@@ -203,6 +315,10 @@ class _AutomaticReviewState extends ConsumerState<AutomaticReviewScreen> {
               },
             ),
             DropdownButtonFormField<String>(
+              icon: const RotatedBox(
+                quarterTurns: 1,
+                child: Icon(MintlyIcons.chevronRight),
+              ),
               initialValue: _stage.id,
               decoration: const InputDecoration(labelText: 'Exact stage'),
               items: widget.drop.stages
@@ -219,6 +335,10 @@ class _AutomaticReviewState extends ConsumerState<AutomaticReviewScreen> {
                     }),
             ),
             DropdownButtonFormField<String>(
+              icon: const RotatedBox(
+                quarterTurns: 1,
+                child: Icon(MintlyIcons.chevronRight),
+              ),
               initialValue: _kind,
               decoration: const InputDecoration(labelText: 'Mint method'),
               items: const [
@@ -236,6 +356,17 @@ class _AutomaticReviewState extends ConsumerState<AutomaticReviewScreen> {
                   ? null
                   : (value) => setState(() => _kind = value!),
             ),
+            Card(child:ListTile(
+              title:const Text('Mint time (WAT)'),
+              subtitle:Text(WatTime.label(_mintAt),key:const Key('automatic-mint-time')),
+              trailing:TextButton(onPressed:_busy ? null : _pickMintTime,child:const Text('Change time')),
+            )),
+            if (_stage.startTimeUtc.toUtc().isAfter(DateTime.now().toUtc()))
+              TextButton(onPressed:_busy ? null : () => setState(() {
+                _mintAt = WatTime.defaultForStage(_stage.startTimeUtc,DateTime.now().toUtc());
+                _consent = false;
+              }),child:const Text('Use stage opening time')),
+            const Text('Time is always WAT. Confirmation can be later than the selected time.',style:TextStyle(fontSize:12)),
             for (final field in [
               (_quantity, 'Quantity'),
               (_price, 'Price ceiling per NFT (ETH)'),
@@ -294,6 +425,8 @@ class _AutomaticReviewState extends ConsumerState<AutomaticReviewScreen> {
                         'Verified stage index: ${snapshot['onchain_stage_index']}',
                       ),
                     Text('Quantity: ${snapshot['quantity']}'),
+                    Text('Mint time: ${WatTime.label(snapshot['execute_at'] == null ? _mintAt
+                        : DateTime.fromMillisecondsSinceEpoch((snapshot['execute_at'] as int)*1000,isUtc:true))}'),
                     Text(
                       'Price ceiling: ${_eth(snapshot['price_cap_wei'])} ETH',
                     ),
@@ -318,7 +451,7 @@ class _AutomaticReviewState extends ConsumerState<AutomaticReviewScreen> {
             ),
             FilledButton(
               onPressed: _busy || !_consent ? null : _arm,
-              child: Text(_busy ? 'Saving…' : 'Arm automatic mint'),
+              child: Text(_busy ? 'Saving…' : 'Set automatic'),
             ),
             TextButton(
               onPressed: _busy

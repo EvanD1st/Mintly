@@ -36,10 +36,11 @@ class MintlyWorker:
         """
         now = datetime.now(timezone.utc)
         stmt = (
-            select(MintTask)
+            select(MintTask).join(Wallet, Wallet.id == MintTask.wallet_id).join(User, User.id == Wallet.user_id)
             .where(
                 and_(
                     MintTask.status == "armed",
+                    User.automation_paused.is_(False),
                     MintTask.execution_mode.is_(None),
                     MintTask.scheduled_for_utc <= now,
                     MintTask.expires_at_utc > now,
@@ -132,6 +133,13 @@ class MintlyWorker:
             task.prepared_calldata = calldata
 
             # 4. Prepare and Sign Transaction
+            from app.services import automatic
+            await automatic.lock_execution(session)
+            await session.refresh(task)
+            if task.status != 'preparing':
+                await session.commit()
+                return
+            await automatic.require_running(session, wallet.user_id)
             nonce = task.assigned_nonce if task.assigned_nonce is not None else 0
             signed_res = self.executor.prepare_and_sign(
                 policy=policy,
@@ -161,6 +169,7 @@ class MintlyWorker:
             task.explorer_url = f"https://basescan.org/tx/{tx_hash}" if drop.chain.lower() == "base" else f"https://etherscan.io/tx/{tx_hash}"
 
             session.add(ActivityEvent(
+                user_id=wallet.user_id,
                 event_type="task_submitted",
                 label="Transaction submitted",
                 detail=f"{drop.name} ({auth.quantity} NFTs) submitted to {drop.chain}",
@@ -174,6 +183,7 @@ class MintlyWorker:
                 body=f"Submitted mint for {drop.name}. Tracking confirmation...",
                 category="mint_status",
                 deep_link=f"mintly://queue",
+                user_id=wallet.user_id,
             )
             logger.info(f"[{self.worker_id}] Task {task.id} successfully broadcasted. Hash: {tx_hash}")
 
@@ -215,6 +225,7 @@ class MintlyWorker:
 
             res = await self.executor.reconcile_transaction(t.transaction_hash, chain, is_demo=t.is_demo)
             if res.get("status") == "confirmed":
+                wallet = await session.get(Wallet, t.wallet_id)
                 t.status = "confirmed"
                 t.confirmed_at = datetime.now(timezone.utc)
                 t.actual_gas_used = res.get("gas_used")
@@ -223,6 +234,7 @@ class MintlyWorker:
                 t.block_number = res.get("block_number")
 
                 session.add(ActivityEvent(
+                    user_id=wallet.user_id if wallet else None,
                     event_type="task_confirmed",
                     label="Mint confirmed!",
                     detail=f"{drop.name if drop else 'NFT'} confirmed in block {t.block_number}",
@@ -236,6 +248,7 @@ class MintlyWorker:
                     body=f"Your mint for {drop.name if drop else 'NFT'} was confirmed on-chain.",
                     category="mint_status",
                     deep_link="mintly://queue",
+                    user_id=wallet.user_id if wallet else None,
                 )
                 logger.info(f"Task {t.id} confirmed on-chain!")
 
@@ -271,14 +284,14 @@ class MintlyWorker:
         """Check at most one wallet/stage per call to respect the free API limit."""
         now = datetime.now(timezone.utc)
         plan = (await session.execute(select(MintPlan).join(User, User.id == MintPlan.user_id).where(
-            MintPlan.next_check_at.is_not(None), MintPlan.next_check_at <= now,
+            MintPlan.archived_at.is_(None), MintPlan.next_check_at.is_not(None), MintPlan.next_check_at <= now,
             User.is_active.is_(True), User.deleted_at.is_(None),
         ).order_by(MintPlan.next_check_at.asc()).limit(1)
           .with_for_update(skip_locked=True))).scalar_one_or_none()
         if plan is None:
             return
         wallet = (await session.execute(select(Wallet).where(
-            Wallet.id == plan.wallet_id, Wallet.user_id == plan.user_id,
+            Wallet.id == plan.wallet_id, Wallet.user_id == plan.user_id, Wallet.archived_at.is_(None),
         ))).scalar_one_or_none()
         if wallet is None:
             plan.status = "error"

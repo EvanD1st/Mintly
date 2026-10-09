@@ -1,7 +1,9 @@
+import '../widgets/mintly_notice.dart';
+import '../theme/compatible_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
-import 'package:url_launcher/url_launcher.dart';
+import '../services/external_url.dart';
 import '../models/drop_model.dart';
 import '../state/app_state.dart';
 import 'automatic_review_screen.dart';
@@ -66,15 +68,15 @@ class DropDetailScreen extends ConsumerWidget {
         if (trustedOpenSea)
           FilledButton.icon(onPressed: () async {
             try {
-              if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+              if (!await openExternalUrl(context, uri)) {
                 throw Exception('Could not open OpenSea.');
               }
             } catch (error) {
               if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$error')));
+                MintlyNotice.show(context, SnackBar(content: Text('$error')));
               }
             }
-          }, icon: const Icon(Icons.open_in_new), label: const Text('View on OpenSea'))
+          }, icon: const Icon(MintlyIcons.openInNew), label: const Text('View on OpenSea'))
         else ...[
           const Text('Unverified external link. Confirm its address independently before visiting:'),
           const SizedBox(height: 8),

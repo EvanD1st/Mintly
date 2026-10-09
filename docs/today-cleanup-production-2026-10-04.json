@@ -1,0 +1,38 @@
+{
+  "copy_mints_enabled": true,
+  "migration": "011_dismissed_drops",
+  "record_counts": {
+    "Drop": 3,
+    "DismissedDrop": 0,
+    "MintPlan": 1,
+    "MintTask": 3
+  },
+  "member": {
+    "drops_status": 200,
+    "source_status": 403,
+    "source_notice_visible": false
+  },
+  "admin": {
+    "drops_status": 200,
+    "source_status": 200,
+    "source_notice_visible": true
+  },
+  "checked_at": "2026-10-04T18:57:11.000703+00:00",
+  "release": "today-cleanup-d308fa1",
+  "source_commit": "d308fa12028e51b738331166eac853137452bdec",
+  "public_health": {
+    "status": "ok",
+    "env": "production"
+  },
+  "source_endpoint_unauthenticated_status": 401,
+  "drop_removal": "Per-user retained dismissal; shared drops, plans and history remain.",
+  "cancelled_notice": "Hidden from Mint plans; actionable on-chain revocation remains available.",
+  "validation": {
+    "today_api_checks": 2,
+    "source_migration_safety_checks": 13,
+    "flutter_normal": 31,
+    "flutter_legacy_icons": 31,
+    "ota_guard_unit_tests": 10,
+    "flutter_analyze": "No issues found"
+  }
+}

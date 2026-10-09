@@ -52,5 +52,77 @@ delivery should each be checked. The release key and its signing
 metadata are stored outside this repository under `C:\Users\USER\.ssh` and
 must be backed up for future installers.
 
-Live automatic minting remains disabled in production. Imported social posts
-and OpenSea URLs are not treated as eligibility proof or verified integrations.
+Live Robinhood automatic minting was explicitly activated on 4 October 2026.
+Users arm each exact stage through Mint plans after reviewing its finite limits.
+Imported social posts and OpenSea URLs require independent stage and eligibility
+verification before execution. The automatic notification service has a separate
+protected Firebase credential copy and has no wallet-key mount.
+
+The automatic-plans and History update was published to all four installed
+Android versions on 4 October 2026: `1.1.1+4` patch 3, `1.1.0+3` patch 13,
+`1.0.1+2` patch 3 and `1.0.0+1` patch 3. All three architectures passed the
+existing native and asset checks. See [verified OTA records](automatic-plans-history-ota-2026-10-04.json).
+Open Mintly online, allow the patch download to finish, then fully close and
+reopen the app. Activation on a particular phone must be observed on that device.
+
+## Wallet import OTA compatibility
+
+Pure Dart recovery libraries can be included in a patch. Their new license
+notices are embedded in `mobile/lib/services/wallet_licenses.dart`, registered
+at startup, and available through Wallets → Settings → Open source licenses.
+This delivers the notices even when the installed `NOTICES.Z` asset is older.
+
+For the wallet update, manually dispatch **patch** with `audited_wallet_ota`
+enabled and the exact installed release version. This mode also accepts a comma
+separated list of installed versions. `deploy/shorebird-wallet-ota.py` first
+performs a dry run, audits the release AAB downloaded by Shorebird against the
+built AAB, and only then publishes. Asset file additions/removals, other asset
+changes, missing font glyphs, altered glyph outlines/metrics, and native library
+changes stop publication. Shorebird's native checks remain enabled. The asset
+exception covers only the embedded licenses and a font subset already fully
+provided by the installed font. Compatibility audit JSON is saved as a workflow
+artifact for each release.
+
+Versions `1.0.0+1` and `1.0.1+2` contain fewer Material icons. Their builds use
+`MINTLY_LEGACY_ICONS=true` for equivalent installed icons, with the same wallet
+features and limits. They also lack the native browser launcher introduced in
+`1.1.0+3`. The audited build temporarily removes `url_launcher` from the CI
+checkout's dependency graph and uses `external_url_legacy.dart`: browser actions
+show a link with a Copy link button. The original source and dependency files
+are restored after each build, including failures. That variant is analyzed and
+tested before Shorebird checks the native code. No native-difference override is
+used. The workflow tests both icon modes. Native plugin changes,
+new images, and missing installed glyphs still require an installer update.
+For `1.0.0+1`, the builder also copies that release's five exact installed
+launcher PNGs from the downloaded AAB before rebuilding and auditing. The wallet
+patch preserves its original launcher icon. The CI source PNGs are restored
+afterwards, including on failures.
+
+Devices check for a patch at launch. Open Mintly with internet access, let the
+download finish, then fully close and reopen it to apply the update. Publishing
+an OTA proves availability, not activation on every installed phone. This update
+does not enable the production automatic spending worker.
+
+### Published wallet update — 4 October 2026
+
+The Shorebird API confirms these stable Android patches for every active
+release, each with arm32, arm64, and x86_64 artifacts:
+
+| Installed release | Stable patch |
+| --- | --- |
+| 1.0.0+1 | 1 |
+| 1.0.1+2 | 1 |
+| 1.1.0+3 | 11 |
+| 1.1.1+4 | 1 |
+
+[Rollout evidence](wallet-ota-2026-10-04.json) records source commits, build runs,
+artifact hashes, asset audits, and production status. Some multi-target runs
+published their compatible targets before rejecting another target; later runs
+resolved those mismatches and published the remaining versions. No native diff
+override was used. The final oldest-release run completed successfully.
+
+The wallet update includes the simpler setup, local recovery phrase derivation,
+and automatic collection selection for reviewed mints. Production mainnet
+execution and the automatic spending worker remain disabled. Activation on
+individual phones has not been observed; users must launch online and restart
+after the download finishes.

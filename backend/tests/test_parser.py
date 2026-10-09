@@ -18,6 +18,8 @@ def test_integer_wei_conversion_accuracy():
 
     assert format_wei_to_eth(200_000_000_000_000) == "0.0002"
     assert format_wei_to_eth(0) == "0"
+    assert format_wei_to_eth(1) == "0.000000000000000001"
+    assert parse_eth_to_wei(format_wei_to_eth(500_000_000_000_010)) == 500_000_000_000_010
 
 
 def test_wat_time_parsing():

@@ -91,5 +91,14 @@ class CustodyVault:
             address TEXT NOT NULL, chain INTEGER NOT NULL, nonce INTEGER NOT NULL,
             liability INTEGER NOT NULL, raw TEXT NOT NULL, hash TEXT NOT NULL,
             actual INTEGER, UNIQUE(chain,address,nonce))''')
+        conn.execute('''CREATE TABLE IF NOT EXISTS recoveries (
+            id TEXT PRIMARY KEY, task TEXT NOT NULL UNIQUE, intent TEXT NOT NULL,
+            nonce INTEGER NOT NULL, raw TEXT NOT NULL, hash TEXT NOT NULL)''')
+        conn.execute('CREATE TABLE IF NOT EXISTS copy_rules (id TEXT PRIMARY KEY, intent TEXT NOT NULL, snapshot TEXT NOT NULL)')
+        conn.execute('CREATE TABLE IF NOT EXISTS copy_signed (task TEXT PRIMARY KEY, rule TEXT, stage TEXT NOT NULL UNIQUE)')
+        conn.execute('CREATE TABLE IF NOT EXISTS copy_collections (task TEXT PRIMARY KEY, address TEXT NOT NULL, chain INTEGER NOT NULL, contract TEXT NOT NULL, kind TEXT NOT NULL)')
+        conn.execute('CREATE INDEX IF NOT EXISTS copy_collections_wallet ON copy_collections(address,chain,contract)')
+        conn.execute('CREATE TABLE IF NOT EXISTS daily_limits (user_id TEXT PRIMARY KEY, revision INTEGER NOT NULL, intent TEXT NOT NULL, configuration TEXT NOT NULL)')
+        conn.execute('CREATE TABLE IF NOT EXISTS daily_signed (task TEXT PRIMARY KEY, user_id TEXT NOT NULL, day TEXT NOT NULL)')
         conn.commit()
         return conn

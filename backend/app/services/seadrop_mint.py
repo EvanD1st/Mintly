@@ -114,8 +114,11 @@ async def verify_presale(web3,mint,stage=None):
         if p[2]<=block['timestamp']<=p[3]:
             # Also detects consumed signed-mint digests and live NFT/payout
             # restrictions without broadcasting or changing chain state.
-            await web3.eth.call({'from':wallet,'to':SEADROP_V1_ADDRESS,
-                                'data':mint['execution']['data'],'value':int(mint['execution']['value'])})
+            from app.services.automatic_fees import quote_gas
+            tx={'from':wallet,'to':SEADROP_V1_ADDRESS,
+                'data':mint['execution']['data'],'value':int(mint['execution']['value'])}
+            gas,_=await quote_gas(web3,tx,await web3.eth.chain_id)
+            await web3.eth.call({**tx,'gas':gas},'pending')
     except Exception as error:
         raise OpenSeaUnavailable('Wallet allowlist proof or presale signature, limits, supply or fee rules could not be verified on-chain.',409) from error
 

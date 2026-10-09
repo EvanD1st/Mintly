@@ -1,0 +1,76 @@
+{
+  "read_only": true,
+  "networks": [
+    {
+      "chain_id": 1,
+      "name": "Ethereum"
+    },
+    {
+      "chain_id": 8453,
+      "name": "Base"
+    },
+    {
+      "chain_id": 4663,
+      "name": "Robinhood"
+    }
+  ],
+  "copy_mints_enabled": true,
+  "api_quantity_modes": [
+    "fixed",
+    "max_free"
+  ],
+  "paid_maximum_rejected": true,
+  "migration": "011_dismissed_drops",
+  "rules": [
+    {
+      "id": "1a2468e9-9740-4e2e-badc-e28348da7cd5",
+      "context_hash": "372232896c405220b322f20a370d91167ffc418e29cb6ce530fe7d02ab5ed185",
+      "snapshot_hash": "372232896c405220b322f20a370d91167ffc418e29cb6ce530fe7d02ab5ed185",
+      "quantity_mode": "fixed",
+      "free_only": true
+    },
+    {
+      "id": "5e370761-6c70-4842-adcc-f72e60693843",
+      "context_hash": "ea89d212c2b6df62593167ebf5c7254d24ecc34aa286eae5c035dc832ad14445",
+      "snapshot_hash": "ea89d212c2b6df62593167ebf5c7254d24ecc34aa286eae5c035dc832ad14445",
+      "quantity_mode": "fixed",
+      "free_only": false
+    },
+    {
+      "id": "d45b6f6a-3a51-4eac-8bbf-a1c1fdd08ffd",
+      "context_hash": "22a3046e63e652b463979840aa13d7af169fa7b95a66228293d272bb46ebf4d7",
+      "snapshot_hash": "22a3046e63e652b463979840aa13d7af169fa7b95a66228293d272bb46ebf4d7",
+      "quantity_mode": "fixed",
+      "free_only": false
+    }
+  ],
+  "task_ids": [
+    "0ae8d572-c416-46e4-8c1e-c8b13a861c02",
+    "1c9445a9-30ed-4dbd-89aa-52752a59dd2a",
+    "3ae5d6b8-892f-498e-86d8-b02457d9a63a",
+    "59bff645-3454-4bad-87c4-5dc4f08903ec",
+    "b02c5fe7-b4c3-4567-9a31-bede0ab79d07"
+  ],
+  "checked_at": "2026-10-06T01:21:28.284114+00:00",
+  "release": "copy-max-free-660810a",
+  "source_commit": "660810a330e29197de24be364b8abaae1072b70b",
+  "existing_approval_contexts_unchanged": true,
+  "independent_signer_pins_unchanged": true,
+  "existing_task_history_retained": true,
+  "public_health": {
+    "status": "ok",
+    "env": "production"
+  },
+  "quantity_ceiling": 100,
+  "gas_over_limit_behavior": "Skip the maximum batch without signing",
+  "activation": "Save a new copy approval with Free mints only enabled; old approvals retain fixed quantity",
+  "validation": {
+    "real_local_evm_copy_checks": 34,
+    "fee_signer_account_checks": 22,
+    "flutter_normal": 38,
+    "flutter_legacy_icons": 38,
+    "ota_guard_unit_tests": 10,
+    "flutter_analyze": "No issues found"
+  },
+  "mainnet_validation": "Read-only rule preservation and deployed capability checks. No new mainnet approvals, task creation or test mints."
+}

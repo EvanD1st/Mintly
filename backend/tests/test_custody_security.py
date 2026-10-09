@@ -13,7 +13,9 @@ def test_mainnets_blocked_without_a_supported_explicit_opt_in(monkeypatch,chain)
     monkeypatch.setattr(settings,'ENABLE_CUSTODIAL_AUTOMATIC',True)
     monkeypatch.setattr(settings,'AUTOMATIC_CHAIN_ID',chain)
     monkeypatch.setattr(settings,'ENABLE_ROBINHOOD_AUTOMATIC',False)
-    with pytest.raises(HTTPException,match='unsupported or Robinhood'):
+    monkeypatch.setattr(settings,'ENABLE_ETHEREUM_AUTOMATIC',False)
+    monkeypatch.setattr(settings,'ENABLE_BASE_AUTOMATIC',False)
+    with pytest.raises(HTTPException,match='disabled for this network'):
         automatic.enabled()
 
 
@@ -38,3 +40,13 @@ def test_provisioning_distinguishes_container_root_from_git_checkout(tmp_path):
     checkout = tmp_path/'checkout'
     (checkout/'.git').mkdir(parents=True)
     assert source_root(checkout/'backend/app/provision_custody.py') == checkout
+
+
+def test_task_selected_collections_are_explicit_and_legacy_scopes_stay_fixed():
+    a, b = '0x'+'11'*20, '0x'+'22'*20
+    assert automatic.allows_collection({'contracts': [a]}, a)
+    assert not automatic.allows_collection({'contracts': [a]}, b)
+    assert not automatic.allows_collection({'contracts': []}, a)
+    assert automatic.allows_collection({'collection_scope': 'reviewed_mints', 'contracts': []}, a)
+    assert not automatic.allows_collection({'collection_scope': 'reviewed_mints', 'contracts': [a]}, b)
+    assert not automatic.allows_collection({'collection_scope': 'all_transactions', 'contracts': []}, a)

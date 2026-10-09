@@ -1,0 +1,201 @@
+{
+  "status": "verified",
+  "checked_at_utc": "2026-10-08T22:36:07.354072+00:00",
+  "server_source": "b3063350c8e4313e6d07f469c516817fa17992b3",
+  "mobile_source": "b3063350c8e4313e6d07f469c516817fa17992b3",
+  "ci_url": "https://github.com/EvanD1st/Mintly/actions/runs/37851340526",
+  "ota_url": "https://github.com/EvanD1st/Mintly/actions/runs/37852515323",
+  "validation": {
+    "backend_regression": 287,
+    "postgresql_execution_checks": 110,
+    "flutter_normal": 63,
+    "flutter_legacy_icons": 63,
+    "flutter_analyze": "No issues found"
+  },
+  "server_release": "/home/ubuntu/Mintly/releases/automation-readiness-b306335",
+  "migration": "014_automation_readiness",
+  "retention": {
+    "Wallet": {
+      "before": 4,
+      "after": 4,
+      "existing_immutable_rows_retained": true
+    },
+    "AutomaticGrant": {
+      "before": 10,
+      "after": 10,
+      "existing_immutable_rows_retained": true
+    },
+    "CopyRule": {
+      "before": 12,
+      "after": 12,
+      "existing_immutable_rows_retained": true
+    },
+    "MintTask": {
+      "before": 5,
+      "after": 5,
+      "existing_immutable_rows_retained": true
+    },
+    "MintPlan": {
+      "before": 3,
+      "after": 3,
+      "existing_immutable_rows_retained": true
+    },
+    "MintAuthorization": {
+      "before": 5,
+      "after": 5,
+      "existing_immutable_rows_retained": true
+    },
+    "MintPlanRecord": {
+      "before": 11,
+      "after": 11,
+      "existing_immutable_rows_retained": true
+    }
+  },
+  "features_read_only": {
+    "read_only": true,
+    "migration": "014_automation_readiness",
+    "user_scope_checks": 3,
+    "wallet_readiness_cards": 9,
+    "available_balance_reads": 9,
+    "unavailable_balance_reads": 0,
+    "mainnet_test_transactions_sent": 0,
+    "pause_mutations": 0,
+    "networks": [
+      1,
+      4663,
+      8453
+    ]
+  },
+  "patches": [
+    {
+      "release_version": "1.1.1+4",
+      "patch_number": 13,
+      "patch_id": 705798,
+      "track": "stable",
+      "rolled_back": false,
+      "architectures": [
+        "arm",
+        "aarch64",
+        "x86_64"
+      ],
+      "compatibility_audit": {
+        "changed_assets": [
+          "base/assets/flutter_assets/fonts/MaterialIcons-Regular.otf"
+        ],
+        "font_compatibility": {
+          "installed_glyphs": 34,
+          "required_glyphs": 30
+        },
+        "installed_sha256": "40180a4e181a25c9194ee50e58d3487040bc48c09e079fefb8e74841fa034e9b",
+        "built_sha256": "e0aae3c9e15bdfd9ce2109e35e84e3b69ec78bd9dc3a0cbf0fa9e420d05f16db",
+        "release_version": "1.1.1+4",
+        "track": "stable",
+        "legacy_icons": false,
+        "browser_links": "native launcher",
+        "preserved_installed_launcher": false,
+        "native_checks": "Shorebird enabled; no override"
+      }
+    },
+    {
+      "release_version": "1.1.0+3",
+      "patch_number": 23,
+      "patch_id": 705802,
+      "track": "stable",
+      "rolled_back": false,
+      "architectures": [
+        "arm",
+        "aarch64",
+        "x86_64"
+      ],
+      "compatibility_audit": {
+        "changed_assets": [
+          "base/assets/flutter_assets/NOTICES.Z",
+          "base/assets/flutter_assets/fonts/MaterialIcons-Regular.otf"
+        ],
+        "font_compatibility": {
+          "installed_glyphs": 33,
+          "required_glyphs": 30
+        },
+        "installed_sha256": "a0cb1f84d3a50b55983285ff1ea762d51fc4b5b3d0a048a4d0b718e84970d28c",
+        "built_sha256": "e0aae3c9e15bdfd9ce2109e35e84e3b69ec78bd9dc3a0cbf0fa9e420d05f16db",
+        "release_version": "1.1.0+3",
+        "track": "stable",
+        "legacy_icons": false,
+        "browser_links": "native launcher",
+        "preserved_installed_launcher": false,
+        "native_checks": "Shorebird enabled; no override"
+      }
+    },
+    {
+      "release_version": "1.0.1+2",
+      "patch_number": 13,
+      "patch_id": 705805,
+      "track": "stable",
+      "rolled_back": false,
+      "architectures": [
+        "arm",
+        "aarch64",
+        "x86_64"
+      ],
+      "compatibility_audit": {
+        "changed_assets": [
+          "base/assets/flutter_assets/NOTICES.Z",
+          "base/assets/flutter_assets/fonts/MaterialIcons-Regular.otf"
+        ],
+        "font_compatibility": {
+          "installed_glyphs": 28,
+          "required_glyphs": 22
+        },
+        "installed_sha256": "ce1aa4d6e315d2ac28630c82f3e6c6f74b671558d388008a436528f9fd29cb76",
+        "built_sha256": "eba39242c032c8e0feb8a382cad5855e7c5bd956b38114854470dd7d6ce8b0ad",
+        "release_version": "1.0.1+2",
+        "track": "stable",
+        "legacy_icons": true,
+        "browser_links": "copy and paste",
+        "preserved_installed_launcher": false,
+        "native_checks": "Shorebird enabled; no override"
+      }
+    },
+    {
+      "release_version": "1.0.0+1",
+      "patch_number": 13,
+      "patch_id": 705808,
+      "track": "stable",
+      "rolled_back": false,
+      "architectures": [
+        "arm",
+        "aarch64",
+        "x86_64"
+      ],
+      "compatibility_audit": {
+        "changed_assets": [
+          "base/assets/flutter_assets/NOTICES.Z",
+          "base/assets/flutter_assets/fonts/MaterialIcons-Regular.otf"
+        ],
+        "font_compatibility": {
+          "installed_glyphs": 28,
+          "required_glyphs": 22
+        },
+        "installed_sha256": "74b532a2c2eea51fd585a2dd9ab65d366cb722d0613642ddeb2823bccd4efff8",
+        "built_sha256": "904b7bfeff5f6ab040a90676c8f46391b6258940f64d3e851650d2bad8435f7d",
+        "release_version": "1.0.0+1",
+        "track": "stable",
+        "legacy_icons": true,
+        "browser_links": "copy and paste",
+        "preserved_installed_launcher": true,
+        "native_checks": "Shorebird enabled; no override"
+      }
+    }
+  ],
+  "mainnet_test_transactions_sent": 0,
+  "existing_approvals_expanded_or_reset": false,
+  "phone_activation": "Not observed; online installed apps apply the stable patch on a subsequent restart.",
+  "behavior": {
+    "scheduled": "Unsigned advance checks in the signer; short-lived exact-intent cache; full mint-time validation and selected-time gate retained.",
+    "copying": "Four concurrent observation pairs; fresh cursor and ownership checks; serialized duplicate guards and budget reservations.",
+    "readiness": "Per-user balances, distinct approval budgets, WAT expiry and conservative funding hints on all three networks.",
+    "pause_all": "Persistent per-account pause; unsigned tasks disarmed; copy rules paused; signed receipt tracking retained; explicit reactivation required.",
+    "whitelist": "Receiving-wallet proofs prepared when available; exact stage reverified; no silent public fallback.",
+    "confirmation_policy": "Unchanged; no paid infrastructure added."
+  }
+}

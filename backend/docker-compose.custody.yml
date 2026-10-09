@@ -1,4 +1,4 @@
-# Explicit custody overlay; never included by the production deploy workflow.
+# Explicit custody overlay; spending worker requires separately recorded operator activation.
 # Defaults to Sepolia. Robinhood requires CUSTODY_CHAIN_ID=4663, CUSTODY_RPC and the separate opt-in.
 # docker compose -f docker-compose.yml -f docker-compose.custody.yml --profile custody up -d
 x-custody: &custody
@@ -22,6 +22,11 @@ x-custody: &custody
     ENABLE_CUSTODIAL_AUTOMATIC: "true"
     AUTOMATIC_CHAIN_ID: ${CUSTODY_CHAIN_ID:-11155111}
     ENABLE_ROBINHOOD_AUTOMATIC: ${ENABLE_ROBINHOOD_AUTOMATIC:-false}
+    ENABLE_ETHEREUM_AUTOMATIC: ${ENABLE_ETHEREUM_AUTOMATIC:-false}
+    ENABLE_BASE_AUTOMATIC: ${ENABLE_BASE_AUTOMATIC:-false}
+    ENABLE_COPY_MINTS: ${ENABLE_COPY_MINTS:-false}
+    RPC_ETHEREUM: ${RPC_ETHEREUM:-https://ethereum-rpc.publicnode.com}
+    RPC_BASE: ${RPC_BASE:-https://mainnet.base.org}
     AUTOMATIC_RPC: ${CUSTODY_RPC:-${CUSTODY_SEPOLIA_RPC:-}}
     AUTOMATIC_SIGNER_URL: http://automatic-signer:18766
     AUTOMATIC_SIGNER_TOKEN_FILE: /run/custody-token/token
@@ -40,6 +45,11 @@ services:
       ENABLE_CUSTODIAL_AUTOMATIC: ${CUSTODY_TASK_ARMING:-false}
       AUTOMATIC_CHAIN_ID: ${CUSTODY_CHAIN_ID:-11155111}
       ENABLE_ROBINHOOD_AUTOMATIC: ${ENABLE_ROBINHOOD_AUTOMATIC:-false}
+      ENABLE_ETHEREUM_AUTOMATIC: ${ENABLE_ETHEREUM_AUTOMATIC:-false}
+      ENABLE_BASE_AUTOMATIC: ${ENABLE_BASE_AUTOMATIC:-false}
+      ENABLE_COPY_MINTS: ${ENABLE_COPY_MINTS:-false}
+      RPC_ETHEREUM: ${RPC_ETHEREUM:-https://ethereum-rpc.publicnode.com}
+      RPC_BASE: ${RPC_BASE:-https://mainnet.base.org}
       AUTOMATIC_RPC: ${CUSTODY_RPC:-${CUSTODY_SEPOLIA_RPC:-}}
       AUTOMATIC_SIGNER_URL: http://automatic-signer:18766
       AUTOMATIC_SIGNER_TOKEN_FILE: /run/custody-token/token
@@ -85,6 +95,18 @@ services:
     <<: *custody
     command: python -m app.automatic_notifications
 
+  copy-worker:
+    <<: *custody
+    networks: [default, custody-control]
+    command: python -m app.copy_worker
+    # Observation and task construction cannot access the key vault or password.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import pathlib,time; assert time.time()-pathlib.Path('/tmp/mintly-copy.heartbeat').stat().st_mtime < 180"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+
   custody-import:
     <<: *custody
     profiles: [custody-import]
@@ -101,6 +123,7 @@ services:
     volumes:
       - ${CUSTODY_VAULT_HOST_DIR:?Set signer vault directory}:/run/custody-vault:rw
       - ${CUSTODY_PASSWORD_DIR:?Set independent password secret directory}:/run/custody-password:ro
+      - ${CUSTODY_TOKEN_DIR:?Set protected token directory}:/run/custody-token:ro
 
 networks:
   custody-control:

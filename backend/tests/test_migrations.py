@@ -58,3 +58,38 @@ def test_existing_permission_history_survives_timestamp_upgrade(monkeypatch):
                 assert row[3] == row[4]
         finally:
             engine.dispose()
+
+
+def test_existing_plan_is_backfilled_without_deleting_records(monkeypatch):
+    import sqlalchemy as sa
+    from datetime import datetime, timezone
+    with tempfile.TemporaryDirectory(prefix='mintly-plan-history-') as directory:
+        path = Path(directory) / 'plans.db'
+        monkeypatch.setattr(settings, 'DATABASE_URL', f'sqlite+aiosqlite:///{path.as_posix()}')
+        command.upgrade(Config('alembic.ini'), '007_automatic_execution')
+        engine = create_engine(f'sqlite:///{path.as_posix()}')
+        try:
+            with engine.begin() as conn:
+                plans = sa.Table('mint_plans', sa.MetaData(), autoload_with=conn)
+                now = datetime.now(timezone.utc)
+                conn.execute(plans.insert().values(id='retained-plan', user_id='owner', wallet_id='wallet',
+                    collection_slug='example', collection_name='Existing collection', chain='Base', chain_id=8453,
+                    contract_address='0x' + '2' * 40, opensea_url='https://opensea.io/collection/example',
+                    quantity=3, price_wei=10**15, status='scheduled', status_note='Retain this plan',
+                    created_at=now, updated_at=now))
+                # Join in the migration must use the original linked wallet address.
+                wallets = sa.Table('wallets', sa.MetaData(), autoload_with=conn)
+                conn.execute(wallets.insert().values(id='wallet', user_id='owner', label='MetaMask',
+                    address='0x' + '1' * 40, signing_capability='interactive', supported_chains=['Base'],
+                    is_default=True, is_demo=False, created_at=now, updated_at=now))
+            command.upgrade(Config('alembic.ini'), 'head')
+            with engine.connect() as conn:
+                records = sa.Table('mint_plan_records', sa.MetaData(), autoload_with=conn)
+                row = conn.execute(sa.select(records)).mappings().one()
+                assert row['event'] == 'retained' and row['plan_id'] == 'retained-plan'
+                assert row['snapshot']['quantity'] == 3
+                assert row['snapshot']['price_eth'] == '0.001'
+                assert row['snapshot']['wallet_address'] == '0x' + '1' * 40
+                assert conn.exec_driver_sql('SELECT count(*) FROM mint_plans').scalar() == 1
+        finally:
+            engine.dispose()

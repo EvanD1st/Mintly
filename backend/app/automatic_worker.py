@@ -10,15 +10,16 @@ import time
 import tempfile
 
 import httpx
-from sqlalchemy import select, or_
+from sqlalchemy import select, or_, case
 from eth_utils import keccak
 from web3.exceptions import TransactionNotFound
 
 from app.config import settings
 from app.database import AsyncSessionLocal
-from app.models import MintTask, MintAuthorization, ActivityEvent
+from app.models import MintTask, MintAuthorization, ActivityEvent, MintRecovery, Wallet, User
 from app.services import automatic
 from app.services.automatic_signer import final_receipt
+from app.services.automatic_fees import receipt_cost, additional_fee
 from app.services.mint_plans import aware
 
 log = logging.getLogger('mintly.automatic')
@@ -36,10 +37,16 @@ async def request_signature(task_id):
 
 
 async def finish(db, task, status, note, actual=0):
+    auth = await db.get(MintAuthorization, task.authorization_id)
+    if task.copy_rule_id:
+        from app.services.copy_mints import funding_note, CHAINS
+        if note == 'Insufficient funds for mint value and gas':
+            note = funding_note(auth.snapshot['chain_id'], auth.snapshot['price_wei'] > 0)
+        elif note == 'Estimated gas or total debit exceeds task authorization':
+            note = f'Gas exceeds your spending limit on {CHAINS.get(auth.snapshot["chain_id"], "this network")}.'
     task.status, task.failure_reason = status, note
     task.notification_pending = True
     await automatic.release_reservation(db, task, actual)
-    auth = await db.get(MintAuthorization, task.authorization_id)
     db.add(ActivityEvent(user_id=auth.snapshot['user_id'], event_type='automatic_' + status,
         label='Automatic mint ' + status, detail=f'{task.id}: {note or "Receipt confirmed"}',
         is_demo=False, icon_name='gem'))
@@ -50,12 +57,15 @@ async def step(session_factory=AsyncSessionLocal, sign=request_signature, *, now
     now = now or datetime.now(timezone.utc)
     async with session_factory() as db:
         await automatic.lock_execution(db)
-        task = (await db.execute(select(MintTask).where(
+        task = (await db.execute(select(MintTask).join(Wallet, Wallet.id == MintTask.wallet_id)
+            .join(User, User.id == Wallet.user_id).where(
             MintTask.execution_mode == automatic.MODE,
             MintTask.status.in_(['armed','preparing','prepared','submitted','uncertain']),
             or_(MintTask.next_attempt_at.is_(None), MintTask.next_attempt_at <= now),
             MintTask.scheduled_for_utc <= now,
-        ).order_by(MintTask.expires_at_utc, MintTask.id).limit(1))).scalar_one_or_none()
+            or_(User.automation_paused.is_(False), MintTask.signed_tx_raw.is_not(None)),
+        ).order_by(case((MintTask.status.in_(['armed','preparing','prepared']), 0), else_=1),
+            MintTask.expires_at_utc, MintTask.id).limit(1))).scalar_one_or_none()
         if not task:
             await db.commit()
             return False
@@ -66,16 +76,38 @@ async def step(session_factory=AsyncSessionLocal, sign=request_signature, *, now
                 await db.commit()
                 return True
             task.next_attempt_at = now + timedelta(seconds=1)
+            task.preparation_started_at = task.preparation_started_at or now
             await db.commit()  # signer independently acquires the same lock
         else:
-            web3 = await automatic.provider()
+            recovery = await db.scalar(select(MintRecovery).where(MintRecovery.task_id == task.id))
+            active_recovery = recovery if recovery and recovery.activated_at else None
+            candidates = [(task.transaction_hash, task.signed_tx_raw)]
+            if recovery:
+                candidates += [(recovery.previous_hash, recovery.previous_signed_tx_raw)]
+                if active_recovery:
+                    candidates += [(recovery.replacement_hash, recovery.replacement_signed_tx_raw)]
+            candidates = list(dict(candidates).items())
+            auth = await db.get(MintAuthorization, task.authorization_id)
+            chain_id = auth.snapshot['chain_id']
+            web3 = await automatic.provider_for(chain_id)
             try:
-                receipt = await final_receipt(web3, task.transaction_hash)
+                receipt = None
+                for tx_hash, signed_raw in candidates:
+                    receipt = await final_receipt(web3, tx_hash, chain_id)
+                    if receipt:
+                        task.transaction_hash, task.signed_tx_raw = tx_hash, signed_raw
+                        task.explorer_url = explorer_url(tx_hash, chain_id)
+                        if recovery:
+                            recovery.status = ('confirmed' if receipt.status == 1 else 'reverted') if tx_hash == recovery.replacement_hash else 'superseded'
+                        break
                 if receipt:
+                    included = await web3.eth.get_block(receipt.blockNumber)
+                    task.included_at = datetime.fromtimestamp(included.timestamp,timezone.utc)
+                    task.included_block_hash = '0x' + bytes(receipt.blockHash).hex()
+                    task.inclusion_observed_at = task.inclusion_observed_at or now
+                    task.inclusion_result = 'success' if receipt.status == 1 else 'reverted'
                     auth = await db.get(MintAuthorization, task.authorization_id)
-                    actual = receipt.gasUsed * receipt.effectiveGasPrice
-                    if receipt.status == 1:
-                        actual += auth.snapshot['price_wei'] * auth.quantity
+                    actual = await receipt_cost(web3, receipt, chain_id, auth.snapshot['price_wei'] * auth.quantity)
                     task.actual_gas_used, task.actual_effective_gas_price = receipt.gasUsed, receipt.effectiveGasPrice
                     task.actual_total_cost_wei = actual
                     task.block_number = receipt.blockNumber
@@ -85,32 +117,78 @@ async def step(session_factory=AsyncSessionLocal, sign=request_signature, *, now
                         None if receipt.status == 1 else 'Mint reverted; receipt gas is charged. No automatic second mint.', actual)
                     await db.commit()
                     return True
-                try:
-                    seen_receipt = await web3.eth.get_transaction_receipt(task.transaction_hash)
-                except TransactionNotFound:
-                    seen_receipt = None
+                seen_receipt = None
+                for tx_hash, _ in candidates:
+                    try:
+                        seen_receipt = await web3.eth.get_transaction_receipt(tx_hash)
+                    except TransactionNotFound:
+                        continue
+                    if seen_receipt:
+                        break
                 task.next_attempt_at = now + timedelta(seconds=2)
                 if seen_receipt:
+                    included = await web3.eth.get_block(seen_receipt.blockNumber)
+                    if included.hash != seen_receipt.blockHash:
+                        seen_receipt = None
+                    else:
+                        task.included_at = datetime.fromtimestamp(included.timestamp,timezone.utc)
+                        task.included_block_hash = '0x' + bytes(seen_receipt.blockHash).hex()
+                        task.inclusion_observed_at = now
+                        task.inclusion_result = 'success' if seen_receipt.status == 1 else 'reverted'
+                if seen_receipt:
                     task.status = 'submitted'
+                    if active_recovery:
+                        recovery.status = 'submitted'
                     task.failure_reason = 'Receipt observed; waiting for canonical confirmations.'
                     await db.commit()
                     return True
-                if (aware(task.expires_at_utc) <= now or task.broadcast_attempts >= 4):
+                task.included_at,task.inclusion_observed_at,task.included_block_hash,task.inclusion_result = None,None,None,None
+                owner = await db.get(User, auth.snapshot['user_id'], populate_existing=True)
+                if not owner or owner.automation_paused or not owner.is_active or owner.deleted_at:
+                    task.failure_reason = 'Automation paused. Saved transaction held; receipt tracking continues.'
+                    task.next_attempt_at = now + timedelta(seconds=15)
+                    await db.commit()
+                    return True
+                expiry = active_recovery.expires_at if active_recovery else task.expires_at_utc
+                if task.broadcast_disabled_at:
                     task.status = 'uncertain'
+                    task.failure_reason = 'Wallet unlinked. Signed transaction remains tracked; further broadcasting is disabled.'
+                    task.next_attempt_at = now + timedelta(seconds=15)
+                    await db.commit()
+                    return True
+                attempt_ceiling = active_recovery.attempt_ceiling if active_recovery else 4
+                if (aware(expiry) <= now or task.broadcast_attempts >= attempt_ceiling):
+                    task.status = 'uncertain'
+                    if active_recovery:
+                        recovery.status = 'uncertain'
                     task.failure_reason = 'No confirmed receipt. Reservation retained; no new nonce or further broadcast.'
                     task.next_attempt_at = now + timedelta(seconds=15)
                     await db.commit()
                     return True
                 # Verify durable integrity and publish intent before the network call.
+                if active_recovery:
+                    task.transaction_hash = recovery.replacement_hash
+                    task.signed_tx_raw = recovery.replacement_signed_tx_raw
                 raw = bytes.fromhex(task.signed_tx_raw.removeprefix('0x'))
                 if '0x' + keccak(raw).hex() != task.transaction_hash:
                     raise ValueError('Signed transaction integrity mismatch')
+                if chain_id == 8453:
+                    from eth_account._utils.legacy_transactions import Transaction
+                    decoded = Transaction.from_bytes(raw)
+                    fee = decoded.gas * decoded.gasPrice + await additional_fee(web3, chain_id, decoded.gas, len(raw))
+                    if fee > auth.max_fee_wei or decoded.value + fee > auth.total_spend_cap_wei:
+                        task.status = 'uncertain'
+                        task.failure_reason = 'Base parent or operator fees exceed the approved cap; saved transaction held without broadcasting.'
+                        task.next_attempt_at = now + timedelta(seconds=15)
+                        await db.commit()
+                        return True
                 task.status = 'uncertain'
                 task.broadcast_attempts += 1
                 task.submitted_at = task.submitted_at or now
                 task.failure_reason = 'Broadcast may be in flight; cancellation cannot undo a signed transaction.'
-                task.explorer_url = ('https://sepolia.etherscan.io/tx/' + task.transaction_hash
-                                     if settings.AUTOMATIC_CHAIN_ID == 11155111 else None)
+                task.explorer_url = explorer_url(task.transaction_hash, chain_id)
+                if active_recovery:
+                    recovery.status = 'uncertain'
                 await db.commit()
                 try:
                     returned = await web3.eth.send_raw_transaction(raw)
@@ -122,6 +200,8 @@ async def step(session_factory=AsyncSessionLocal, sign=request_signature, *, now
                         await db.commit()
                         return True
                     task.status = 'submitted'
+                    if active_recovery:
+                        recovery.status = 'submitted'
                     task.failure_reason = None
                     task.notification_pending = True
                 except Exception:
@@ -139,7 +219,16 @@ async def step(session_factory=AsyncSessionLocal, sign=request_signature, *, now
             finally:
                 await web3.provider.disconnect()
     try:
-        await sign(task_id)
+        result = await sign(task_id)
+        if isinstance(result, dict) and result.get('status') == 'armed':
+            # Count waiting from the response, not the start of a slow RPC.
+            # Otherwise one blocked nonce/chain can monopolize every iteration.
+            async with session_factory() as db:
+                await automatic.lock_execution(db)
+                task = await db.get(MintTask, task_id)
+                if task and task.status in ('armed','preparing') and not task.signed_tx_raw:
+                    task.next_attempt_at = max(now, datetime.now(timezone.utc)) + timedelta(seconds=1)
+                await db.commit()
     except Exception as error:
         async with session_factory() as db:
             await automatic.lock_execution(db)
@@ -149,6 +238,13 @@ async def step(session_factory=AsyncSessionLocal, sign=request_signature, *, now
                 await db.commit()
                 return True
             task.preparation_attempts += 1
+            from app.services.daily_budget import LIMIT_NOTE
+            if isinstance(error,httpx.HTTPStatusError) and error.response.status_code == 429 and error.response.json().get('detail') == LIMIT_NOTE:
+                task.preparation_attempts -= 1
+                task.failure_reason = LIMIT_NOTE
+                task.next_attempt_at = now + timedelta(seconds=60)
+                await db.commit()
+                return True
             permanent = isinstance(error, httpx.HTTPStatusError) and error.response.status_code == 409
             if permanent or task.preparation_attempts >= 6:
                 note = 'Bounded preparation retries exhausted. No transaction broadcast.'
@@ -162,8 +258,68 @@ async def step(session_factory=AsyncSessionLocal, sign=request_signature, *, now
     return True
 
 
+def explorer_url(tx_hash, chain_id=None):
+    base = {11155111: 'https://sepolia.etherscan.io/tx/',
+            4663: 'https://robinhoodchain.blockscout.com/tx/', 1: 'https://etherscan.io/tx/',
+            8453: 'https://basescan.org/tx/'}.get(settings.AUTOMATIC_CHAIN_ID if chain_id is None else chain_id)
+    return base + tx_hash if base else None
+
+
 async def run():
     automatic.enabled()
+    advance = asyncio.create_task(preflight_loop())
+    try:
+        await execution_loop()
+    finally:
+        advance.cancel()
+        await asyncio.gather(advance, return_exceptions=True)
+
+
+async def preflight_step(session_factory=AsyncSessionLocal, check=None, *, now=None):
+    now = now or datetime.now(timezone.utc)
+    async with session_factory() as db:
+        ids = (await db.scalars(select(MintTask.id).join(Wallet, Wallet.id == MintTask.wallet_id)
+            .join(User, User.id == Wallet.user_id).where(MintTask.execution_mode == automatic.MODE,
+                MintTask.status == 'armed', MintTask.copy_rule_id.is_(None), MintTask.signed_tx_raw.is_(None),
+                User.automation_paused.is_(False), User.is_active.is_(True), User.deleted_at.is_(None),
+                MintTask.scheduled_for_utc > now + timedelta(seconds=10),
+                MintTask.scheduled_for_utc <= now + timedelta(seconds=180),
+                or_(MintTask.preflight_checked_at.is_(None), MintTask.preflight_checked_at < now - timedelta(seconds=30)))
+            .order_by(MintTask.scheduled_for_utc).limit(8))).all()
+    for task_id in ids:
+        try:
+            if check:
+                await check(task_id)
+            else:
+                token = Path(settings.AUTOMATIC_SIGNER_TOKEN_FILE).read_text().strip()
+                if len(token) < 32:
+                    raise ValueError('Signer authentication is not configured')
+                async with httpx.AsyncClient(timeout=15, trust_env=False) as client:
+                    response = await client.post(settings.AUTOMATIC_SIGNER_URL + f'/tasks/{task_id}/preflight',
+                        headers={'Authorization':'Bearer ' + token})
+                    response.raise_for_status()
+        except Exception:
+            log.info('Advance check deferred; mint-time validation retained.')
+            async with session_factory() as db:
+                await automatic.lock_execution(db)
+                task = await db.get(MintTask, task_id)
+                if task and task.status == 'armed' and not task.signed_tx_raw:
+                    task.preflight_checked_at = datetime.now(timezone.utc)
+                    task.preflight_note = 'Advance checks unavailable. Mint-time checks are still required.'
+                await db.commit()
+    return len(ids)
+
+
+async def preflight_loop():
+    while True:
+        try:
+            await preflight_step()
+        except Exception:
+            log.info('Advance checks temporarily unavailable.')
+        await asyncio.sleep(5)
+
+
+async def execution_loop():
     while True:
         started = time.monotonic()
         try:

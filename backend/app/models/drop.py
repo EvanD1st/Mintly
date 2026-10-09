@@ -8,6 +8,12 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
 
 
+class DismissedDrop(Base):
+    __tablename__ = 'dismissed_drops'
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey('users.id'), primary_key=True)
+    drop_id: Mapped[str] = mapped_column(String(64), ForeignKey('drops.id'), primary_key=True)
+
+
 class Drop(Base):
     __tablename__ = "drops"
 

@@ -37,6 +37,10 @@ class MintTask(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     authorization_id: Mapped[str] = mapped_column(String(36), ForeignKey("mint_authorizations.id"), nullable=False)
+    plan_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey('mint_plans.id'), nullable=True, index=True)
+    copy_rule_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey('copy_rules.id'), nullable=True)
+    copy_stage_key: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, unique=True)
+    archived_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     wallet_id: Mapped[str] = mapped_column(String(36), ForeignKey("wallets.id"), nullable=False)
     drop_id: Mapped[str] = mapped_column(String(64), ForeignKey("drops.id"), nullable=False)
     stage_id: Mapped[str] = mapped_column(String(64), ForeignKey("mint_stages.id"), nullable=False)
@@ -59,9 +63,17 @@ class MintTask(Base):
     
     # Transaction lifecycle
     prepared_calldata: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    preflight_checked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    preflight_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    preparation_started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    included_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    inclusion_observed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    included_block_hash: Mapped[Optional[str]] = mapped_column(String(66))
+    inclusion_result: Mapped[Optional[str]] = mapped_column(String(16))
     signed_tx_raw: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     transaction_hash: Mapped[Optional[str]] = mapped_column(String(66), nullable=True, index=True)
     broadcast_attempts: Mapped[int] = mapped_column(Integer, default=0)
+    broadcast_disabled_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     
     submitted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     confirmed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)

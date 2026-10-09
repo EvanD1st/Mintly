@@ -7,12 +7,17 @@ void main() {
   testWidgets('empty live feed contains no fabricated drops', (tester) async {
     tester.view.physicalSize = const Size(1080, 2400);
     tester.view.devicePixelRatio = 1.0;
-    addTearDown(() { tester.view.resetPhysicalSize(); tester.view.resetDevicePixelRatio(); });
-    await tester.pumpWidget(const ProviderScope(child: MaterialApp(
-      home: Scaffold(body: DiscoverScreen()),
-    )));
-    expect(find.text('@lakzonevn drops'), findsOneWidget);
-    expect(find.textContaining('No drops from @lakzonevn yet'), findsOneWidget);
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+    await tester.pumpWidget(
+      const ProviderScope(
+        child: MaterialApp(home: Scaffold(body: DiscoverScreen())),
+      ),
+    );
+    expect(find.text('@lakzonevn drops'), findsNothing);
+    expect(find.textContaining('No current drops.'), findsOneWidget);
     expect(find.text('Orbit Bloom'), findsNothing);
   });
 }

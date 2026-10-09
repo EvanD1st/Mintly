@@ -1,0 +1,102 @@
+{
+  "feature_enabled": true,
+  "networks": [
+    {
+      "chain_id": 1,
+      "name": "Ethereum"
+    },
+    {
+      "chain_id": 8453,
+      "name": "Base"
+    },
+    {
+      "chain_id": 4663,
+      "name": "Robinhood"
+    }
+  ],
+  "rpc": [
+    {
+      "chain_id": 1,
+      "seadrop_code_bytes": 21081
+    },
+    {
+      "chain_id": 8453,
+      "seadrop_code_bytes": 21081
+    },
+    {
+      "chain_id": 4663,
+      "seadrop_code_bytes": 21081
+    }
+  ],
+  "migration": "010_copy_mints",
+  "records": {
+    "CopyWatch": 0,
+    "CopyRule": 0,
+    "CopyEvent": 0
+  },
+  "owner_api": {
+    "enabled": true,
+    "watch_count": 0,
+    "activity_count": 0,
+    "spent_wei": "0"
+  },
+  "prior_receipt": {
+    "status": "confirmed",
+    "hash": "0x76638de8650ea090dd6218718d89591da92f4cf2f44ccc04b253ed01ec42e31b",
+    "cost_wei": 39195327232000
+  },
+  "prior_policy": {
+    "chain_id": 4663,
+    "status": "enabled",
+    "spent_wei": 115472285248000,
+    "reserved_wei": 0
+  },
+  "checked_at": "2026-10-04T10:08:34.938267+00:00",
+  "release": "copy-mints-2f3ee78",
+  "source_commit": "2f3ee7804ffb255fba01bd32579efbc1779b2309",
+  "public_health": {
+    "status": "ok",
+    "env": "production"
+  },
+  "copy_endpoint_unauthenticated_status": 401,
+  "signer_existing_policy_ready": true,
+  "new_funded_ethereum_base_mainnet_test": false,
+  "validation": {
+    "full_backend_run": {
+      "passed": 195,
+      "skipped": 0
+    },
+    "copy_and_multichain_run": {
+      "passed": 23
+    },
+    "final_copy_run": {
+      "passed": 17
+    },
+    "flutter_ci": {
+      "normal": 27,
+      "legacy_icons": 27
+    },
+    "ota_guard_unit_tests": 10
+  },
+  "public_observation_rpc_checks": [
+    {
+      "chain_id": 1,
+      "bounded_mint_log_query": "passed",
+      "found": 0,
+      "recent_historical_stage_rpc": "passed"
+    },
+    {
+      "chain_id": 8453,
+      "bounded_mint_log_query": "passed",
+      "found": 0,
+      "base_extra_fee_quote_wei": 5428318697,
+      "recent_historical_stage_rpc": "passed"
+    },
+    {
+      "chain_id": 4663,
+      "bounded_mint_log_query": "passed",
+      "found": 0,
+      "recent_historical_stage_rpc": "passed"
+    }
+  ]
+}

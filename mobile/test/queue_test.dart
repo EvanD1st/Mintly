@@ -11,6 +11,6 @@ void main() {
     expect(find.text('Mint plans'), findsOneWidget);
     expect(find.text('No mint plans yet'), findsOneWidget);
     expect(find.textContaining('execute on the server while the app is closed'), findsOneWidget);
-    expect(find.textContaining('explicitly provisioned custodial signer policy'), findsOneWidget);
+    expect(find.text('View mint history'), findsOneWidget);
   });
 }

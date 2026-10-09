@@ -1,3 +1,4 @@
+import '../widgets/mintly_notice.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../theme/colors.dart';
@@ -106,7 +107,7 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
             onPressed: _isImporting ? null : () async {
               final text = _textController.text.trim();
               if (text.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
+                MintlyNotice.show(context,
                   const SnackBar(
                     content: Text('Paste an OpenSea link or list first.'),
                     duration: Duration(seconds: 2),
@@ -128,14 +129,14 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
                   throw StateError('Members can import direct OpenSea collection links only.');
                 }
                 if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                  MintlyNotice.show(context, SnackBar(
                     content: Text(isOpenSeaLink ? 'Mint check saved. See Mint plans.' : 'List imported.'),
                   ));
                   Navigator.of(context).pop();
                 }
               } catch (error) {
                 if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$error')));
+                  MintlyNotice.show(context, SnackBar(content: Text('$error')));
                 }
               } finally {
                 if (mounted) setState(() => _isImporting = false);

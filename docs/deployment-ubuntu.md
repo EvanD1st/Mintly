@@ -75,7 +75,7 @@ changes; switching application releases does not undo database migrations.
 Automated backups, retention of old images/releases, and schema rollback are not configured.
 
 See [the review](review-2026-09-29.md) before considering real automatic minting.
-# Custody import deployment
+## Custody import deployment
 
 On 3 October 2026 the backend was deployed from the local release snapshot
 `custody-5b27aadf42ab`, with migration `007_automatic_execution`. The signer and
@@ -92,3 +92,51 @@ A PostgreSQL custom-format backup was taken before migration at
 `~/Mintly/shared/pre-custody-import.dump` (mode 600). The previous application
 release remains available. Caddy retained its previous site configuration backup.
 See [wallet import setup](wallet-key-import.md) for custody boundaries.
+
+The subsequent `main` deployment from commit
+`410a8e1ffa596049f7e083094897ae826471abee` preserved this configuration.
+Production health returned 200, unauthenticated import config returned 401 with
+`Cache-Control: no-store`, and public signer readiness returned 404. The API
+confirmed task arming is disabled; the automatic spending worker is absent.
+The exact release and Android patch evidence are recorded in
+[custody deployment evidence](custody-deployment-2026-10-03.json).
+
+Android patch 9 was published to the stable channel for release `1.1.0+3`
+on 3 October 2026 at 13:21 UTC. Hosted analysis and all 14 mobile tests passed.
+Shorebird verified asset/native compatibility without overrides. New dropdowns
+reuse an installed icon glyph. Open the installed app online to download the
+patch, then fully close and reopen it to activate the update. Device activation
+has not been observed from the deployment host.
+
+## Simplified wallet setup deployment
+
+Release `wallets-560dbea` deploys the simplified import API and independently
+validated task-selected collection scope. The live importer advertises
+`automatic_collection_selection: true` on Robinhood 4663. Health returned 200;
+unauthenticated import configuration returned 401/no-store; signer readiness is
+not publicly routed (404). Task arming is still disabled and the automatic spending
+worker is absent. No real key import or mint occurred during verification.
+
+Android 1.1.1+4 requires a new signed installer: recovery-phrase libraries add
+license notice assets, and the new screen also changes the icon subset. The
+attempted 1.1.0+3 patch was rejected without overrides. Recovery phrases are
+processed on the device; only the matching linked account key reaches the
+protected importer. The release evidence is tracked in
+[wallet deployment evidence](wallet-deployment-2026-10-03.json).
+
+The Android release build succeeded on workflow run `37156828708`, attempt 2.
+The installer was checked with Android apksigner and matched the existing Mintly
+release key; package `com.mintly.mintly`, version name `1.1.1`, version code `4`.
+The verified APK is available at
+[Mintly 1.1.1](https://mintly.duckdns.org/downloads/Mintly-1.1.1-4.apk).
+Caddy serves `/downloads/` only from `/var/www/mintly/downloads`; custody files
+remain under their protected separate root. HEAD returned 200 and the exact byte
+length; range download returned 206 with the APK ZIP header. Missing `.env` and
+traversal requests returned 404. The existing authenticated import route and
+backend health checks remained correct after Caddy reload.
+
+Publish a verified future installer with `deploy/publish-android-installer.sh`
+and its independently checked SHA256, then run `deploy/setup-custody-caddy.sh`.
+The script refuses changed bytes under an existing immutable installer name.
+Future automatic Dart patches now target `1.1.1+4`; users on `1.1.0+3` must install
+this signed update first. No real wallet import or mainnet spending was performed.

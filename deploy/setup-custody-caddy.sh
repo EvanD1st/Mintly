@@ -7,6 +7,13 @@ sudo -n cp "$SITE" "$BACKUP"
 sudo -n tee "$SITE" >/dev/null <<'CADDY'
 mintly.duckdns.org {
     encode gzip
+    handle_path /downloads/* {
+        root * /var/www/mintly/downloads
+        header Cache-Control "public, max-age=86400, immutable"
+        header Content-Type application/vnd.android.package-archive
+        header Content-Disposition attachment
+        file_server
+    }
     @custody path /api/automatic/import /api/automatic/import/config
     handle @custody {
         request_body {

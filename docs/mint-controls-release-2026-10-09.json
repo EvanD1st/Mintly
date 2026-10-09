@@ -1,0 +1,198 @@
+{
+  "status": "verified",
+  "checked_at_utc": "2026-10-09T02:44:51.554449+00:00",
+  "server_source": "2c58c7875d08e0ca8cd03b2df0adf4085e9ed7de",
+  "mobile_source": "2c58c7875d08e0ca8cd03b2df0adf4085e9ed7de",
+  "ci_url": "https://github.com/EvanD1st/Mintly/actions/runs/37873915114",
+  "ota_url": "https://github.com/EvanD1st/Mintly/actions/runs/37874552842",
+  "validation": {
+    "backend_regression": 327,
+    "postgresql_execution_checks": 150,
+    "flutter_normal": 68,
+    "flutter_legacy_icons": 68,
+    "flutter_analyze": "No issues found"
+  },
+  "server_release": "/home/ubuntu/Mintly/releases/mint-controls-2c58c78",
+  "migration": "015_mint_controls",
+  "retention": {
+    "Wallet": {
+      "before": 4,
+      "after": 4,
+      "existing_immutable_rows_retained": true
+    },
+    "AutomaticGrant": {
+      "before": 10,
+      "after": 10,
+      "existing_immutable_rows_retained": true
+    },
+    "CopyRule": {
+      "before": 19,
+      "after": 19,
+      "existing_immutable_rows_retained": true
+    },
+    "MintTask": {
+      "before": 5,
+      "after": 5,
+      "existing_immutable_rows_retained": true
+    },
+    "MintPlan": {
+      "before": 3,
+      "after": 3,
+      "existing_immutable_rows_retained": true
+    },
+    "MintAuthorization": {
+      "before": 5,
+      "after": 5,
+      "existing_immutable_rows_retained": true
+    },
+    "MintPlanRecord": {
+      "before": 12,
+      "after": 12,
+      "existing_immutable_rows_retained": true
+    }
+  },
+  "features_read_only": {
+    "read_only": true,
+    "migration": "015_mint_controls",
+    "user_scope_checks": 3,
+    "progress_responses": 0,
+    "mainnet_test_transactions_sent": 0,
+    "limit_mutations": 0,
+    "check_mode_mutations": 0,
+    "test_notifications_sent": 0,
+    "daily_limits_set": 0,
+    "check_modes_active": 0
+  },
+  "patches": [
+    {
+      "release_version": "1.1.1+4",
+      "patch_number": 14,
+      "patch_id": 706042,
+      "track": "stable",
+      "rolled_back": false,
+      "architectures": [
+        "arm",
+        "aarch64",
+        "x86_64"
+      ],
+      "compatibility_audit": {
+        "changed_assets": [
+          "base/assets/flutter_assets/fonts/MaterialIcons-Regular.otf"
+        ],
+        "font_compatibility": {
+          "installed_glyphs": 34,
+          "required_glyphs": 30
+        },
+        "installed_sha256": "40180a4e181a25c9194ee50e58d3487040bc48c09e079fefb8e74841fa034e9b",
+        "built_sha256": "d15cca86b41653bdb6e970c6e7ae49814bb35a0863b9e5da89ffb25cc4189365",
+        "release_version": "1.1.1+4",
+        "track": "stable",
+        "legacy_icons": false,
+        "browser_links": "native launcher",
+        "preserved_installed_launcher": false,
+        "native_checks": "Shorebird enabled; no override"
+      }
+    },
+    {
+      "release_version": "1.1.0+3",
+      "patch_number": 24,
+      "patch_id": 706045,
+      "track": "stable",
+      "rolled_back": false,
+      "architectures": [
+        "arm",
+        "aarch64",
+        "x86_64"
+      ],
+      "compatibility_audit": {
+        "changed_assets": [
+          "base/assets/flutter_assets/NOTICES.Z",
+          "base/assets/flutter_assets/fonts/MaterialIcons-Regular.otf"
+        ],
+        "font_compatibility": {
+          "installed_glyphs": 33,
+          "required_glyphs": 30
+        },
+        "installed_sha256": "a0cb1f84d3a50b55983285ff1ea762d51fc4b5b3d0a048a4d0b718e84970d28c",
+        "built_sha256": "d15cca86b41653bdb6e970c6e7ae49814bb35a0863b9e5da89ffb25cc4189365",
+        "release_version": "1.1.0+3",
+        "track": "stable",
+        "legacy_icons": false,
+        "browser_links": "native launcher",
+        "preserved_installed_launcher": false,
+        "native_checks": "Shorebird enabled; no override"
+      }
+    },
+    {
+      "release_version": "1.0.1+2",
+      "patch_number": 14,
+      "patch_id": 706048,
+      "track": "stable",
+      "rolled_back": false,
+      "architectures": [
+        "arm",
+        "aarch64",
+        "x86_64"
+      ],
+      "compatibility_audit": {
+        "changed_assets": [
+          "base/assets/flutter_assets/NOTICES.Z",
+          "base/assets/flutter_assets/fonts/MaterialIcons-Regular.otf"
+        ],
+        "font_compatibility": {
+          "installed_glyphs": 28,
+          "required_glyphs": 22
+        },
+        "installed_sha256": "ce1aa4d6e315d2ac28630c82f3e6c6f74b671558d388008a436528f9fd29cb76",
+        "built_sha256": "f9f64c65c003eb09cad3b6d9b62dea2cbc2bbd00f16b71603be581c5ad948bce",
+        "release_version": "1.0.1+2",
+        "track": "stable",
+        "legacy_icons": true,
+        "browser_links": "copy and paste",
+        "preserved_installed_launcher": false,
+        "native_checks": "Shorebird enabled; no override"
+      }
+    },
+    {
+      "release_version": "1.0.0+1",
+      "patch_number": 14,
+      "patch_id": 706051,
+      "track": "stable",
+      "rolled_back": false,
+      "architectures": [
+        "arm",
+        "aarch64",
+        "x86_64"
+      ],
+      "compatibility_audit": {
+        "changed_assets": [
+          "base/assets/flutter_assets/NOTICES.Z",
+          "base/assets/flutter_assets/fonts/MaterialIcons-Regular.otf"
+        ],
+        "font_compatibility": {
+          "installed_glyphs": 28,
+          "required_glyphs": 22
+        },
+        "installed_sha256": "74b532a2c2eea51fd585a2dd9ab65d366cb722d0613642ddeb2823bccd4efff8",
+        "built_sha256": "b9e550b0b8d4d71d35beb28dbc6c613741e83a74340d7404307b3a3c739d0a8e",
+        "release_version": "1.0.0+1",
+        "track": "stable",
+        "legacy_icons": true,
+        "browser_links": "copy and paste",
+        "preserved_installed_launcher": true,
+        "native_checks": "Shorebird enabled; no override"
+      }
+    }
+  ],
+  "mainnet_test_transactions_sent": 0,
+  "existing_approvals_expanded_or_reset": false,
+  "phone_activation": "Not observed; online installed apps apply the stable patch on a subsequent restart.",
+  "behavior": {
+    "progress": "Evidence-backed checking/preparing/sent/included/confirmed timeline; inclusion is provisional and reorgs clear it.",
+    "daily_limit": "Optional per-account WAT-day ETH ceiling across both bots, every wallet and network; independent signer pin and durable carried liabilities; no spending reset.",
+    "check_only": "Separate owner-scoped configuration/results without authorizations, tasks, nonces, reservations or signatures. Explicit copy consent required to return to spending.",
+    "wallet_alerts": "Owned funding/expiry state-change alerts with durable deduplication, renewal/recovery clearing, opt-out and versioned delivery.",
+    "existing_authority": "Old grants, task scopes and public-only approvals preserved; extra daily ceiling defaults off.",
+    "test_method": "Real isolated SeaDrop EVM, concurrent and fault tests, PostgreSQL, Flutter light/dark phone tests and four installed-version native/asset audits."
+  }
+}

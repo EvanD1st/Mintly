@@ -18,7 +18,7 @@ from sqlalchemy import select, update
 from web3 import AsyncWeb3
 
 from app.config import settings
-from app.models import AutomaticGrant, AutomaticLock, Drop, MintStage, Wallet, MintTask, MintAuthorization
+from app.models import AutomaticGrant, AutomaticLock, Drop, MintStage, Wallet, MintTask, MintAuthorization, MintPlan
 from app.services.mint_plans import aware
 from app.services.opensea import OpenSeaClient, OpenSeaUnavailable, collection_slug, CHAINS
 from app.services.seadrop_mint import decode_mint, verify_presale
@@ -32,30 +32,45 @@ def digest(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
 
 
-def enabled():
+def rpc_for(chain_id):
+    if chain_id == settings.AUTOMATIC_CHAIN_ID:
+        return settings.AUTOMATIC_RPC
+    return {1: settings.RPC_ETHEREUM, 8453: settings.RPC_BASE, 4663: settings.RPC_ROBINHOOD,
+            11155111: settings.RPC_SEPOLIA}.get(chain_id, '')
+
+
+def enabled(chain_id=None):
+    chain_id = settings.AUTOMATIC_CHAIN_ID if chain_id is None else chain_id
     if not settings.ENABLE_CUSTODIAL_AUTOMATIC:
         raise HTTPException(409, 'Automatic custody is not enabled. A linked MetaMask address alone cannot sign automatically.')
-    if settings.AUTOMATIC_CHAIN_ID not in (31337, 11155111) and not (
-            settings.AUTOMATIC_CHAIN_ID == 4663 and settings.ENABLE_ROBINHOOD_AUTOMATIC):
-        raise HTTPException(409, 'Chain is unsupported or Robinhood mainnet opt-in is disabled.')
-    parsed = urlparse(settings.AUTOMATIC_RPC)
-    if settings.AUTOMATIC_CHAIN_ID == 31337:
+    permitted = {4663: settings.ENABLE_ROBINHOOD_AUTOMATIC, 1: settings.ENABLE_ETHEREUM_AUTOMATIC,
+                 8453: settings.ENABLE_BASE_AUTOMATIC}
+    if chain_id not in (31337, 11155111) and not permitted.get(chain_id, False):
+        raise HTTPException(409, 'Automatic execution is disabled for this network.')
+    parsed = urlparse(rpc_for(chain_id))
+    if chain_id == 31337:
         if parsed.hostname not in ('127.0.0.1', 'localhost', 'evm') or parsed.scheme != 'http':
             raise HTTPException(409, 'Local automatic execution requires an isolated local RPC.')
     elif parsed.scheme != 'https':
         raise HTTPException(409, 'Remote automatic execution requires HTTPS RPC.')
 
 
-async def provider():
-    enabled()
-    web3 = AsyncWeb3(AsyncWeb3.AsyncHTTPProvider(settings.AUTOMATIC_RPC, request_kwargs={'timeout': 8}))
+async def provider(chain_id=None):
+    chain_id = settings.AUTOMATIC_CHAIN_ID if chain_id is None else chain_id
+    enabled(chain_id)
+    web3 = AsyncWeb3(AsyncWeb3.AsyncHTTPProvider(rpc_for(chain_id), request_kwargs={'timeout': 8}))
     try:
-        if await web3.eth.chain_id != settings.AUTOMATIC_CHAIN_ID:
+        if await web3.eth.chain_id != chain_id:
             raise ValueError('RPC chain mismatch')
         return web3
-    except Exception:
+    except BaseException:
         await web3.provider.disconnect()
         raise
+
+
+async def provider_for(chain_id):
+    # Preserve the default provider boundary used by local integration fixtures.
+    return await provider() if chain_id == settings.AUTOMATIC_CHAIN_ID else await provider(chain_id)
 
 
 async def signer_ready(grant_id):
@@ -92,60 +107,134 @@ def wei(value):
 
 
 async def grant_for(db, grant_id, user_id):
+    await require_running(db, user_id)
     grant = (await db.execute(select(AutomaticGrant).where(
         AutomaticGrant.id == grant_id, AutomaticGrant.user_id == user_id
     ).execution_options(populate_existing=True))).scalar_one_or_none()
     if grant is None:
         raise HTTPException(404, 'Automatic policy not found.')
-    if grant.adapter != MODE or grant.chain_id != settings.AUTOMATIC_CHAIN_ID:
+    if grant.adapter != MODE:
         raise HTTPException(409, 'Unsupported automatic policy adapter or chain.')
+    enabled(grant.chain_id)
+    wallet = await db.get(Wallet, grant.wallet_id)
+    if not wallet or wallet.archived_at:
+        raise HTTPException(409, 'Wallet is unlinked. Add it again and approve a new policy.')
     if grant.status != 'enabled' or aware(grant.expires_at) <= datetime.now(timezone.utc):
         raise HTTPException(409, 'Automatic policy is disabled or expired. Renew it in the signer before arming.')
     return grant
 
 
-async def make_snapshot(db, req, user_id):
+async def require_running(db, user_id):
+    from app.models import User
+    user = await db.scalar(select(User).where(User.id == user_id).execution_options(populate_existing=True))
+    if not user or not user.is_active or user.deleted_at or user.automation_paused:
+        raise HTTPException(409, 'Automation is paused. Resume it in Settings before setting up a mint.')
+
+
+async def make_snapshot(db, req, user_id, *, presale_mint=None):
     enabled()
     if not req.grant_id:
         raise HTTPException(409, 'MetaMask connection is not automatic signing authority. Configure a custodial signer policy first.')
     grant = await grant_for(db, req.grant_id, user_id)
+    if req.plan_id:
+        plan = await db.get(MintPlan, req.plan_id)
+        if (not plan or plan.user_id != user_id or plan.archived_at
+                or plan.wallet_id != req.wallet_id or plan.automatic_drop_id != req.drop_id
+                or plan.automatic_stage_id != req.stage_id):
+            raise HTTPException(409, 'Mint plan changed or was removed. Reopen its automatic review.')
     wallet = await db.get(Wallet, req.wallet_id)
     drop = await db.get(Drop, req.drop_id)
     stage = await db.get(MintStage, req.stage_id)
-    if not wallet or wallet.user_id != user_id or not drop or not stage or stage.drop_id != drop.id:
+    if not wallet or wallet.archived_at or wallet.user_id != user_id or not drop or not stage or stage.drop_id != drop.id:
         raise HTTPException(404, 'Wallet, drop or selected stage not found.')
     if grant.wallet_id != wallet.id or grant.account.lower() != wallet.address.lower():
         raise HTTPException(409, 'Signer policy does not belong to this wallet.')
     if drop.chain_id != grant.chain_id or not drop.is_supported_integration or not drop.contract_address or drop.is_demo:
         raise HTTPException(409, 'Drop chain or contract integration is unsupported for this signer.')
-    if drop.contract_address.lower() not in [x.lower() for x in grant.scope['contracts']] or req.mint_kind not in grant.scope['mint_kinds']:
+    if not allows_collection(grant.scope, drop.contract_address) or req.mint_kind not in grant.scope['mint_kinds']:
         raise HTTPException(409, 'Contract or mint method is outside the signer policy.')
     if req.mint_kind != 'public' and req.conditional_eligibility and req.onchain_stage_index is None:
         raise HTTPException(409, 'A conditional presale needs the verified on-chain stage index before arming; an ambiguous stage label is insufficient.')
-    if not stage.end_time_utc or not 1 <= req.quantity <= min(100, stage.limit_per_wallet):
+    stage_price, stage_limit = stage.price_wei, stage.limit_per_wallet
+    if presale_mint is not None:
+        p = presale_mint['params']
+        if (req.mint_kind == 'public' or presale_mint['kind'] != req.mint_kind
+                or presale_mint['wallet'].lower() != wallet.address.lower()
+                or presale_mint['contract'].lower() != drop.contract_address.lower()
+                or presale_mint['quantity'] != req.quantity or p[4] != req.onchain_stage_index
+                or p[2:4] != (int(aware(stage.start_time_utc).timestamp()), int(aware(stage.end_time_utc).timestamp()))):
+            raise HTTPException(409, 'Whitelist preparation differs from the receiving wallet or stage.')
+        stage_price, stage_limit = p[0], p[1]
+    if not stage.end_time_utc or not 1 <= req.quantity <= min(100, stage_limit):
         raise HTTPException(409, 'Stage needs an exact end time and sufficient quantity limit.')
     start, end = aware(stage.start_time_utc), aware(stage.end_time_utc)
     expiry = aware(req.expires_at) if req.expires_at else min(end, aware(grant.expires_at))
-    price = wei(req.price_cap_eth) if req.price_cap_eth is not None else stage.price_wei
+    price = wei(req.price_cap_eth) if req.price_cap_eth is not None else stage_price
     fee = wei(req.fee_cap_eth)
     total = wei(req.total_cap_eth) if req.total_cap_eth is not None else price * req.quantity + fee
     if not max(datetime.now(timezone.utc), start) < expiry <= min(end, aware(grant.expires_at)):
         raise HTTPException(409, 'Submission expiry must fall within the stage and policy validity.')
-    if price < stage.price_wei or fee <= 0 or total < stage.price_wei * req.quantity + fee:
+    scheduled = getattr(req, 'scheduled_for_utc', None)
+    execute_at = None
+    if scheduled is not None:
+        if scheduled.tzinfo is None:
+            raise HTTPException(422, 'Mint time must include its time zone; Mintly displays WAT.')
+        scheduled = aware(scheduled)
+        # Round up fractional seconds rather than execute before the requested instant.
+        from math import ceil
+        execute_at = ceil(scheduled.timestamp())
+        if (scheduled < start or scheduled <= datetime.now(timezone.utc)
+                or execute_at >= int(expiry.timestamp())):
+            raise HTTPException(409, 'Choose a future mint time within the stage and before the approval expires.')
+    if price < stage_price or fee <= 0 or total < stage_price * req.quantity + fee:
         raise HTTPException(409, 'Mint price, gas budget or total ceiling is insufficient.')
     if total > int(grant.scope['max_task_wei']) or total > grant.budget_wei - grant.spent_wei - grant.reserved_wei:
         raise HTTPException(409, 'Automatic policy budget is insufficient, including pending reservations.')
-    return grant, {
-        'user_id': user_id, 'wallet_id': wallet.id, 'account': to_checksum_address(wallet.address),
+    snapshot = {
+        'plan_id': req.plan_id, 'user_id': user_id, 'wallet_id': wallet.id, 'account': to_checksum_address(wallet.address),
         'chain_id': drop.chain_id, 'chain': drop.chain, 'contract': to_checksum_address(drop.contract_address),
         'drop_id': drop.id, 'drop_name': drop.name, 'stage_id': stage.id, 'stage_name': stage.stage_name,
         'mint_kind': req.mint_kind, 'start': int(start.timestamp()), 'end': int(end.timestamp()),
-        'expiry': int(expiry.timestamp()), 'quantity': req.quantity, 'price_wei': stage.price_wei,
+        'expiry': int(expiry.timestamp()), 'quantity': req.quantity, 'price_wei': stage_price,
         'price_cap_wei': price, 'fee_cap_wei': fee, 'total_cap_wei': total,
         'recipient': to_checksum_address(wallet.address), 'mint_page_url': drop.mint_page_url,
         'conditional_eligibility': req.conditional_eligibility,
         'onchain_stage_index': req.onchain_stage_index,
     }
+    if execute_at is not None:
+        snapshot['execute_at'] = execute_at
+    if getattr(req, 'copy_event_id', None):
+        from app.models import CopyEvent
+        from app.services.copy_mints import enabled as copy_enabled
+        copy_enabled()
+        event = await db.get(CopyEvent, req.copy_event_id)
+        from app.models import CopyCheck
+        check=await db.get(CopyCheck,event.watch_id) if event else None
+        if check and check.active:
+            raise HTTPException(409,'Check-only mode is on. Turn it off before reviewing a copy mint.')
+        if not event or event.user_id != user_id or event.task_id:
+            raise HTTPException(409, 'Copy observation is unavailable or already has a task.')
+        o = event.observation
+        if (snapshot['mint_kind'] != 'public' or o['chain_id'] != snapshot['chain_id']
+                or o['contract'].lower() != snapshot['contract'].lower()
+                or any(o[k] != snapshot[k] for k in ('price_wei','start','end'))):
+            raise HTTPException(409, 'Copy review differs from the observed public stage.')
+        snapshot['copy_source'] = o
+    return grant, snapshot
+
+
+def allows_collection(scope, contract):
+    """Explicit task-selected scope; old fixed policies retain their exact allowlist.
+
+    This only selects an NFT collection. The signer still independently decodes
+    the pinned SeaDrop call and checks the persisted recipient/quantity/budget.
+    Unknown modes and implicit empty allowlists must fail closed.
+    """
+    if scope.get('collection_scope') == 'reviewed_mints':
+        return scope.get('contracts') == []
+    if scope.get('collection_scope') is not None:
+        return False
+    return contract.lower() in [x.lower() for x in scope.get('contracts', [])]
 
 
 async def validate_mint(web3, snapshot, transaction):
@@ -201,11 +290,31 @@ async def prepare_mint(web3, snapshot):
 
 
 async def release_reservation(db, task, actual=0):
+    from app.services.daily_budget import settle
+    await settle(db,task,actual)
     auth = await db.get(MintAuthorization, task.authorization_id)
     grant = await db.get(AutomaticGrant, auth.grant_id)
     grant.reserved_wei -= auth.total_spend_cap_wei
     grant.spent_wei += actual
-    if grant.reserved_wei < 0 or grant.spent_wei > grant.budget_wei:
+    if task.copy_rule_id:
+        from app.models import CopyRule
+        rule = await db.get(CopyRule, task.copy_rule_id)
+        rule.reserved_wei -= auth.total_spend_cap_wei
+        rule.spent_wei += actual
+        if rule.reserved_wei < 0:
+            raise ValueError('Copy budget reservation invariant violated')
+        if rule.spent_wei > rule.budget_wei or actual > auth.total_spend_cap_wei:
+            rule.status = 'paused'
+    if grant.chain_id == 8453 and (grant.spent_wei > grant.budget_wei or actual > auth.total_spend_cap_wei):
+        # Inclusion-time parent fees can change after a bounded submission.
+        # Preserve the real charge and stop future signing rather than lose a receipt.
+        grant.status = 'disabled'
+        from app.models import CopyRule
+        await db.execute(update(CopyRule).where(CopyRule.grant_id == grant.id,
+            CopyRule.status.in_(['active','registering'])).values(status='paused'))
+    elif grant.spent_wei > grant.budget_wei:
+        raise ValueError('Budget accounting invariant violated')
+    if grant.reserved_wei < 0:
         raise ValueError('Budget accounting invariant violated')
 
 

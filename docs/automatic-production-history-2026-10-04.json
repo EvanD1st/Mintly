@@ -1,0 +1,17 @@
+{
+  "history_serializer": "passed",
+  "raw_signatures_redacted": true,
+  "original_authorization_retained": true,
+  "owner_history_read": "passed",
+  "cross_owner_live_check": "not applicable: one production user; regression-tested locally",
+  "recovery_records": 1,
+  "nonce_reservations": 1,
+  "plan_record_count": 2,
+  "signer_policy_ready": true,
+  "mainnet_arming_enabled": true,
+  "chain_id": 4663,
+  "task_status": "confirmed",
+  "original_expiry": "2026-10-04 05:48:16+00:00",
+  "recovery_expiry": "2026-10-04 06:35:39.386003+00:00",
+  "checked_at": "2026-10-04T06:44:55.488444+00:00"
+}

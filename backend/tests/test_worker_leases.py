@@ -2,7 +2,7 @@
 
 import pytest
 from datetime import datetime, timezone, timedelta
-from app.models import MintTask, MintAuthorization
+from app.models import MintTask, MintAuthorization, Wallet, User
 from app.worker import MintlyWorker
 from sqlalchemy import select
 
@@ -12,6 +12,9 @@ async def test_worker_leases_prevent_duplicate_claims(test_db):
     """Verifies that two workers cannot claim the same task concurrently."""
     # Insert an armed task scheduled in the past (ready now)
     now = datetime.now(timezone.utc)
+    member = await test_db.scalar(select(User).where(User.username == 'member'))
+    test_db.add(Wallet(id='wallet_1', user_id=member.id, label='Lease wallet', address='0x' + '1' * 40))
+    await test_db.commit()
     task = MintTask(
         authorization_id="auth_lease_test",
         wallet_id="wallet_1",

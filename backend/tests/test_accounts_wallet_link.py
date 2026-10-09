@@ -55,37 +55,11 @@ async def test_admin_provisioning_forced_change_and_reset_revocation(test_db):
 
 
 @pytest.mark.asyncio
-async def test_wallet_pairing_requires_valid_signature_and_code_is_one_use(test_db):
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        member_headers = await signed_in(client, "member", "Member test password 123")
-        pairing = await client.post("/api/wallets/pairings", headers=member_headers)
-        assert pairing.status_code == 200, pairing.text
-        code = pairing.json()["code"]
-        wallet = Account.create()
-        other = Account.create()
-        challenge = await client.post("/api/wallet-link/challenge", json={
-            "code": code, "address": wallet.address,
-        })
-        assert challenge.status_code == 200, challenge.text
-        message = challenge.json()["message"]
-        assert "mintly.duckdns.org" in message
-        bad = Account.sign_message(encode_defunct(text=message), other.key).signature.hex()
-        assert (await client.post("/api/wallet-link/complete", json={
-            "code": code, "address": wallet.address, "signature": bad,
-        })).status_code == 400
-        signature = Account.sign_message(encode_defunct(text=message), wallet.key).signature.hex()
-        linked = await client.post("/api/wallet-link/complete", json={
-            "code": code, "address": wallet.address, "signature": signature,
-        })
-        assert linked.status_code == 200, linked.text
-        assert (await client.post("/api/wallet-link/complete", json={
-            "code": code, "address": wallet.address, "signature": signature,
-        })).status_code == 404
-        wallets = await client.get("/api/wallets", headers=member_headers)
-        assert wallets.status_code == 200
-        assert [item["address"] for item in wallets.json()] == [wallet.address]
-        admin_headers = await signed_in(client, "admin", "Admin test password 123")
-        assert (await client.get("/api/wallets", headers=admin_headers)).json() == []
-        unlinked = await client.delete(f"/api/wallets/{wallets.json()[0]['id']}", headers=member_headers)
-        assert unlinked.status_code == 200, unlinked.text
-        assert (await client.get("/api/wallets", headers=member_headers)).json() == []
+async def test_web_linking_is_retired_and_never_creates_wallets(test_db):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url='http://test') as client:
+        headers = await signed_in(client, 'member', 'Member test password 123')
+        assert (await client.post('/api/wallets/pairings', headers=headers)).status_code == 410
+        payload = {'code': '1'*16, 'address': '0x'+'2'*40}
+        assert (await client.post('/api/wallet-link/challenge', json=payload)).status_code == 410
+        assert (await client.post('/api/wallet-link/complete', json={**payload, 'signature': '0x'+'1'*130})).status_code == 410
+        assert (await client.get('/api/wallets', headers=headers)).json() == []
