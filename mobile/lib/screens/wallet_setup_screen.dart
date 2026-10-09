@@ -61,7 +61,7 @@ class _WalletSetupState extends ConsumerState<WalletSetupScreen> {
       Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           const Text('Enable automatic signing', style: TextStyle(fontWeight: FontWeight.w700)),
-          const Text('Mintly derives the selected account on this device and sends its private key over HTTPS to the custody service, which stores it encrypted. The recovery phrase is not sent. This grants server signing access within your approved limits.'),
+          const Text('Mintly derives the selected account on this device and sends its private key over HTTPS to the custody service, which stores it encrypted. The recovery phrase is not sent. The server holds signing access; Mintly’s software enforces your approved limits.'),
           const SizedBox(height: 10),
           const Text('Use a dedicated minting wallet. Choose the networks and finite spending limits you want to approve.'),
           const SizedBox(height: 12),

@@ -1,7 +1,7 @@
 """Resolve verified instructions; users never supply a proof or guessed stage index."""
 from types import SimpleNamespace
 from fastapi import HTTPException
-from app.models import Wallet,Drop,MintStage,CopyEvent,CopyWatch
+from app.models import Wallet,Drop,MintStage,CopyEvent,CopyWatch,MintPlan
 from app.services import automatic
 from app.services.mint_plans import aware
 from app.services.opensea import OpenSeaClient,OpenSeaUnavailable,collection_slug,CHAINS
@@ -39,6 +39,12 @@ async def prepare(db,body,user_id):
     if not stage.end_time_utc:
         raise HTTPException(409,'This stage’s closing time is not verified yet.')
     source_kind=None
+    force_presale=False
+    if body.plan_id:
+        plan=await db.get(MintPlan,body.plan_id)
+        if not plan or plan.user_id!=user_id or plan.archived_at or plan.wallet_id!=wallet.id:
+            raise HTTPException(404,'Mint plan not found.')
+        force_presale=plan.stage_type is not None and plan.stage_type!='public_sale'
     if body.copy_event_id:
         event=await db.get(CopyEvent,body.copy_event_id)
         watch=await db.get(CopyWatch,event.watch_id) if event else None
@@ -55,7 +61,7 @@ async def prepare(db,body,user_id):
                 int(aware(stage.start_time_utc).timestamp()),int(aware(stage.end_time_utc).timestamp()),stage.price_wei)
         except ValueError:
             is_public=False
-        if is_public and source_kind in (None,'public'):
+        if is_public and not force_presale and source_kind in (None,'public'):
             kind,price,index='public',stage.price_wei,None
         else:
             candidate=SimpleNamespace(wallet_id=wallet.id,drop_id=drop.id,stage_id=stage.id,quantity=body.quantity,mint_kind=source_kind or 'auto')

@@ -149,6 +149,7 @@ class _CustodyImportScreenState extends ConsumerState<CustodyImportScreen>
   Future<void> _continue() async {
     if (!_form.currentState!.validate()) return;
     final generation = _generation;
+    _targetWalletId = widget.walletId;
     final secret = <String, String>{
       'kind': 'phrase',
       'secret': _key.text,

@@ -41,7 +41,7 @@ async def add_watch_wallet(req:WatchWalletRequest,user=Depends(get_current_user)
     if not req.label.strip():
         raise HTTPException(422,'Enter a wallet name.')
     wallet=Wallet(id=str(uuid.uuid4()),user_id=user.id,address=to_checksum_address(req.address),label=req.label.strip(),
-        signing_capability='watch_only',is_demo=False)
+        signing_capability='watch_only',is_default=active_count==0,supported_chains=['Ethereum','Base','Robinhood Chain','Arbitrum One','Optimism'],is_demo=False)
     db.add(wallet);await db.commit()
     return WalletSchema.model_validate(wallet)
 
