@@ -65,13 +65,18 @@ def test_explicit_provider_message_drives_retry_classification(message,reason):
     assert error.upstream_status==409 and error.retry_after_seconds==3
     assert error.status==(503 if reason=='stage_not_active' else 409)
 
-async def test_transient_rpc_failure_is_not_an_invalid_proof():
+@pytest.mark.parametrize('failure',[TimeoutError('private rpc endpoint'),ValueError({'code':-32005,'message':'RPC rate limit'})])
+async def test_transient_rpc_failure_is_not_an_invalid_proof(failure):
     class Eth:
-        async def call(self,*args,**kwargs):raise TimeoutError('private rpc endpoint')
+        async def call(self,*args,**kwargs):raise failure
     mint={'kind':'allowlist','params':(0,2,1,27,3,2222,0,True),'contract':'0x'+'11'*20,'wallet':'0x'+'22'*20,'proof':[]}
     with pytest.raises(OpenSeaUnavailable) as error:await verify_presale(SimpleNamespace(eth=Eth()),mint)
     assert error.value.status==503 and error.value.mint_reason=='rpc_unavailable'
     assert 'private rpc' not in str(error.value)
+
+def test_provider_codes_are_allowlisted_and_drive_classification():
+    assert diag.mint_rejection_reason({'error':{'code':'STAGE_NOT_ACTIVE'}})=='stage_not_active'
+    assert diag.provider_code({'code':'private-token-never-log'}) is None
 
 async def test_identical_concurrent_lookups_share_one_request_but_not_mutable_result():
     calls=[]

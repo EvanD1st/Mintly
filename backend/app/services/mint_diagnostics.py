@@ -9,7 +9,8 @@ _context=ContextVar('mint_http_diagnostics',default=None)
 log=logging.getLogger('uvicorn.error')
 FAILURES={'timeout','network_error','invalid_response','redirect','response_too_large','cooldown','paced','queued','execution_priority'}
 ENDPOINTS={'drop_mint','drop_schedule','key_creation','contract_lookup','other_opensea'}
-MINT_REASONS={
+PREPARATION_REASONS={
+    'upstream_server_error':'OpenSea mint preparation is temporarily unavailable. Waiting to retry.',
     'stage_not_active':'The selected stage is not active yet; waiting for mint instructions.',
     'instructions_unavailable':'Eligibility verified; wallet-specific instructions are not available yet.',
     'invalid_proof':'The wallet proof or creator signature is invalid under the current contract rules.',
@@ -26,11 +27,30 @@ MINT_REASONS={
     'creator_payout_missing':'The creator has not configured the payout address required for this paid mint.',
     'precondition_unknown':'OpenSea rejected a mint precondition; the specific reason could not be verified.',
 }
+# Preserve the existing copy-event terminal-reason contract.
+MINT_REASONS={key:PREPARATION_REASONS[key] for key in ('wallet_not_allowlisted','insufficient_funds',
+    'wallet_limit','supply_exhausted','creator_payout_missing','precondition_unknown')}
+PROVIDER_CODES={'STAGE_NOT_ACTIVE':'stage_not_active','MINT_NOT_ACTIVE':'stage_not_active',
+    'INVALID_PROOF':'invalid_proof','INVALID_SIGNATURE':'invalid_proof','INSUFFICIENT_FUNDS':'insufficient_funds',
+    'WALLET_LIMIT_EXCEEDED':'wallet_limit','MAX_SUPPLY_EXCEEDED':'supply_exhausted','SOLD_OUT':'supply_exhausted',
+    'NOT_ALLOWLISTED':'wallet_not_allowlisted','RATE_LIMIT_EXCEEDED':'upstream_rate_limited'}
+
+
+def provider_code(body):
+    if not isinstance(body,dict):return None
+    for candidate in (body,body.get('error'),body.get('detail')):
+        if not isinstance(candidate,dict):continue
+        for key in ('code','error_code'):
+            value=candidate.get(key)
+            if isinstance(value,str) and value in PROVIDER_CODES:return value
+    return None
 
 
 def mint_rejection_reason(body):
     """Classify only explicit provider messages; never retain arbitrary response text."""
     if not isinstance(body,dict):return 'precondition_unknown'
+    code=provider_code(body)
+    if code:return PROVIDER_CODES[code]
     parts=[]
     for key in ('message','error','errors','detail'):
         value=body.get(key)
@@ -96,13 +116,14 @@ def record_terms(snapshot,mint):
     log.info('mint_terms %s',json.dumps(fields,separators=(',',':')))
 
 
-def record_http(method,path,status,retry_after,started,failure=None,*,mint_reason=None):
+def record_http(method,path,status,retry_after,started,failure=None,*,mint_reason=None,upstream_code=None):
     context=_context.get()
     event={'at':datetime.now(timezone.utc).isoformat(),'endpoint':endpoint(path),
         'method':method if method in ('GET','POST') else 'OTHER','http_status':status,
         'retry_after_seconds':retry_seconds(retry_after),'duration_ms':min(600000,max(0,int((time.monotonic()-started)*1000))),
         'failure':failure if failure in FAILURES else None}
-    if mint_reason in MINT_REASONS:event['mint_reason']=mint_reason
+    if mint_reason in PREPARATION_REASONS:event['mint_reason']=mint_reason
+    if upstream_code in PROVIDER_CODES:event['upstream_code']=upstream_code
     if context is not None and len(context['events'])<16:context['events'].append(event)
     # Uvicorn's configured logger is visible inside the isolated signer process.
     if context is not None:
@@ -125,7 +146,8 @@ def clean_events(value):
             'retry_after_seconds':number(row.get('retry_after_seconds'),0,86400),
             'duration_ms':number(row.get('duration_ms'),0,600000),
             'failure':row.get('failure') if row.get('failure') in FAILURES else None})
-        if row.get('mint_reason') in MINT_REASONS:result[-1]['mint_reason']=row['mint_reason']
+        if row.get('mint_reason') in PREPARATION_REASONS:result[-1]['mint_reason']=row['mint_reason']
+        if row.get('upstream_code') in PROVIDER_CODES:result[-1]['upstream_code']=row['upstream_code']
     return result
 
 

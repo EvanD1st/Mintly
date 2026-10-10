@@ -25,7 +25,8 @@ def test_presale_rejects_redirected_wallet_quantity_price_and_noncanonical_data(
     for wrong_wallet,qty in [(Account.create().address,2),(wallet,3)]:
         with pytest.raises(OpenSeaUnavailable):decode_mint(tx,contract,wrong_wallet,qty)
     stage={'uuid':'eligible','type':'presale','starts_at':datetime.fromtimestamp(100,timezone.utc),'ends_at':datetime.fromtimestamp(200,timezone.utc),'price_wei':10}
-    other={**stage,'uuid':'other','price_wei':20}
+    stage['onchain_stage_index']=1
+    other={**stage,'uuid':'other','price_wei':20,'onchain_stage_index':2}
     assert match_stage(decoded,[other,stage])['uuid']=='eligible'
     with pytest.raises(OpenSeaUnavailable):match_stage(decoded,[other])
     with pytest.raises(OpenSeaUnavailable):match_stage(decoded,[stage,{**stage,'uuid':'ambiguous'}])

@@ -204,9 +204,15 @@ async def automatic_context(plan_id: str, user: User = Depends(get_current_user)
         if kind is None:
             raise HTTPException(409, 'This stage type is not supported for automatic minting.')
         automatic.enabled(plan.chain_id)
+        from app.services.mint_stage_choice import pinned
         drop_id = automatic.digest(['plan', plan.id, plan.chain_id, plan.contract_address.lower(),
-                                    plan.collection_name, jsonable_encoder(selected)])
+                                    pinned(selected),plan.price_wei,(plan.selected_stage or {}).get('wallet_total_limit')])
         stage_id = automatic.digest(['stage', drop_id])
+        previous=await db.get(MintStage,plan.automatic_stage_id) if plan.automatic_stage_id else None
+        if (previous and previous.drop_id==plan.automatic_drop_id and
+                (aware(previous.start_time_utc),aware(previous.end_time_utc),previous.price_wei,previous.limit_per_wallet)==
+                (selected['starts_at'],selected['ends_at'],plan.price_wei,(plan.selected_stage or {}).get('wallet_total_limit') or selected['max_per_wallet'])):
+            drop_id,stage_id=plan.automatic_drop_id,plan.automatic_stage_id
         drop = await db.get(Drop, drop_id)
         if drop is None:
             drop = Drop(id=drop_id, name=plan.collection_name, chain=plan.chain, chain_id=plan.chain_id,

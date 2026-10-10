@@ -66,7 +66,7 @@ def match_stage(mint,stages):
         candidates=[s for s in stages if stage_kind(s['type'])=='public']
     else:
         p=mint['params']
-        candidates=[s for s in stages if stage_kind(s['type'])==mint['kind']
+        candidates=[s for s in stages if (stage_kind(s['type'])==mint['kind'] or s['type']=='presale')
                     and int(s['starts_at'].timestamp())==p[2] and int(s['ends_at'].timestamp())==p[3]
                     and (s.get('onchain_stage_index') is None or s['onchain_stage_index']==p[4])]
     if len(candidates)!=1:
@@ -81,6 +81,10 @@ def signed_mint_typed_data(mint,chain_id):
                        'mintParams':dict(zip(PARAM_NAMES,mint['params'])),'salt':mint['salt']}}
 
 
+class InvalidProof(ValueError):
+    pass
+
+
 async def verify_presale(web3,mint,stage=None):
     if mint['kind']=='public':return
     p=mint['params'];contract=mint['contract'];wallet=mint['wallet']
@@ -93,21 +97,21 @@ async def verify_presale(web3,mint,stage=None):
     try:
         if mint['kind']=='allowlist':
             proof=mint['proof']
-            if len(proof)>64:raise ValueError()
+            if len(proof)>64:raise InvalidProof()
             root=(await read('getAllowListMerkleRoot(address)',['address'],[contract],['bytes32']))[0]
             leaf=keccak(encode(['address',PARAM_TYPE],[wallet,p]))
             for sibling in proof:leaf=keccak(min(leaf,sibling)+max(leaf,sibling))
-            if root==bytes(32) or leaf!=root:raise ValueError()
+            if root==bytes(32) or leaf!=root:raise InvalidProof()
         else:
             sig=mint['signature']
             if len(sig)!=65 or sig[64] not in (27,28) or not 0<int.from_bytes(sig[32:64],'big')<=0x7fffffffffffffffffffffffffffffff5d576e7357a4501ddfe92f46681b20a0:
-                raise ValueError()
+                raise InvalidProof()
             signer=Account.recover_message(encode_typed_data(full_message=signed_mint_typed_data(mint,await web3.eth.chain_id)),signature=sig)
             bounds=await read('getSignedMintValidationParams(address,address)',['address','address'],[contract,signer],['uint80','uint24','uint40','uint40','uint40','uint16','uint16'])
             if not (bounds[1]>0 and p[0]>=bounds[0] and p[1]<=bounds[1] and p[2]>=bounds[2] and p[3]<=bounds[3]
-                    and p[5]<=bounds[4] and bounds[5]<=p[6]<=bounds[6] and p[7]):raise ValueError()
-        if int(mint['fee'],16)==0:raise ValueError()
-        if p[7] and not (await read('getFeeRecipientIsAllowed(address,address)',['address','address'],[contract,mint['fee']],['bool']))[0]:raise ValueError()
+                    and p[5]<=bounds[4] and bounds[5]<=p[6]<=bounds[6] and p[7]):raise InvalidProof()
+        if int(mint['fee'],16)==0:raise InvalidProof()
+        if p[7] and not (await read('getFeeRecipientIsAllowed(address,address)',['address','address'],[contract,mint['fee']],['bool']))[0]:raise InvalidProof()
         minted,total,max_supply=await read('getMintStats(address)',['address'],[wallet],['uint256']*3,to=contract)
         if minted+mint['quantity']>p[1]:
             raise OpenSeaUnavailable('The receiving wallet allowance is exhausted.',409,mint_reason='wallet_limit')
@@ -129,13 +133,13 @@ async def verify_presale(web3,mint,stage=None):
         from web3.exceptions import ContractLogicError
         # Transport/server failures must never become a permanent invalid-proof result.
         # Unknown RPC failures remain bounded/retryable; signing still requires success.
-        if not isinstance(error,(ValueError,ContractLogicError)):
+        if not isinstance(error,(InvalidProof,ContractLogicError)):
             raise OpenSeaUnavailable('Blockchain checks are temporarily unavailable. No transaction was signed.',503,
                 mint_reason='rpc_unavailable') from None
-        from app.services.mint_diagnostics import mint_rejection_reason,MINT_REASONS
+        from app.services.mint_diagnostics import mint_rejection_reason,PREPARATION_REASONS
         reason=mint_rejection_reason({'message':str(error)})
         if reason=='precondition_unknown':reason='invalid_proof'
-        raise OpenSeaUnavailable(MINT_REASONS[reason],409,mint_reason=reason) from None
+        raise OpenSeaUnavailable(PREPARATION_REASONS[reason],409,mint_reason=reason) from None
 
 
 async def verified_mint_execution(web3,tx,plan,wallet):

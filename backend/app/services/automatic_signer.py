@@ -85,8 +85,8 @@ async def preflight_task(db, task_id, vault=None):
             if balance < s['total_cap_wei']:
                 note = 'Balance is below the approved maximum. Add ETH before mint time.'
         except OpenSeaUnavailable as error:
-            from app.services.mint_diagnostics import MINT_REASONS
-            note = MINT_REASONS.get(error.mint_reason,'Wallet-specific instructions are not ready. Another check will run at mint time.')
+            from app.services.mint_diagnostics import PREPARATION_REASONS
+            note = PREPARATION_REASONS.get(error.mint_reason,'Wallet-specific instructions are not ready. Another check will run at mint time.')
         except Exception:
             note = 'Advance checks unavailable. Mint-time checks are still required.'
     finally:

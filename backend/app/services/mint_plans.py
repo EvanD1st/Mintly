@@ -28,8 +28,8 @@ async def refresh_mint_plan(plan: MintPlan, wallet: Wallet, client: OpenSeaClien
         raise OpenSeaUnavailable("Drop contract, chain, or wallet changed; review this plan again.", 409)
     previous_stage = tuple(getattr(plan, key, None) for key in ('stage_uuid', 'starts_at', 'ends_at', 'price_wei'))
     def invalidate_context():
-        if (plan.stage_uuid, aware(plan.starts_at), aware(plan.ends_at), plan.price_wei) != (
-                previous_stage[0], aware(previous_stage[1]), aware(previous_stage[2]), previous_stage[3]):
+        if (stage_key(plan.stage_uuid), aware(plan.starts_at), aware(plan.ends_at), plan.price_wei) != (
+                stage_key(previous_stage[0]), aware(previous_stage[1]), aware(previous_stage[2]), previous_stage[3]):
             plan.automatic_drop_id, plan.automatic_stage_id = None, None
     stages = stage_schedule(detail)
     active = [stage for stage in stages if stage["starts_at"] <= now < stage["ends_at"]]
@@ -151,7 +151,7 @@ async def refresh_mint_plan(plan: MintPlan, wallet: Wallet, client: OpenSeaClien
         plan.status = "scheduled"
         plan.status_note = str(client.mint_error(status))
     # A later allowlist or public stage can make the wallet mintable.
-    plan.next_check_at = min(now + timedelta(minutes=5),
+    plan.next_check_at = min(now + timedelta(seconds=max(2,getattr(client,'last_retry_after',None) or 15)),
                              future[0]["starts_at"] if future else active[-1]["ends_at"])
     if plan.next_check_at <= now:
         plan.next_check_at = now + timedelta(minutes=5)

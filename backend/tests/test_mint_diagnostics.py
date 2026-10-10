@@ -96,7 +96,7 @@ async def test_signer_mapping_and_worker_retain_original_code_and_retry_deadline
         assert row.upstream_events[0]['retry_after_seconds']==37
         assert row.attempt_number==1 and row.outcome=='retry_scheduled'
         assert row.next_retry_at==task.next_attempt_at
-        assert row.error_category=={409:'stage_not_active',429:'upstream_rate_limited',503:'upstream_server_error'}[code]
+        assert row.error_category=={409:'mint_instructions_unavailable',429:'upstream_rate_limited',503:'upstream_server_error'}[code]
         assert task.status=='armed' and task.preparation_attempts==1 and not task.signed_tx_raw
         assert 'Private upstream' not in json.dumps(row.upstream_events)
     # New DB session proves the history survives ephemeral response/exception state.

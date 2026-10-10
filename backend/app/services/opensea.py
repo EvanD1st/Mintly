@@ -139,7 +139,7 @@ class OpenSeaClient:
             raise OpenSeaUnavailable('The application OpenSea key must be provisioned by the operator.',503,mint_reason='api_key_unavailable')
         import time
         from app.services.mint_diagnostics import record_http
-        started=time.monotonic();status=None;retry_after=None;failure=None;mint_reason=None
+        started=time.monotonic();status=None;retry_after=None;failure=None;mint_reason=None;upstream_code=None
         from app.services import opensea_limits
         delay,reason=await opensea_limits.permit(path)
         if delay:
@@ -169,18 +169,23 @@ class OpenSeaClient:
                         failure='invalid_response'
                         raise OpenSeaUnavailable("OpenSea returned an unexpected response.")
                     self.last_status=status
+                    from app.services.mint_diagnostics import provider_code
+                    upstream_code=provider_code(data)
                     from app.services.mint_diagnostics import retry_seconds
                     self.last_retry_after=retry_seconds(retry_after)
                     if status in (400,409,422) and path.endswith('/mint'):
                         from app.services.mint_diagnostics import mint_rejection_reason
                         mint_reason=mint_rejection_reason(data)
+                        from app.services.mint_diagnostics import current_phase,MINT_REASONS
+                        if current_phase()=='copy' and mint_reason not in MINT_REASONS:
+                            mint_reason='precondition_unknown'
                         self.last_mint_reason=mint_reason
                     return response.status, data
         except (aiohttp.ClientError, TimeoutError, ValueError) as error:
             failure='timeout' if isinstance(error,TimeoutError) else 'invalid_response' if isinstance(error,ValueError) else 'network_error'
             raise OpenSeaUnavailable("OpenSea is temporarily unavailable.") from error
         finally:
-            try:record_http(method,path,status,retry_after,started,failure,mint_reason=mint_reason)
+            try:record_http(method,path,status,retry_after,started,failure,mint_reason=mint_reason,upstream_code=upstream_code)
             except Exception:pass  # Diagnostic logging never changes the HTTP outcome.
 
     async def _key(self, min_validity_seconds=60) -> str:
@@ -338,12 +343,13 @@ class OpenSeaClient:
         raise OpenSeaUnavailable("OpenSea could not prepare this wallet's mint.")
 
     def mint_error(self,status):
-        from app.services.mint_diagnostics import MINT_REASONS
-        reason=getattr(self,'last_mint_reason',None) or 'instructions_unavailable'
+        from app.services.mint_diagnostics import PREPARATION_REASONS
+        reason=getattr(self,'last_mint_reason',None) or ('precondition_unknown' if status==422 else 'instructions_unavailable')
         if status in (401,403):reason='api_access_denied'
         elif status==429:reason='upstream_rate_limited'
+        elif status>=500:reason='upstream_server_error'
         permanent=reason in ('wallet_not_allowlisted','insufficient_funds','wallet_limit','supply_exhausted','creator_payout_missing','invalid_proof')
-        return OpenSeaUnavailable(MINT_REASONS.get(reason,'Wallet-specific mint instructions are temporarily unavailable.'),
+        return OpenSeaUnavailable(PREPARATION_REASONS.get(reason,'Wallet-specific mint instructions are temporarily unavailable.'),
             409 if permanent else 503,retry_after_seconds=getattr(self,'last_retry_after',None),mint_reason=reason,upstream_status=status)
 
 

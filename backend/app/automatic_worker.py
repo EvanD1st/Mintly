@@ -276,9 +276,9 @@ async def step(session_factory=AsyncSessionLocal, sign=request_signature, *, now
                 from app.services.preparation_retry import next_retry
                 task.next_attempt_at,misses_deadline=next_retry(max(now,datetime.now(timezone.utc)),aware(task.expires_at_utc),task.preparation_attempts,provider_wait)
                 reason=error.response.headers.get('X-Mintly-Reason') if isinstance(error,httpx.HTTPStatusError) else None
-                from app.services.mint_diagnostics import MINT_REASONS
+                from app.services.mint_diagnostics import PREPARATION_REASONS
                 task.failure_reason = ('Provider capacity or cooldown cannot serve this mint before its approved deadline. No transaction sent.' if misses_deadline else
-                    MINT_REASONS.get(reason,'Preparation temporarily unavailable; retrying within the approved submission window.'))
+                    PREPARATION_REASONS.get(reason,'Preparation temporarily unavailable; retrying within the approved submission window.'))
             await mint_diagnostics.save(db,task,'preparation',attempt_number,attempt_started,
                 'retry_scheduled' if task.status in ('armed','preparing') else task.status,
                 events=mint_diagnostics.from_error(error),status=error.response.status_code if isinstance(error,httpx.HTTPStatusError) else None,error=error)

@@ -23,6 +23,8 @@ async def test_overlapping_stages_bind_eligible_presale_not_first_or_most_expens
     fake=SimpleNamespace(build_mint=AsyncMock(return_value=(200,tx)))
     monkeypatch.setattr('app.services.mint_plans.eth_usdt_quote',AsyncMock(return_value=None))
     monkeypatch.setattr('app.services.mint_plans.estimate_network_fee',AsyncMock(return_value=100))
+    monkeypatch.setattr('app.services.automatic.provider_for',AsyncMock(return_value=SimpleNamespace(provider=SimpleNamespace(disconnect=AsyncMock()))))
+    monkeypatch.setattr('app.services.seadrop_mint.verify_presale',AsyncMock())
     await refresh_mint_plan(plan,wallet,fake,now=now,detail=details)
     assert plan.status=='ready_for_approval'
     assert plan.stage_uuid=='wallet-presale' and plan.stage_name=='wallet-presale'
