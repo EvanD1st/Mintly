@@ -310,7 +310,7 @@ async def prepare_task(db, task_id, vault=None):
                 try:
                     await automatic.validate_mint(web3, s, {'to': execution['target'], 'value': execution['value'], 'data': execution['data']})
                 except OpenSeaUnavailable as error:
-                    if error.mint_reason!='invalid_proof':raise
+                    if error.mint_reason!='invalid_proof' or task.copy_rule_id:raise
                     # Only unsigned tasks reach this branch. Renew the proof once,
                     # preserving the exact pinned approval and all independent checks.
                     from app.services.opensea import forget_verified_mint,collection_slug

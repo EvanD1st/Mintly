@@ -12,7 +12,7 @@ ENDPOINTS={'drop_mint','drop_schedule','key_creation','contract_lookup','other_o
 PREPARATION_REASONS={
     'upstream_server_error':'OpenSea mint preparation is temporarily unavailable. Waiting to retry.',
     'stage_not_active':'The selected stage is not active yet; waiting for mint instructions.',
-    'instructions_unavailable':'Eligibility verified; wallet-specific instructions are not available yet.',
+    'instructions_unavailable':'Waiting for wallet-specific mint instructions; another check is required.',
     'invalid_proof':'The wallet proof or creator signature is invalid under the current contract rules.',
     'rpc_unavailable':'Blockchain checks are temporarily unavailable. No transaction was signed.',
     'api_key_unavailable':'The application OpenSea key is missing or expired; operator action is required.',

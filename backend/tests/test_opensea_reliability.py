@@ -34,6 +34,26 @@ async def test_production_key_creation_transport_is_blocked(monkeypatch):
     monkeypatch.setattr(settings,'APP_ENV','production')
     with pytest.raises(OpenSeaUnavailable):await OpenSeaClient()._request('POST','/auth/keys')
 
+async def test_revoked_provisioned_key_is_reported_without_replacement(tmp_path,monkeypatch):
+    path=tmp_path/'secret.json';saved={'api_key':'disposable-developer-key','provisioned':True}
+    path.write_text(json.dumps(saved))
+    monkeypatch.setattr(settings,'APP_ENV','production');monkeypatch.setattr(settings,'OPENSEA_KEY_FILE',str(path))
+    calls=[]
+    async def denied(self,method,url,**kwargs):
+        assert url!='/auth/keys';calls.append(url)
+        return 403,{}
+    monkeypatch.setattr(OpenSeaClient,'_request',denied)
+    for _ in range(2):
+        with pytest.raises(OpenSeaUnavailable) as error:
+            await OpenSeaClient().build_mint('example','0x'+'11'*20)
+        assert error.value.mint_reason=='api_access_denied' and error.value.upstream_status==403
+    assert json.loads(path.read_text())==saved and len(calls)==2
+
+def test_shared_preparation_messages_preserve_copy_terminal_reason_contract():
+    assert set(diag.MINT_REASONS)=={'wallet_not_allowlisted','insufficient_funds','wallet_limit',
+        'supply_exhausted','creator_payout_missing','precondition_unknown'}
+    assert 'rpc_unavailable' in diag.PREPARATION_REASONS and 'stage_not_active' in diag.PREPARATION_REASONS
+
 def test_overview_link_normalizes_without_loosening_host_validation():
     assert collection_slug('https://opensea.io/collection/seeker-net/overview/')=='seeker-net'
     for url in ('https://opensea.io.evil.test/collection/seeker-net/overview','https://opensea.io/collection/seeker-net/overview/extra'):

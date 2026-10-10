@@ -18,6 +18,10 @@ Defaults retain conservative headroom: `OPENSEA_GLOBAL_REQUEST_SECONDS=6`,
 Retry-After accepts seconds or HTTP dates. Capacity that exceeds the approval
 deadline is reported without extending that deadline.
 
+The deployed copy-specific services, observer/worker, routes, rules and retry
+policy are preserved. Shared provider and signer changes are covered by the
+existing copy regressions; this release does not tune copy observation or retries.
+
 A read-only probe with the provisioned credential returned 200 for collection
 metadata and 422 for mint preparation. Both reported a rate-limit value of 120,
 but the headers did not identify the mint quota bucket. OpenSea documents

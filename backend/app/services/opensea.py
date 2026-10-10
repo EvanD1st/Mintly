@@ -263,7 +263,7 @@ class OpenSeaClient:
         status, data = await self._request("GET", f"/drops/{slug}", key=await self._key())
         if status == 404:
             raise OpenSeaUnavailable("This collection has no OpenSea drop.", 404)
-        if status in (401,403,429):raise self.mint_error(status)
+        if status in (401,403,429) or status>=500:raise self.mint_error(status)
         if status != 200:
             raise OpenSeaUnavailable("OpenSea could not verify this drop.")
         if data.get("chain") not in CHAINS:
@@ -289,6 +289,7 @@ class OpenSeaClient:
         if cached and cached[0]>time.monotonic():slug=cached[1]
         else:
             status, data = await self._request('GET', f'/chain/{chain}/contract/{to_checksum_address(contract)}', key=await self._key())
+            if status in (401,403,429) or status>=500:raise self.mint_error(status)
             slug = data.get('collection')
             if (status != 200 or data.get('chain') != chain or data.get('address', '').lower() != contract.lower()
                     or data.get('contract_standard') != 'erc721' or not isinstance(slug, str) or not SLUG_RE.fullmatch(slug)):
