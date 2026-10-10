@@ -6,12 +6,46 @@ from app.services.signer.base import MINT_PUBLIC_SELECTOR
 from app.models import MintPlan, Wallet
 from app.services.price_quote import eth_usdt_quote
 from app.services.opensea import CHAINS, OpenSeaClient, OpenSeaUnavailable, estimate_network_fee, stage_schedule, transaction_value_wei
+from app.services.phase_identity import stage_key,schedule_matches
 
 
 def aware(value: datetime | None) -> datetime | None:
     if value is None:
         return None
     return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+
+
+async def verified_stage_schedule(detail: dict, chain_id: int, contract: str) -> list[dict]:
+    """Use SeaDrop's current public terms for personal-plan review.
+
+    OpenSea can retain an earlier public schedule after the collection owner
+    changes it. The signer checks SeaDrop, so review must show the same terms.
+    Whitelist stages continue to use their distinct OpenSea instructions.
+    """
+    schedule = stage_schedule(detail)
+    public_rows = [stage for stage in schedule if stage['type'] == 'public_sale']
+    if not public_rows:
+        return schedule
+    if len(public_rows) != 1:
+        raise OpenSeaUnavailable('Multiple public phases cannot be matched to SeaDrop safely.', 409)
+    from app.services import automatic
+    from app.services.copy_mints import public_stage
+
+    web3 = None
+    try:
+        web3 = await automatic.provider_for(chain_id)
+        current = await public_stage(web3, contract)
+    except Exception as error:
+        raise OpenSeaUnavailable('Current public mint terms could not be verified on chain.', 503) from error
+    finally:
+        if web3 is not None:
+            await web3.provider.disconnect()
+    public = public_rows[0]
+    verified = dict(public, starts_at=datetime.fromtimestamp(current['start'], timezone.utc),
+                    ends_at=datetime.fromtimestamp(current['end'], timezone.utc),
+                    price_wei=current['price_wei'], max_per_wallet=current['limit'])
+    return sorted((verified if stage is public else stage for stage in schedule),
+                  key=lambda stage: stage['starts_at'])
 
 
 async def refresh_mint_plan(plan: MintPlan, wallet: Wallet, client: OpenSeaClient | None = None,
@@ -27,17 +61,19 @@ async def refresh_mint_plan(plan: MintPlan, wallet: Wallet, client: OpenSeaClien
         raise OpenSeaUnavailable("Drop contract, chain, or wallet changed; review this plan again.", 409)
     previous_stage = tuple(getattr(plan, key, None) for key in ('stage_uuid', 'starts_at', 'ends_at', 'price_wei'))
     def invalidate_context():
-        if (plan.stage_uuid, aware(plan.starts_at), aware(plan.ends_at), plan.price_wei) != (
-                previous_stage[0], aware(previous_stage[1]), aware(previous_stage[2]), previous_stage[3]):
+        if (stage_key(plan.stage_uuid), aware(plan.starts_at), aware(plan.ends_at), plan.price_wei) != (
+                stage_key(previous_stage[0]), aware(previous_stage[1]), aware(previous_stage[2]), previous_stage[3]):
             plan.automatic_drop_id, plan.automatic_stage_id = None, None
-    stages = stage_schedule(detail)
+    stages = (await verified_stage_schedule(detail, plan.chain_id, plan.contract_address)
+              if getattr(plan, 'selected_stage', None) and plan.selected_stage.get('type') == 'public_sale'
+              else stage_schedule(detail))
     active = [stage for stage in stages if stage["starts_at"] <= now < stage["ends_at"]]
     future = [stage for stage in stages if stage["starts_at"] > now]
     selected = active[0] if active else future[0] if future else None
     if getattr(plan,'selected_stage',None):
         from app.services.mint_stage_choice import pinned
-        selected=next((stage for stage in stages if stage['uuid']==plan.selected_stage['uuid']),None)
-        if not selected or pinned(selected)!=plan.selected_stage:
+        selected=next((stage for stage in stages if stage_key(stage['uuid'])==stage_key(plan.selected_stage['uuid'])),None)
+        if not selected or not schedule_matches(selected,plan.selected_stage,pinned):
             plan.status='unverified';plan.status_note='Your selected phase changed. Review its details again.'
             plan.automatic_drop_id=plan.automatic_stage_id=None
             return plan
@@ -52,7 +88,7 @@ async def refresh_mint_plan(plan: MintPlan, wallet: Wallet, client: OpenSeaClien
     plan.stage_type = selected["type"] if selected else None
     plan.starts_at = selected["starts_at"] if selected else None
     plan.ends_at = selected["ends_at"] if selected else None
-    plan.price_wei = selected["price_wei"] if selected else None
+    plan.price_wei = plan.selected_stage['price_wei'] if getattr(plan,'selected_stage',None) and selected else selected["price_wei"] if selected else None
     plan.mint_value_wei = None
     plan.estimated_network_fee_wei = None
     quote = await eth_usdt_quote()
@@ -93,16 +129,15 @@ async def refresh_mint_plan(plan: MintPlan, wallet: Wallet, client: OpenSeaClien
             raise
         plan.status = "unverified"
         plan.status_note = str(error)
-        plan.next_check_at = now + timedelta(minutes=5)
+        plan.next_check_at = min(now + timedelta(seconds=max(2,error.retry_after_seconds or 15)),selected['ends_at'])
         invalidate_context()
         return plan
     if status == 200 and transaction is not None:
         if transaction.get("chain") != detail["chain"]:
             raise OpenSeaUnavailable("OpenSea returned a different mint chain.")
         value = transaction_value_wei(transaction["value"])
-        max_active_price = max((stage["price_wei"] or 0) for stage in active) * (plan.quantity or 1)
-        if value > max_active_price or value >= 2**63:
-            raise OpenSeaUnavailable("Mint value exceeds the verified active-stage price.")
+        if value >= 2**63:
+            raise OpenSeaUnavailable("Mint value exceeds the supported range.")
         # OpenSea chooses the first *eligible* active stage, which need not be
         # the first entry in the schedule. Bind presale params to that stage.
         from app.services.seadrop_mint import decode_mint, match_stage, ALLOW_SELECTOR, SIGNED_SELECTOR
@@ -110,15 +145,25 @@ async def refresh_mint_plan(plan: MintPlan, wallet: Wallet, client: OpenSeaClien
         if transaction['data'][2:10].lower() in (ALLOW_SELECTOR,SIGNED_SELECTOR):
             mint=decode_mint(transaction,plan.contract_address,wallet.address,plan.quantity)
             selected=match_stage(mint,stages if getattr(plan,'selected_stage',None) else active)
-            if getattr(plan,'selected_stage',None) and selected['uuid']!=plan.selected_stage['uuid']:
+            if getattr(plan,'selected_stage',None) and stage_key(selected['uuid'])!=stage_key(plan.selected_stage['uuid']):
                 plan.status='not_ready';plan.status_note='OpenSea prepared another phase. Mintly will not switch your selected phase.'
                 return plan
             plan.stage_uuid=selected['uuid'];plan.stage_name=selected['name'];plan.stage_type=selected['type']
-            plan.starts_at=selected['starts_at'];plan.ends_at=selected['ends_at'];plan.price_wei=selected['price_wei']
+            from app.services import automatic
+            from app.services.seadrop_mint import verify_presale
+            provider=await automatic.provider_for(plan.chain_id)
+            try:await verify_presale(provider,mint)
+            finally:await provider.provider.disconnect()
+            if getattr(plan,'selected_stage',None) and mint['params'][0]!=plan.selected_stage['price_wei']:
+                plan.status='not_ready';plan.status_note='Your approved wallet price changed. Review the phase again.'
+                return plan
+            plan.starts_at=selected['starts_at'];plan.ends_at=selected['ends_at'];plan.price_wei=mint['params'][0]
+            from app.services.opensea import remember_verified_mint
+            remember_verified_mint(plan.collection_slug,wallet.address,plan.quantity,transaction,mint['params'][3])
         elif transaction['data'][2:10].lower() == MINT_PUBLIC_SELECTOR:
             public=[stage for stage in active if stage['type']=='public_sale']
             if len(public)!=1:raise OpenSeaUnavailable('The selected phase is not the public phase returned by OpenSea.',409)
-            if getattr(plan,'selected_stage',None) and public[0]['uuid']!=plan.selected_stage['uuid']:
+            if getattr(plan,'selected_stage',None) and stage_key(public[0]['uuid'])!=stage_key(plan.selected_stage['uuid']):
                 plan.status='not_ready';plan.status_note='OpenSea prepared another phase. No public fallback is allowed.'
                 return plan
             selected=public[0]
@@ -136,12 +181,12 @@ async def refresh_mint_plan(plan: MintPlan, wallet: Wallet, client: OpenSeaClien
 
     if status == 422:
         plan.status = "not_ready"
-        plan.status_note = "OpenSea could not prepare this wallet's mint. Check allowlist, balance, limit, and supply."
+        plan.status_note = str(client.mint_error(status))
     else:
         plan.status = "scheduled"
-        plan.status_note = "The OpenSea mint stage is not currently active."
+        plan.status_note = str(client.mint_error(status))
     # A later allowlist or public stage can make the wallet mintable.
-    plan.next_check_at = min(now + timedelta(minutes=5),
+    plan.next_check_at = min(now + timedelta(seconds=max(2,getattr(client,'last_retry_after',None) or 15)),
                              future[0]["starts_at"] if future else active[-1]["ends_at"])
     if plan.next_check_at <= now:
         plan.next_check_at = now + timedelta(minutes=5)

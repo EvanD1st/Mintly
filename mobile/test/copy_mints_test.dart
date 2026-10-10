@@ -204,6 +204,8 @@ void main() {
       expect(approved?['fee_cap_eth'], '0.0001');
       expect(approved?['budget_eth'], '0.001');
       expect(approved?['consent'], true);
+      expect(approved?['paid_only'], true);
+      expect(approved?['include_presales'], true);
       expect(approved?.containsKey('private_key'), false);
       expect(find.text('Copy minting'), findsOneWidget);
       expect(tester.takeException(), isNull);
@@ -285,7 +287,7 @@ void main() {
         );
         if (!keepFree) {
           await reveal(find.text('Free mints only'), up: true);
-          await tester.tap(find.text('Public / whitelist mints'));
+          await tester.tap(find.text('Paid mints'));
           await tester.pumpAndSettle();
           expect(find.text('Free mints use the maximum available for your wallet, within your limits (up to 100 NFTs).'), findsNothing);
           await reveal(find.text('Custom'), up: true);
@@ -302,6 +304,8 @@ void main() {
         expect(approved?['quantity'], keepFree || paidMax ? 100 : 2);
         expect(approved?['price_cap_eth'], keepFree ? '0' : '0.00001');
         expect(approved?['free_only'], keepFree);
+        expect(approved?['paid_only'], !keepFree);
+        expect(approved?['include_presales'], true);
         expect(approved?['fee_cap_eth'], '0.0001');
         expect(tester.takeException(), isNull);
         await tester.pumpWidget(const SizedBox());

@@ -15,9 +15,10 @@ async def own_presale(db,req,user_id,web3):
     stage=await db.get(MintStage,req.stage_id)
     if not wallet or wallet.user_id!=user_id or wallet.archived_at or not drop or not stage or stage.drop_id!=drop.id:
         raise HTTPException(404,'Wallet or mint stage not found.')
-    status,tx=await OpenSeaClient().build_mint(collection_slug(drop.mint_page_url),wallet.address,req.quantity)
+    client=OpenSeaClient()
+    status,tx=await client.build_mint(collection_slug(drop.mint_page_url),wallet.address,req.quantity)
     if status!=200 or not tx:
-        raise HTTPException(409,'Wallet-specific whitelist instructions are not available yet. Try again when the project releases them.')
+        raise client.mint_error(status)
     if CHAINS.get(tx.get('chain'),(None,))[0]!=drop.chain_id:
         raise HTTPException(409,'Mint network could not be verified.')
     mint=decode_mint(tx,drop.contract_address,wallet.address,req.quantity)
@@ -27,6 +28,21 @@ async def own_presale(db,req,user_id,web3):
         raise HTTPException(409,'The project returned a different mint stage. Reopen the plan to review it.')
     await verify_presale(web3,mint,SimpleNamespace(starts_at=stage.start_time_utc,ends_at=stage.end_time_utc,
         price_wei=mint['params'][0],stage_type='presale'))
+    if req.plan_id:
+        plan=await db.get(MintPlan,req.plan_id)
+        if plan and plan.selected_stage:
+            from app.services.opensea import stage_schedule
+            from app.services.seadrop_mint import match_stage
+            from app.services.mint_stage_choice import pinned
+            from app.services.phase_identity import schedule_matches
+            detail=await client.get_drop(collection_slug(drop.mint_page_url))
+            selected=match_stage(mint,stage_schedule(detail))
+            approved=plan.selected_stage
+            if (not schedule_matches(selected,approved,pinned) or mint['params'][0]!=approved['price_wei']
+                    or (approved.get('wallet_total_limit') is not None and mint['params'][1]!=approved['wallet_total_limit'])):
+                raise OpenSeaUnavailable('The returned phase or wallet terms differ from your selection. Review the phase again.',409,mint_reason='terms_changed')
+    from app.services.opensea import remember_verified_mint
+    remember_verified_mint(collection_slug(drop.mint_page_url),wallet.address,req.quantity,tx,mint['params'][3])
     return mint
 
 
@@ -73,7 +89,7 @@ async def prepare(db,body,user_id):
         elif is_public and not force_presale and source_kind in (None,'public'):
             kind,price,index='public',stage.price_wei,None
         else:
-            candidate=SimpleNamespace(wallet_id=wallet.id,drop_id=drop.id,stage_id=stage.id,quantity=body.quantity,mint_kind=source_kind or 'auto')
+            candidate=SimpleNamespace(wallet_id=wallet.id,drop_id=drop.id,stage_id=stage.id,quantity=body.quantity,mint_kind=source_kind or 'auto',plan_id=body.plan_id)
             presale=await own_presale(db,candidate,user_id,web3)
             kind,price,index=presale['kind'],presale['params'][0],presale['params'][4]
         if price is None:

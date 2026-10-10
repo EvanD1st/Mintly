@@ -20,6 +20,8 @@ async def evaluate(web3,observation,snapshot,*,now=None):
     if kind not in r['mint_kinds']:
         return {'status':'would_skip','note':'Whitelist copying is off in these settings.'}
     await copy_mints.verify_source(web3,o)
+    if kind=='public' and not copy_mints.accepts_price(r,o['price_wei']):
+        return {'status':'would_skip','note':'Mint price does not match the selected free or paid mode.'}
     if kind == 'public':
         count=(await copy_mints.maximum_free_quantity(web3,o,r) if r['quantity_mode']=='max_free' else
             await copy_mints.maximum_available_quantity(web3,o,r) if r['quantity_mode']=='max_available' else r['quantity'])
@@ -30,7 +32,9 @@ async def evaluate(web3,observation,snapshot,*,now=None):
     else:
         mint,_=await copy_mints.prepare_presale_copy(web3,o,r)
         count,price,execution=mint['quantity'],mint['params'][0],mint['execution']
-    if price > r['price_cap_wei'] or (r['free_only'] and price != 0):
+    if not copy_mints.accepts_price(r,price):
+        return {'status':'would_skip','note':'Your eligible mint price does not match the selected free or paid mode.'}
+    if price > r['price_cap_wei']:
         return {'status':'would_skip','note':'Mint price exceeds these limits.'}
     tx={'from':r['account'],'to':execution['target'],'data':execution['data'],'value':int(execution['value'])}
     gas,gas_price=await quote_gas(web3,tx,o['chain_id'])

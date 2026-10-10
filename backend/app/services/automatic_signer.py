@@ -15,7 +15,7 @@ from eth_utils import to_checksum_address
 from app.api.deps import get_db
 from app.config import settings
 from app.models import MintTask, MintAuthorization, AutomaticGrant, AutomaticNonce, Wallet, User, CopyRule, CopyWatch, CopyCheck
-from app.services import automatic
+from app.services import automatic, mint_instruction_cache
 from app.services.custody import CustodyVault, private_read
 from app.services.custody_accounts import verify_account
 from app.services.automatic_fees import quote_gas, maximum_fee, receipt_cost
@@ -84,8 +84,9 @@ async def preflight_task(db, task_id, vault=None):
             balance = await web3.eth.get_balance(to_checksum_address(s['account']), 'pending')
             if balance < s['total_cap_wei']:
                 note = 'Balance is below the approved maximum. Add ETH before mint time.'
-        except OpenSeaUnavailable:
-            note = 'Checking whitelist access. Another check will run at mint time.'
+        except OpenSeaUnavailable as error:
+            from app.services.mint_diagnostics import PREPARATION_REASONS
+            note = PREPARATION_REASONS.get(error.mint_reason,'Wallet-specific instructions are not ready. Another check will run at mint time.')
         except Exception:
             note = 'Advance checks unavailable. Mint-time checks are still required.'
     finally:
@@ -107,6 +108,10 @@ async def preflight_task(db, task_id, vault=None):
         _preflights.pop(next(iter(_preflights)))
     if execution is not None:
         _preflights[task.id] = (checked, intent, execution)
+        cache_journal=vault.journal()
+        try:
+            mint_instruction_cache.put(cache_journal,task.id,intent,execution,s['expiry']);cache_journal.commit()
+        finally:cache_journal.close()
     task.preflight_checked_at, task.preflight_note = datetime.now(timezone.utc), note
     await db.commit()
     return {'status':'checked', 'note':note}
@@ -114,12 +119,15 @@ async def preflight_task(db, task_id, vault=None):
 
 @app.post('/tasks/{task_id}/preflight')
 async def advance_checks(task_id: str, authorization: str | None = Header(default=None), db=Depends(get_db)):
-    authenticate(authorization)
-    try:
-        return await preflight_task(db, task_id)
-    except Exception:
-        await db.rollback()
-        raise HTTPException(503, 'Advance checks unavailable; no transaction was signed.') from None
+    from app.services import mint_diagnostics
+    with mint_diagnostics.capture(task_id,'preflight') as events:
+        authenticate(authorization)
+        try:
+            result=await preflight_task(db, task_id)
+            return {**result,'_diagnostics':events}
+        except Exception:
+            await db.rollback()
+            raise HTTPException(503, 'Advance checks unavailable; no transaction was signed.',headers=mint_diagnostics.headers(events)) from None
 
 
 def authenticate(authorization: str | None = Header(default=None)):
@@ -159,7 +167,7 @@ async def prepare_task(db, task_id, vault=None):
     if task.status not in ('armed', 'preparing'):
         raise ValueError('Task is cancelled or already terminal')
     auth = await db.get(MintAuthorization, task.authorization_id)
-    s = auth.snapshot
+    s = copy.deepcopy(auth.snapshot)
     grant = await automatic.grant_for(db, auth.grant_id, s['user_id'])
     wallet = await db.get(Wallet, task.wallet_id)
     user = await db.get(User, grant.user_id)
@@ -240,7 +248,7 @@ async def prepare_task(db, task_id, vault=None):
                         or not quantity_matches or s['expiry'] > r['expiry']
                         or s['price_cap_wei'] != r['price_cap_wei'] or s['fee_cap_wei'] != r['fee_cap_wei']
                         or (s['total_cap_wei'] != r['total_cap_wei'] if mode!='max_available' else not 0<s['total_cap_wei']<=r['total_cap_wei'])
-                        or (r['free_only'] and s['price_wei'] != 0)):
+                        or not copy_mints.accepts_price(r,s['price_wei'])):
                     raise ValueError('Copy mint differs from the independently approved limits')
             duplicate = journal.execute('SELECT task FROM copy_signed WHERE stage=?', (copy_key,)).fetchone()
             if duplicate and duplicate['task'] != task.id:
@@ -290,14 +298,27 @@ async def prepare_task(db, task_id, vault=None):
             if copy_key:
                 await copy_mints.no_mixed_stage_copy(db, s, task_id=task.id)
                 verify_collection_copy_journal(journal, s, task.id)
-            execution = s.get('execution')
+            execution = None
             cached = _preflights.pop(task.id, None)
-            if not execution and cached and cached[1] == intent and time.monotonic() - cached[0] <= 90:
+            if cached and cached[1] == intent and time.monotonic() - cached[0] <= 90:
                 execution = cached[2]
+            if not execution:
+                execution=mint_instruction_cache.get(journal,task.id,intent)
+            if not execution:
+                execution=s.get('execution')
             if execution:
-                await automatic.validate_mint(web3, s, {'to': execution['target'], 'value': execution['value'], 'data': execution['data']})
+                try:
+                    await automatic.validate_mint(web3, s, {'to': execution['target'], 'value': execution['value'], 'data': execution['data']})
+                except OpenSeaUnavailable as error:
+                    if error.mint_reason!='invalid_proof' or task.copy_rule_id:raise
+                    # Only unsigned tasks reach this branch. Renew the proof once,
+                    # preserving the exact pinned approval and all independent checks.
+                    from app.services.opensea import forget_verified_mint,collection_slug
+                    forget_verified_mint(collection_slug(s['mint_page_url']),s['account'],s['quantity'])
+                    execution=await automatic.prepare_mint(web3,s)
             else:
                 execution = await automatic.prepare_mint(web3, s)
+            mint_instruction_cache.put(journal,task.id,intent,execution,s['expiry'])
             pending = await web3.eth.get_transaction_count(address, 'pending')
             stored = (await db.execute(select(func.max(AutomaticNonce.nonce)).where(
                 AutomaticNonce.address == address.lower(), AutomaticNonce.chain_id == s['chain_id']))).scalar()
@@ -362,26 +383,34 @@ async def prepare_task(db, task_id, vault=None):
 
 @app.post('/tasks/{task_id}/prepare', dependencies=[Depends(authenticate)])
 async def prepare(task_id: str, db=Depends(get_db)):
-    try:
-        return await prepare_task(db, task_id)
-    except OpenSeaUnavailable as error:
-        await db.rollback()
-        raise HTTPException(409 if error.status in (400,409,422) else 503,
-            'SeaDrop proof or exact-stage validation failed.' if error.status in (400,409,422) else 'Presale provider temporarily unavailable.') from None
-    except (ValueError, HTTPException) as error:
-        await db.rollback()
-        if isinstance(error,HTTPException) and (error.status_code == 429 or error.status_code >= 500):
-            raise error
-        actionable = {'Insufficient funds for mint value and gas', 'Estimated gas or total debit exceeds task authorization',
-                      'Task or signer policy expired', 'Public stage changed on chain',
-                      'Independent signer budget exhausted or reserved by uncertain submissions',
-                      'Independent shared copy budget exhausted or reserved',
-                      'Whitelist copy already signed. Public mint skipped.', 'Public copy already signed. Whitelist mint skipped.'}
-        detail = str(error) if str(error) in actionable else 'Independent signer rejected task policy, identity, budget or chain readiness.'
-        raise HTTPException(409, detail) from None
-    except Exception:
-        await db.rollback()
-        raise HTTPException(503, 'Signer or RPC temporarily unavailable; no fresh-nonce retry is permitted.') from None
+    from app.services import mint_diagnostics
+    with mint_diagnostics.capture(task_id,'preparation') as events:
+        try:
+            result=await prepare_task(db, task_id)
+            return {**result,'_diagnostics':events}
+        except OpenSeaUnavailable as error:
+            await db.rollback()
+            retry_headers=mint_diagnostics.headers(events)
+            if error.retry_after_seconds is not None:
+                retry_headers['Retry-After']=str(max(1,min(86400,error.retry_after_seconds)))
+            if error.mint_reason:retry_headers['X-Mintly-Reason']=error.mint_reason
+            if error.upstream_status:retry_headers['X-Mintly-Upstream-Status']=str(error.upstream_status)
+            raise HTTPException(409 if error.status in (400,409,422) else 503,str(error),headers=retry_headers) from None
+        except (ValueError, HTTPException) as error:
+            await db.rollback()
+            if isinstance(error,HTTPException) and (error.status_code == 429 or error.status_code >= 500):
+                error.headers={**(error.headers or {}),**mint_diagnostics.headers(events)}
+                raise error
+            actionable = {'Insufficient funds for mint value and gas', 'Estimated gas or total debit exceeds task authorization',
+                          'Task or signer policy expired', 'Public stage changed on chain',
+                          'Independent signer budget exhausted or reserved by uncertain submissions',
+                          'Independent shared copy budget exhausted or reserved',
+                          'Whitelist copy already signed. Public mint skipped.', 'Public copy already signed. Whitelist mint skipped.'}
+            detail = str(error) if str(error) in actionable else 'Independent signer rejected task policy, identity, budget or chain readiness.'
+            raise HTTPException(409, detail,headers=mint_diagnostics.headers(events)) from None
+        except Exception:
+            await db.rollback()
+            raise HTTPException(503, 'Signer or RPC temporarily unavailable; no fresh-nonce retry is permitted.',headers=mint_diagnostics.headers(events)) from None
 
 
 @app.post('/account-limits/{user_id}/register',dependencies=[Depends(authenticate)])
