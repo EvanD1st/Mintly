@@ -1,6 +1,7 @@
 """Personal OpenSea plans must never become unattended mint authorizations."""
 
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -12,6 +13,7 @@ from app.main import app
 from app.models import MintPlan, User, Wallet
 from app.services.opensea import CHAINS, OpenSeaClient, OpenSeaUnavailable, chain_rpc, collection_slug, stage_schedule, transaction_value_wei
 from app.services.signer.base import SEADROP_V1_ADDRESS
+from app.services.mint_plans import verified_stage_schedule
 
 @pytest.fixture(autouse=True)
 def mock_display_quote(monkeypatch):
@@ -40,6 +42,41 @@ def test_stage_schedule_is_sorted_and_uses_native_price():
                 "price_currency_address": "0x" + "0" * 40}
     sorted_stages = stage_schedule({"stages": [stage(2, 60), stage(1, 10)]})
     assert [s["uuid"] for s in sorted_stages] == ["1", "2"]
+
+
+@pytest.mark.asyncio
+async def test_public_plan_review_uses_current_seadrop_terms(monkeypatch):
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    public = {"uuid": "public", "stage_type": "public_sale", "label": "Public",
+              "start_time": (now - timedelta(hours=2)).isoformat(),
+              "end_time": (now + timedelta(days=1)).isoformat(),
+              "price": "0", "max_per_wallet": "5",
+              "price_currency_address": "0x" + "0" * 40}
+    presale = dict(public, uuid="team", stage_type="signed_presale", label="Team")
+    detail = {"stages": [public, presale]}
+    web3 = SimpleNamespace(provider=SimpleNamespace(disconnect=AsyncMock()))
+    lookup = AsyncMock(return_value=web3)
+    chain_terms = AsyncMock(return_value={
+        'start': int((now - timedelta(hours=1)).timestamp()),
+        'end': int((now + timedelta(days=2)).timestamp()),
+        'price_wei': 10**15, 'limit': 3})
+    monkeypatch.setattr('app.services.automatic.provider_for', lookup)
+    monkeypatch.setattr('app.services.copy_mints.public_stage', chain_terms)
+
+    stages = await verified_stage_schedule(detail, 4663, '0x' + '2' * 40)
+    actual = next(stage for stage in stages if stage['uuid'] == 'public')
+    assert actual['starts_at'] == now - timedelta(hours=1)
+    assert actual['ends_at'] == now + timedelta(days=2)
+    assert actual['price_wei'] == 10**15
+    assert actual['max_per_wallet'] == 3
+    assert next(stage for stage in stages if stage['uuid'] == 'team')['starts_at'] == now - timedelta(hours=2)
+    lookup.assert_awaited_once_with(4663)
+    chain_terms.assert_awaited_once_with(web3, '0x' + '2' * 40)
+    web3.provider.disconnect.assert_awaited_once()
+
+    chain_terms.side_effect = ValueError('No bounded public stage')
+    with pytest.raises(OpenSeaUnavailable, match='could not be verified on chain'):
+        await verified_stage_schedule(detail, 4663, '0x' + '2' * 40)
 
 
 @pytest.mark.asyncio

@@ -13,8 +13,7 @@ from app.models import MintPlan, MintPlanRecord, MintPermission, MintTask, Drop,
 from fastapi.encoders import jsonable_encoder
 from app.schemas.drop import DropSchema
 from app.services import automatic
-from app.services.opensea import stage_schedule
-from app.services.mint_plans import aware, refresh_mint_plan
+from app.services.mint_plans import aware, refresh_mint_plan, verified_stage_schedule
 from app.services.opensea import CHAINS, OpenSeaClient, OpenSeaUnavailable, collection_slug
 
 router = APIRouter(prefix="/mint-plans", tags=["mint-plans"])
@@ -181,12 +180,17 @@ async def automatic_context(plan_id: str, user: User = Depends(get_current_user)
         transaction = {}
         await refresh_mint_plan(plan, wallet, client, detail=detail, transaction_out=transaction, db=db)
         from app.services.phase_identity import stage_key,schedule_matches
-        selected = next((s for s in stage_schedule(detail) if stage_key(s['uuid']) == stage_key(plan.stage_uuid)), None)
+        schedule = await verified_stage_schedule(detail, plan.chain_id, plan.contract_address)
+        selected = next((s for s in schedule if stage_key(s['uuid']) == stage_key(plan.stage_uuid)), None)
+        if (not plan.selected_stage and selected and selected['type'] == 'public_sale'
+                and (aware(plan.starts_at), aware(plan.ends_at), plan.price_wei)
+                != (selected['starts_at'], selected['ends_at'], selected['price_wei'])):
+            raise HTTPException(409, 'Public mint terms changed on chain. Choose the mint phase again before reviewing it.')
         if plan.selected_stage:
             from app.services.mint_stage_choice import pinned
             if not selected or not schedule_matches(selected,plan.selected_stage,pinned):
                 raise HTTPException(409,'Your selected phase changed. Review its details again.')
-            overlaps=[s for s in stage_schedule(detail) if s['type']!='public_sale' and selected['type']!='public_sale'
+            overlaps=[s for s in schedule if s['type']!='public_sale' and selected['type']!='public_sale'
                 and (s['starts_at'],s['ends_at'])==(selected['starts_at'],selected['ends_at'])]
             if len(overlaps)>1:
                 raise HTTPException(409,'The project has overlapping whitelist phases whose exact mint instructions cannot be distinguished. Automatic minting is unavailable for this selection.')

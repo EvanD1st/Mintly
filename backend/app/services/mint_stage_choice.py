@@ -4,8 +4,8 @@ from fastapi import HTTPException
 from sqlalchemy import select,or_
 from app.models import Wallet,OpenSeaAccess,MintTask,MintPermission
 from app.services import automatic
-from app.services.mint_plans import aware
-from app.services.opensea import OpenSeaClient,stage_schedule
+from app.services.mint_plans import aware,verified_stage_schedule
+from app.services.opensea import OpenSeaClient,OpenSeaUnavailable,stage_schedule
 from app.services.phase_identity import stage_key,schedule_matches
 
 
@@ -22,7 +22,13 @@ async def stages(db,plan,user_id):
     from app.services.opensea import CHAINS
     if CHAINS[detail['chain']][0]!=plan.chain_id or detail['contract_address'].lower()!=plan.contract_address.lower():
         raise HTTPException(409,'The collection network or contract changed.')
-    schedule=stage_schedule(detail)
+    public_verified=True
+    try:
+        schedule=await verified_stage_schedule(detail,plan.chain_id,plan.contract_address)
+    except OpenSeaUnavailable as error:
+        if error.status != 503:raise
+        schedule=stage_schedule(detail)
+        public_verified=False
     consent=await db.get(OpenSeaAccess,wallet.id)
     access=bool(consent and consent.user_id==user_id and consent.enabled and aware(consent.expires_at)>datetime.now(timezone.utc))
     lookup={};note=None
@@ -40,7 +46,7 @@ async def stages(db,plan,user_id):
         except Exception:
             note='Eligibility could not be verified now. Public stage details are still available.'
     else:note='Enable read-only OpenSea access to check your whitelist stages.'
-    minted=supply=maximum=None;public=None
+    minted=supply=maximum=None
     try:
         from eth_abi import encode,decode
         from eth_utils import keccak,to_checksum_address
@@ -51,12 +57,6 @@ async def stages(db,plan,user_id):
                     'data':keccak(text='getMintStats(address)')[:4]+encode(['address'],[to_checksum_address(wallet.address)])}))
             except Exception:
                 if note is None:note='Eligibility found; remaining allowance could not be checked on-chain. It will be checked before signing.'
-            # Public metadata is independent; neither read discards the other's result.
-            try:
-                from app.services.copy_mints import public_stage
-                public=await public_stage(web3,to_checksum_address(plan.contract_address))
-            except Exception:
-                pass
         finally:await web3.provider.disconnect()
     except Exception:
         if note is None:note='Eligibility found; remaining allowance could not be checked on-chain. It will be checked before signing.'
@@ -64,23 +64,26 @@ async def stages(db,plan,user_id):
     now=datetime.now(timezone.utc)
     for stage in schedule:
         own=lookup.get(stage_key(stage['uuid']),{})
-        eligible=own.get('eligible') if own.get('eligible') is not None else True if stage['type']=='public_sale' else None
+        eligible=(True if public_verified else None) if stage['type']=='public_sale' else own.get('eligible')
         remaining=own.get('remaining')
         total=own.get('max_total_mintable_by_wallet')
-        if stage['type']=='public_sale' and public and (public['start'],public['end'],public['price_wei'])==(
-            int(stage['starts_at'].timestamp()),int(stage['ends_at'].timestamp()),stage['price_wei']):
-            total=min(total,public['limit']) if total is not None else public['limit']
+        if stage['type']=='public_sale' and public_verified:
+            total=min(total,stage['max_per_wallet']) if total is not None else stage['max_per_wallet']
         if total is not None and minted is not None:
             remaining=max(0,total-minted)
             if supply is not None:remaining=min(remaining,max(0,maximum-supply))
+        price=(stage['price_wei'] if stage['type']=='public_sale' else
+               own.get('price_wei') if own.get('price_wei') is not None else stage['price_wei'])
         # A published stage default is not the wallet's accumulated remaining allowance.
         result.append({'id':stage['uuid'],'name':stage['name'],'type':stage['type'],
             'eligibility':'eligible' if eligible is True else 'not_eligible' if eligible is False else 'unverified',
             'remaining':remaining,'wallet_total_limit':total,'default_limit':stage['max_per_wallet'],
-            'price_wei':str(own.get('price_wei') if own.get('price_wei') is not None else stage['price_wei']) if own.get('price_wei') is not None or stage['price_wei'] is not None else None,
+            'price_wei':str(price) if price is not None else None,
             'starts_at':stage['starts_at'].isoformat(),'ends_at':stage['ends_at'].isoformat(),
             'timing':'ended' if stage['ends_at']<=now else 'upcoming' if stage['starts_at']>now else 'open',
             'selected':bool(plan.selected_stage and stage_key(plan.selected_stage['uuid'])==stage_key(stage['uuid']))})
+    if not public_verified and note is None:
+        note='Public mint terms could not be verified on chain. Try again before selecting the public phase.'
     return {'wallet_id':wallet.id,'address':wallet.address,'stages':result,'access_enabled':access,'note':note},schedule
 
 
@@ -97,6 +100,8 @@ async def select_stage(db,plan,body,user_id):
     stage=next((stage for stage in schedule if stage_key(stage['uuid'])==stage_key(body.stage_uuid)),None)
     item=next((stage for stage in result['stages'] if stage_key(stage['id'])==stage_key(body.stage_uuid)),None)
     if not stage or item['timing']=='ended':raise HTTPException(409,'This phase has ended or is no longer available.')
+    if item['type']=='public_sale' and item['eligibility']!='eligible':
+        raise HTTPException(409,'Current public mint terms could not be verified on chain. Try again before selecting this phase.')
     if item['eligibility']=='not_eligible':raise HTTPException(409,'This wallet is not eligible for that phase.')
     if item['remaining'] is not None and body.quantity>item['remaining']:
         raise HTTPException(409,'Quantity exceeds this wallet’s verified remaining allowance.')

@@ -65,6 +65,10 @@ async def test_explicit_public_phase_never_switches_to_an_eligible_presale(monke
     fake=SimpleNamespace(build_mint=AsyncMock(return_value=(200,tx)))
     monkeypatch.setattr('app.services.mint_plans.eth_usdt_quote',AsyncMock(return_value=None))
     outgoing={}
+    monkeypatch.setattr('app.services.automatic.provider_for',AsyncMock(return_value=SimpleNamespace(provider=SimpleNamespace(disconnect=AsyncMock()))))
+    monkeypatch.setattr('app.services.copy_mints.public_stage',AsyncMock(return_value={
+        'start':int(start.timestamp()),'end':int((end+timedelta(hours=1)).timestamp()),
+        'price_wei':20,'limit':2}))
     await refresh_mint_plan(plan,wallet,fake,now=now,detail=details,transaction_out=outgoing)
     assert plan.stage_uuid=='public' and plan.stage_type=='public_sale'
     assert plan.status=='not_ready' and outgoing=={}

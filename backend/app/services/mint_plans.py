@@ -15,6 +15,39 @@ def aware(value: datetime | None) -> datetime | None:
     return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
 
 
+async def verified_stage_schedule(detail: dict, chain_id: int, contract: str) -> list[dict]:
+    """Use SeaDrop's current public terms for personal-plan review.
+
+    OpenSea can retain an earlier public schedule after the collection owner
+    changes it. The signer checks SeaDrop, so review must show the same terms.
+    Whitelist stages continue to use their distinct OpenSea instructions.
+    """
+    schedule = stage_schedule(detail)
+    public_rows = [stage for stage in schedule if stage['type'] == 'public_sale']
+    if not public_rows:
+        return schedule
+    if len(public_rows) != 1:
+        raise OpenSeaUnavailable('Multiple public phases cannot be matched to SeaDrop safely.', 409)
+    from app.services import automatic
+    from app.services.copy_mints import public_stage
+
+    web3 = None
+    try:
+        web3 = await automatic.provider_for(chain_id)
+        current = await public_stage(web3, contract)
+    except Exception as error:
+        raise OpenSeaUnavailable('Current public mint terms could not be verified on chain.', 503) from error
+    finally:
+        if web3 is not None:
+            await web3.provider.disconnect()
+    public = public_rows[0]
+    verified = dict(public, starts_at=datetime.fromtimestamp(current['start'], timezone.utc),
+                    ends_at=datetime.fromtimestamp(current['end'], timezone.utc),
+                    price_wei=current['price_wei'], max_per_wallet=current['limit'])
+    return sorted((verified if stage is public else stage for stage in schedule),
+                  key=lambda stage: stage['starts_at'])
+
+
 async def refresh_mint_plan(plan: MintPlan, wallet: Wallet, client: OpenSeaClient | None = None,
                             now: datetime | None = None, detail: dict | None = None,
                             transaction_out: dict | None = None, db=None) -> MintPlan:
@@ -31,7 +64,9 @@ async def refresh_mint_plan(plan: MintPlan, wallet: Wallet, client: OpenSeaClien
         if (stage_key(plan.stage_uuid), aware(plan.starts_at), aware(plan.ends_at), plan.price_wei) != (
                 stage_key(previous_stage[0]), aware(previous_stage[1]), aware(previous_stage[2]), previous_stage[3]):
             plan.automatic_drop_id, plan.automatic_stage_id = None, None
-    stages = stage_schedule(detail)
+    stages = (await verified_stage_schedule(detail, plan.chain_id, plan.contract_address)
+              if getattr(plan, 'selected_stage', None) and plan.selected_stage.get('type') == 'public_sale'
+              else stage_schedule(detail))
     active = [stage for stage in stages if stage["starts_at"] <= now < stage["ends_at"]]
     future = [stage for stage in stages if stage["starts_at"] > now]
     selected = active[0] if active else future[0] if future else None
