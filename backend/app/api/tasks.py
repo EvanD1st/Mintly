@@ -38,11 +38,13 @@ async def guided_preview(req:GuidedRequest,user=Depends(get_current_user),db=Dep
     from app.services.guided_mint import prepare
     try:
         return await prepare(db,req,user.id)
-    except (ValueError,OpenSeaUnavailable):
+    except OpenSeaUnavailable as error:
+        raise HTTPException(error.status,str(error),headers={'Retry-After':str(error.retry_after_seconds)} if error.retry_after_seconds else None) from None
+    except ValueError:
         raise HTTPException(409,'The mint instructions or wallet eligibility could not be verified. No transaction was signed.') from None
 
 
-async def resolved_snapshot(db,req,user_id):
+async def resolved_snapshot(db,req,user_id,*,prepared=None):
     presale=None
     if req.guided and req.mint_kind!='public' and req.conditional_eligibility and req.onchain_stage_index is None:
         # make_snapshot independently revalidates the selected phase and allowance.
@@ -53,6 +55,7 @@ async def resolved_snapshot(db,req,user_id):
         try:
             from app.services.guided_mint import own_presale
             presale=await own_presale(db,req,user_id,web3)
+            if prepared is not None:prepared.update(presale['execution'])
         finally:
             await web3.provider.disconnect()
     return await automatic.make_snapshot(db,req,user_id,presale_mint=presale)
@@ -60,14 +63,15 @@ async def resolved_snapshot(db,req,user_id):
 
 @router.post("/draft")
 async def draft_task_preview(req: DraftTaskRequest, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    grant, snapshot = await resolved_snapshot(db,req,user.id)
+    prepared={}
+    grant, snapshot = await resolved_snapshot(db,req,user.id,prepared=prepared)
     await automatic.signer_ready(grant.id)
     web3 = await automatic.provider_for(grant.chain_id)
     try:
         if req.copy_event_id:
             from app.services.copy_mints import verify_source
             await verify_source(web3, snapshot['copy_source'])
-        execution = None if snapshot.get('selected_phase') else await automatic.prepare_mint(web3, snapshot)
+        execution = None if snapshot.get('selected_phase') else prepared or await automatic.prepare_mint(web3, snapshot)
         eligibility = 'verified_waiting_for_instructions' if snapshot.get('selected_phase') else 'verified'
     except Exception as error:
         if (snapshot['mint_kind'] == 'public' or not req.conditional_eligibility
@@ -100,7 +104,8 @@ async def arm_mint_task(req: ArmTaskRequest, user: User = Depends(get_current_us
             MintTask.status.not_in(automatic.TERMINAL)).limit(1))
         if pending:
             raise HTTPException(409, 'This plan already has an active automatic mint. Check its task before arming another.')
-    grant, snapshot = await resolved_snapshot(db,req,user.id)
+    prepared={}
+    grant, snapshot = await resolved_snapshot(db,req,user.id,prepared=prepared)
     copy_key = None
     if req.copy_event_id:
         from app.services.copy_mints import no_duplicate
@@ -111,7 +116,7 @@ async def arm_mint_task(req: ArmTaskRequest, user: User = Depends(get_current_us
         if req.copy_event_id:
             from app.services.copy_mints import verify_source
             await verify_source(web3, snapshot['copy_source'])
-        execution = None if snapshot.get('selected_phase') else await automatic.prepare_mint(web3, snapshot)
+        execution = None if snapshot.get('selected_phase') else prepared or await automatic.prepare_mint(web3, snapshot)
     except Exception as error:
         if (snapshot['mint_kind'] == 'public' or not req.conditional_eligibility
                 or not isinstance(error, OpenSeaUnavailable) or error.status not in (429, 503)):

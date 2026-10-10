@@ -1,18 +1,12 @@
 """Explicit stage discovery/selection does not authorize a mint."""
 from datetime import datetime,timezone
-from uuid import UUID
 from fastapi import HTTPException
 from sqlalchemy import select,or_
 from app.models import Wallet,OpenSeaAccess,MintTask,MintPermission
 from app.services import automatic
 from app.services.mint_plans import aware
 from app.services.opensea import OpenSeaClient,stage_schedule
-
-
-def stage_key(value):
-    # OpenSea uses compact UUIDs in schedules and hyphenated UUIDs in eligibility.
-    try:return UUID(value).hex
-    except (ValueError,TypeError,AttributeError):return value
+from app.services.phase_identity import stage_key,schedule_matches
 
 
 def pinned(stage):
@@ -83,10 +77,10 @@ async def stages(db,plan,user_id):
         result.append({'id':stage['uuid'],'name':stage['name'],'type':stage['type'],
             'eligibility':'eligible' if eligible is True else 'not_eligible' if eligible is False else 'unverified',
             'remaining':remaining,'wallet_total_limit':total,'default_limit':stage['max_per_wallet'],
-            'price_wei':str(own.get('price_wei') if own.get('price_wei') is not None else stage['price_wei']) if stage['price_wei'] is not None else None,
+            'price_wei':str(own.get('price_wei') if own.get('price_wei') is not None else stage['price_wei']) if own.get('price_wei') is not None or stage['price_wei'] is not None else None,
             'starts_at':stage['starts_at'].isoformat(),'ends_at':stage['ends_at'].isoformat(),
             'timing':'ended' if stage['ends_at']<=now else 'upcoming' if stage['starts_at']>now else 'open',
-            'selected':bool(plan.selected_stage and plan.selected_stage['uuid']==stage['uuid'])})
+            'selected':bool(plan.selected_stage and stage_key(plan.selected_stage['uuid'])==stage_key(stage['uuid']))})
     return {'wallet_id':wallet.id,'address':wallet.address,'stages':result,'access_enabled':access,'note':note},schedule
 
 
@@ -100,8 +94,8 @@ async def select_stage(db,plan,body,user_id):
     if pending or legacy:raise HTTPException(409,'This plan already has a mint in progress. Manage that mint before changing its phase.')
     await db.commit()  # Discovery does not hold the execution lock through HTTP.
     result,schedule=await stages(db,plan,user_id)
-    stage=next((stage for stage in schedule if stage['uuid']==body.stage_uuid),None)
-    item=next((stage for stage in result['stages'] if stage['id']==body.stage_uuid),None)
+    stage=next((stage for stage in schedule if stage_key(stage['uuid'])==stage_key(body.stage_uuid)),None)
+    item=next((stage for stage in result['stages'] if stage_key(stage['id'])==stage_key(body.stage_uuid)),None)
     if not stage or item['timing']=='ended':raise HTTPException(409,'This phase has ended or is no longer available.')
     if item['eligibility']=='not_eligible':raise HTTPException(409,'This wallet is not eligible for that phase.')
     if item['remaining'] is not None and body.quantity>item['remaining']:
@@ -114,9 +108,12 @@ async def select_stage(db,plan,body,user_id):
     legacy=await db.scalar(select(MintPermission.id).where(MintPermission.plan_id==plan.id,
         MintPermission.status.in_(('awaiting_signature','armed','prepared','submitted','uncertain'))).limit(1))
     if pending or legacy:raise HTTPException(409,'The plan was armed while checking its phases.')
-    plan.selected_stage=pinned(stage);plan.quantity=body.quantity
+    choice=pinned(stage)
+    if item['eligibility']=='eligible' and item['price_wei'] is not None:
+        choice.update(schedule_price_wei=stage['price_wei'],price_wei=int(item['price_wei']),wallet_total_limit=item['wallet_total_limit'])
+    plan.selected_stage=choice;plan.quantity=body.quantity
     plan.stage_uuid=stage['uuid'];plan.stage_name=stage['name'];plan.stage_type=stage['type']
-    plan.starts_at=stage['starts_at'];plan.ends_at=stage['ends_at'];plan.price_wei=stage['price_wei']
+    plan.starts_at=stage['starts_at'];plan.ends_at=stage['ends_at'];plan.price_wei=choice['price_wei']
     plan.automatic_drop_id=plan.automatic_stage_id=None
     plan.mint_value_wei=plan.estimated_network_fee_wei=None
     plan.next_check_at=max(stage['starts_at'],datetime.now(timezone.utc))
@@ -138,21 +135,21 @@ async def deferred_presale(db,req,user_id):
             or plan.chain_id!=drop.chain_id or plan.contract_address.lower()!=drop.contract_address.lower()):
         raise HTTPException(409,'Select and verify your wallet’s upcoming whitelist phase before approving it.')
     result,schedule=await stages(db,plan,user_id)
-    selected=next((row for row in schedule if row['uuid']==plan.selected_stage['uuid']),None)
-    item=next((row for row in result['stages'] if row['id']==plan.selected_stage['uuid']),None)
+    selected=next((row for row in schedule if stage_key(row['uuid'])==stage_key(plan.selected_stage['uuid'])),None)
+    item=next((row for row in result['stages'] if stage_key(row['id'])==stage_key(plan.selected_stage['uuid'])),None)
     kinds={'signed_presale':'signed','signed_sale':'signed','signed':'signed',
         'allowlist':'allowlist','allowlist_sale':'allowlist'}
-    if (not selected or pinned(selected)!=plan.selected_stage or not item
+    if (not selected or not schedule_matches(selected,plan.selected_stage,pinned) or not item
             or item['timing']!='upcoming' or item['eligibility']!='eligible'
             or item['remaining'] is None or req.quantity>item['remaining']
             or kinds.get(selected['type'])!=req.mint_kind
-            or selected['price_wei'] is None or item['price_wei']!=str(selected['price_wei'])
+            or plan.selected_stage['price_wei'] is None or item['price_wei']!=str(plan.selected_stage['price_wei'])
+            or ('wallet_total_limit' in plan.selected_stage and item['wallet_total_limit']!=plan.selected_stage['wallet_total_limit'])
             or (int(aware(stage.start_time_utc).timestamp()),int(aware(stage.end_time_utc).timestamp()),stage.price_wei)
                 !=(plan.selected_stage['starts_at'],plan.selected_stage['ends_at'],plan.selected_stage['price_wei'])):
         raise HTTPException(409,'This wallet’s selected phase, price or remaining quantity could not be verified. Review the phase again.')
-    matches=[row for row in schedule if row['type']!='public_sale'
-        and (row['starts_at'],row['ends_at'],row['price_wei'])==
-            (selected['starts_at'],selected['ends_at'],selected['price_wei'])]
+    matches=[row for row in schedule if kinds.get(row['type'])==req.mint_kind
+        and (row['starts_at'],row['ends_at'])==(selected['starts_at'],selected['ends_at'])]
     if len(matches)!=1:
         raise HTTPException(409,'Overlapping whitelist phases cannot be distinguished safely. No automatic mint was approved.')
     return dict(plan.selected_stage),item

@@ -68,6 +68,7 @@ async def test_member_import_checks_wallet_and_never_creates_mint_task(test_db, 
                    "data": "0x12345678", "value": str(10**15 * quantity)}
     fake = type("FakeOpenSea", (), {"get_drop": AsyncMock(return_value=detail),
                                     "build_mint": AsyncMock(return_value=(200, transaction))})()
+    fake.mint_error=OpenSeaClient().mint_error
     monkeypatch.setattr("app.api.mint_plans.OpenSeaClient", lambda: fake)
     monkeypatch.setattr("app.services.mint_plans.OpenSeaClient", lambda: fake)
     monkeypatch.setattr("app.services.mint_plans.estimate_network_fee", AsyncMock(return_value=10**13))

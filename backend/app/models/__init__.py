@@ -30,4 +30,4 @@ from app.models.opensea_access import OpenSeaAccess
 
 from app.models.mint_diagnostic import MintAttemptDiagnostic
 
-from app.models.opensea_gate import OpenSeaRequestGate
+from app.models.opensea_gate import OpenSeaRequestGate,OpenSeaRequestWaiter

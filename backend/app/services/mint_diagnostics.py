@@ -7,9 +7,18 @@ import json,logging,re,time
 
 _context=ContextVar('mint_http_diagnostics',default=None)
 log=logging.getLogger('uvicorn.error')
-FAILURES={'timeout','network_error','invalid_response','redirect','response_too_large','cooldown','paced','execution_priority'}
+FAILURES={'timeout','network_error','invalid_response','redirect','response_too_large','cooldown','paced','queued','execution_priority'}
 ENDPOINTS={'drop_mint','drop_schedule','key_creation','contract_lookup','other_opensea'}
 MINT_REASONS={
+    'stage_not_active':'The selected stage is not active yet; waiting for mint instructions.',
+    'instructions_unavailable':'Eligibility verified; wallet-specific instructions are not available yet.',
+    'invalid_proof':'The wallet proof or creator signature is invalid under the current contract rules.',
+    'rpc_unavailable':'Blockchain checks are temporarily unavailable. No transaction was signed.',
+    'api_key_unavailable':'The application OpenSea key is missing or expired; operator action is required.',
+    'api_access_denied':'OpenSea denied the application API access; check the key and endpoint permissions. Operator action is required.',
+    'upstream_rate_limited':'OpenSea is rate-limiting mint preparation; waiting for the shared cooldown.',
+    'wrong_phase':'OpenSea returned instructions for a different phase. No phase fallback is allowed.',
+    'terms_changed':'The approved mint terms changed. Review the phase again.',
     'wallet_not_allowlisted':'This wallet is not eligible for the active whitelist stage.',
     'insufficient_funds':'This wallet has insufficient native balance for mint price and gas.',
     'wallet_limit':'This mint exceeds the receiving wallet’s remaining allowance.',
@@ -30,6 +39,8 @@ def mint_rejection_reason(body):
         values=[v.get('message') if isinstance(v,dict) else v for v in values[:8]]
         parts.extend(v.lower() for v in values[:8] if isinstance(v,str) and len(v)<=2000)
     message=' '.join(parts)
+    if any(x in message for x in ('stage not active','stage is not active','stage is inactive','not yet active','has not started','not started yet','mint not active','no active stage')):return 'stage_not_active'
+    if any(x in message for x in ('invalid proof','invalid signature','proof is invalid','signature is invalid')):return 'invalid_proof'
     if any(x in message for x in ('insufficient funds','insufficient native balance','insufficient balance','cannot afford','cannot pay')):return 'insufficient_funds'
     if any(x in message for x in ('not on the allowlist','not on the active presale','not in the allowlist','not allowlisted','not eligible for the active','not eligible for this stage','not on this allowlist','not in allowlist')):return 'wallet_not_allowlisted'
     if any(x in message for x in ('supply exhausted','sold out','exceeds remaining supply','exceeds the remaining supply','over the remaining supply')):return 'supply_exhausted'
@@ -69,6 +80,20 @@ def capture(task_id,phase,*,event_id=None):
 def current_phase():
     context=_context.get()
     return context['phase'] if context else None
+
+
+def record_terms(snapshot,mint):
+    """Only validated scalar terms; never log calldata, proofs or signatures."""
+    context=_context.get()
+    if context is None:return
+    params=mint.get('params')
+    number=lambda v:v if type(v) is int and 0<=v<2**256 else None
+    fields={'task_id':context['task_id'],'phase':context['phase'],
+        'expected_start':number(snapshot.get('start')),'expected_end':number(snapshot.get('end')),
+        'expected_price':number(snapshot.get('price_wei')),'expected_index':number(snapshot.get('onchain_stage_index')),
+        'actual_start':number(params[2]) if params else None,'actual_end':number(params[3]) if params else None,
+        'actual_price':number(params[0]) if params else None,'actual_index':number(params[4]) if params else None}
+    log.info('mint_terms %s',json.dumps(fields,separators=(',',':')))
 
 
 def record_http(method,path,status,retry_after,started,failure=None,*,mint_reason=None):
@@ -122,7 +147,8 @@ def category(events,status,error=None):
     for row in reversed(events):
         code=row['http_status']
         if code==429:return 'upstream_rate_limited'
-        if code==409:return 'stage_not_active'
+        if row.get('mint_reason'):return row['mint_reason']
+        if code==409:return 'mint_instructions_unavailable'
         if code==422:return row.get('mint_reason','mint_instructions_unavailable')
         if code in (401,403):return 'upstream_access_denied'
         if code is not None and code>=500:return 'upstream_server_error'
@@ -145,5 +171,18 @@ async def save(db,task,phase,attempt,started,outcome,events=None,status=None,err
                 signer_http_status=status,error_category=category(events,status,error),upstream_events=events,
                 next_retry_at=task.next_attempt_at if task.status in ('armed','preparing') else None))
             await db.flush()
+            from app.models import MintAuthorization
+            auth=await db.get(MintAuthorization,task.authorization_id)
+            snapshot=auth.snapshot if auth else {}
+            selected=snapshot.get('selected_phase') or {}
+            number=lambda value:value if type(value) is int and 0<=value<2**256 else None
+            phase_id=selected.get('uuid')
+            log.info('mint_attempt %s',json.dumps({'task_id':task.id,'phase':phase,'attempt':attempt,
+                'phase_uuid':phase_id if isinstance(phase_id,str) and re.fullmatch(r'[a-fA-F0-9-]{32,36}',phase_id) else None,
+                'stage_index':number(snapshot.get('onchain_stage_index')),'stage_start':number(snapshot.get('start')),
+                'stage_end':number(snapshot.get('end')),'price_wei':number(snapshot.get('price_wei')),
+                'quantity':number(snapshot.get('quantity')),'outcome':outcome,
+                'retry_at':task.next_attempt_at.isoformat() if task.next_attempt_at else None,
+                'has_broadcast':bool(task.broadcast_attempts)},separators=(',',':')))
     except Exception:
         logging.getLogger('mintly.automatic').warning('Mint diagnostics persistence unavailable task_id=%s',task.id)

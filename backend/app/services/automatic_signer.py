@@ -84,8 +84,9 @@ async def preflight_task(db, task_id, vault=None):
             balance = await web3.eth.get_balance(to_checksum_address(s['account']), 'pending')
             if balance < s['total_cap_wei']:
                 note = 'Balance is below the approved maximum. Add ETH before mint time.'
-        except OpenSeaUnavailable:
-            note = 'Checking whitelist access. Another check will run at mint time.'
+        except OpenSeaUnavailable as error:
+            from app.services.mint_diagnostics import MINT_REASONS
+            note = MINT_REASONS.get(error.mint_reason,'Wallet-specific instructions are not ready. Another check will run at mint time.')
         except Exception:
             note = 'Advance checks unavailable. Mint-time checks are still required.'
     finally:
@@ -297,14 +298,24 @@ async def prepare_task(db, task_id, vault=None):
             if copy_key:
                 await copy_mints.no_mixed_stage_copy(db, s, task_id=task.id)
                 verify_collection_copy_journal(journal, s, task.id)
-            execution = s.get('execution')
+            execution = None
             cached = _preflights.pop(task.id, None)
-            if not execution and cached and cached[1] == intent and time.monotonic() - cached[0] <= 90:
+            if cached and cached[1] == intent and time.monotonic() - cached[0] <= 90:
                 execution = cached[2]
             if not execution:
                 execution=mint_instruction_cache.get(journal,task.id,intent)
+            if not execution:
+                execution=s.get('execution')
             if execution:
-                await automatic.validate_mint(web3, s, {'to': execution['target'], 'value': execution['value'], 'data': execution['data']})
+                try:
+                    await automatic.validate_mint(web3, s, {'to': execution['target'], 'value': execution['value'], 'data': execution['data']})
+                except OpenSeaUnavailable as error:
+                    if error.mint_reason!='invalid_proof':raise
+                    # Only unsigned tasks reach this branch. Renew the proof once,
+                    # preserving the exact pinned approval and all independent checks.
+                    from app.services.opensea import forget_verified_mint,collection_slug
+                    forget_verified_mint(collection_slug(s['mint_page_url']),s['account'],s['quantity'])
+                    execution=await automatic.prepare_mint(web3,s)
             else:
                 execution = await automatic.prepare_mint(web3, s)
             mint_instruction_cache.put(journal,task.id,intent,execution,s['expiry'])
@@ -382,8 +393,9 @@ async def prepare(task_id: str, db=Depends(get_db)):
             retry_headers=mint_diagnostics.headers(events)
             if error.retry_after_seconds is not None:
                 retry_headers['Retry-After']=str(max(1,min(86400,error.retry_after_seconds)))
-            raise HTTPException(409 if error.status in (400,409,422) else 503,
-                'SeaDrop proof or exact-stage validation failed.' if error.status in (400,409,422) else 'Presale provider temporarily unavailable.',headers=retry_headers) from None
+            if error.mint_reason:retry_headers['X-Mintly-Reason']=error.mint_reason
+            if error.upstream_status:retry_headers['X-Mintly-Upstream-Status']=str(error.upstream_status)
+            raise HTTPException(409 if error.status in (400,409,422) else 503,str(error),headers=retry_headers) from None
         except (ValueError, HTTPException) as error:
             await db.rollback()
             if isinstance(error,HTTPException) and (error.status_code == 429 or error.status_code >= 500):

@@ -37,8 +37,8 @@ COMPOSE=("${DOCKER[@]}" compose --env-file "$MINTLY_ENV_FILE" -f "$RELEASE_DIR/b
 export MINTLY_OPENSEA_DIR="$APP_DIR/shared/opensea"
 mkdir -p "$MINTLY_OPENSEA_DIR"
 if [[ -f "$APP_DIR/shared/custody.env" ]]; then
-    export MINTLY_OPENSEA_AUTO_RENEW=true
-    # Root API/worker rotate the key; isolated UID/GID 10001 services only read it.
+    export MINTLY_OPENSEA_AUTO_RENEW=false
+    # Provisioned key is operator-managed; isolated UID/GID 10001 services only read it.
     sudo -n chgrp 10001 "$MINTLY_OPENSEA_DIR"
     chmod 750 "$MINTLY_OPENSEA_DIR"
     if [[ -f "$MINTLY_OPENSEA_DIR/key.json" ]]; then

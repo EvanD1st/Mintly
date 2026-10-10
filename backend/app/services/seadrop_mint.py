@@ -61,15 +61,16 @@ def decode_mint(tx,contract,wallet,quantity):
 
 
 def match_stage(mint,stages):
+    from app.services.phase_identity import stage_kind
     if mint['kind']=='public':
-        candidates=[s for s in stages if s['type']=='public_sale']
+        candidates=[s for s in stages if stage_kind(s['type'])=='public']
     else:
         p=mint['params']
-        candidates=[s for s in stages if s['type']!='public_sale'
+        candidates=[s for s in stages if stage_kind(s['type'])==mint['kind']
                     and int(s['starts_at'].timestamp())==p[2] and int(s['ends_at'].timestamp())==p[3]
-                    and s['price_wei']==p[0]]
+                    and (s.get('onchain_stage_index') is None or s['onchain_stage_index']==p[4])]
     if len(candidates)!=1:
-        raise OpenSeaUnavailable('The exact eligible mint stage could not be identified. Refresh the drop.',409)
+        raise OpenSeaUnavailable('The returned phase cannot be identified uniquely by mint method, timing and stage index. Review the phase.',409,mint_reason='wrong_phase')
     return candidates[0]
 
 
@@ -108,8 +109,12 @@ async def verify_presale(web3,mint,stage=None):
         if int(mint['fee'],16)==0:raise ValueError()
         if p[7] and not (await read('getFeeRecipientIsAllowed(address,address)',['address','address'],[contract,mint['fee']],['bool']))[0]:raise ValueError()
         minted,total,max_supply=await read('getMintStats(address)',['address'],[wallet],['uint256']*3,to=contract)
-        if minted+mint['quantity']>p[1] or total+mint['quantity']>min(max_supply,p[5]):raise ValueError()
-        if int(mint['execution']['value']) and int((await read('getCreatorPayoutAddress(address)',['address'],[contract],['address']))[0],16)==0:raise ValueError()
+        if minted+mint['quantity']>p[1]:
+            raise OpenSeaUnavailable('The receiving wallet allowance is exhausted.',409,mint_reason='wallet_limit')
+        if total+mint['quantity']>min(max_supply,p[5]):
+            raise OpenSeaUnavailable('The collection or selected stage is sold out.',409,mint_reason='supply_exhausted')
+        if int(mint['execution']['value']) and int((await read('getCreatorPayoutAddress(address)',['address'],[contract],['address']))[0],16)==0:
+            raise OpenSeaUnavailable('The creator payout address is not configured.',409,mint_reason='creator_payout_missing')
         block=await web3.eth.get_block('latest')
         if p[2]<=block['timestamp']<=p[3]:
             # Also detects consumed signed-mint digests and live NFT/payout
@@ -119,8 +124,18 @@ async def verify_presale(web3,mint,stage=None):
                 'data':mint['execution']['data'],'value':int(mint['execution']['value'])}
             gas,_=await quote_gas(web3,tx,await web3.eth.chain_id)
             await web3.eth.call({**tx,'gas':gas},'pending')
+    except OpenSeaUnavailable:raise
     except Exception as error:
-        raise OpenSeaUnavailable('Wallet allowlist proof or presale signature, limits, supply or fee rules could not be verified on-chain.',409) from error
+        from web3.exceptions import ContractLogicError
+        # Transport/server failures must never become a permanent invalid-proof result.
+        # Unknown RPC failures remain bounded/retryable; signing still requires success.
+        if not isinstance(error,(ValueError,ContractLogicError)):
+            raise OpenSeaUnavailable('Blockchain checks are temporarily unavailable. No transaction was signed.',503,
+                mint_reason='rpc_unavailable') from None
+        from app.services.mint_diagnostics import mint_rejection_reason,MINT_REASONS
+        reason=mint_rejection_reason({'message':str(error)})
+        if reason=='precondition_unknown':reason='invalid_proof'
+        raise OpenSeaUnavailable(MINT_REASONS[reason],409,mint_reason=reason) from None
 
 
 async def verified_mint_execution(web3,tx,plan,wallet):

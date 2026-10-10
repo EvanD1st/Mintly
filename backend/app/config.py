@@ -33,10 +33,13 @@ class Settings(BaseSettings):
     OPENSEA_KEY_FILE: str = "./opensea-key.json"
     OPENSEA_KEY_READ_ONLY: bool = False
     OPENSEA_AUTO_RENEW_KEY: bool = False
+    OPENSEA_ALLOW_INSTANT_KEYS: bool = False
     OPENSEA_SHARED_KEY_GID: int | None = None
     OPENSEA_COORDINATE_REQUESTS: bool = False
     OPENSEA_GLOBAL_REQUEST_SECONDS: float = 6.0
     OPENSEA_MINT_REQUEST_SECONDS: float = 20.0
+    OPENSEA_QUEUE_WAIT_SECONDS: float = 4.0
+    OPENSEA_PREPARATION_MAX_ATTEMPTS: int = 40
 
     # RPC Configuration
     RPC_ETHEREUM: str = "https://ethereum-rpc.publicnode.com"

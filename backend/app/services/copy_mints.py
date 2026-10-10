@@ -633,7 +633,7 @@ async def process_copy_events(db,watch_id,chain):
                     event.note=('Waiting: OpenSea rejected a mint precondition; its specific reason is unknown. ' if error.mint_reason=='precondition_unknown' else
                         'OpenSea rate limit is delaying mint instructions. ' if category=='upstream_rate_limited' else
                         'Waiting for wallet-specific mint instructions. ')+ 'Retry at '+(event.next_attempt_at+timedelta(hours=1)).strftime('%H:%M:%S WAT')+'.'
-                    if error.mint_reason in mint_diagnostics.MINT_REASONS and error.mint_reason!='precondition_unknown':
+                    if error.mint_reason in ('wallet_not_allowlisted','insufficient_funds','wallet_limit','supply_exhausted','creator_payout_missing','invalid_proof'):
                         event.status='skipped';event.next_attempt_at=None
                         event.note=funding_note(chain,int(event.observation['price_wei'])>0) if error.mint_reason=='insufficient_funds' else mint_diagnostics.MINT_REASONS[error.mint_reason]
                     event.last_error_category=category

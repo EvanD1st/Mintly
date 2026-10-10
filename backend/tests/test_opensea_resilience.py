@@ -30,6 +30,7 @@ async def test_read_only_clients_reuse_persistent_key_after_client_restart(tmp_p
 
 @pytest.mark.parametrize('expired',[False,True])
 async def test_missing_or_expired_read_only_key_defers_without_creation(tmp_path,monkeypatch,expired):
+    monkeypatch.setattr(settings,'OPENSEA_ALLOW_INSTANT_KEYS',True)
     path=tmp_path/'key.json'
     if expired:stored_key(path,datetime.now(timezone.utc)-timedelta(seconds=1))
     monkeypatch.setattr(settings,'OPENSEA_KEY_FILE',str(path));monkeypatch.setattr(settings,'OPENSEA_KEY_READ_ONLY',True)
@@ -40,6 +41,7 @@ async def test_missing_or_expired_read_only_key_defers_without_creation(tmp_path
 
 
 async def test_concurrent_key_owners_rotate_once_and_preserve_permissions(tmp_path,monkeypatch):
+    monkeypatch.setattr(settings,'OPENSEA_ALLOW_INSTANT_KEYS',True)
     path=tmp_path/'key.json';calls=[]
     monkeypatch.setattr(settings,'OPENSEA_KEY_FILE',str(path));monkeypatch.setattr(settings,'OPENSEA_KEY_READ_ONLY',False)
     monkeypatch.setattr(settings,'OPENSEA_SHARED_KEY_GID',os.getgid() if os.name=='posix' else None)
@@ -150,11 +152,15 @@ async def test_cached_proof_is_rejected_when_onchain_allowlist_changes(lab,monke
     lab.w.provider.make_request('hardhat_impersonateAccount',[lab.nft.address])
     lab.sea.functions.updateAllowList((bytes.fromhex('11'*32),[],'')).transact({'from':lab.nft.address})
     lab.w.provider.make_request('hardhat_stopImpersonatingAccount',[lab.nft.address])
-    async def unexpected(*args,**kwargs):raise AssertionError('The encrypted cache should be found')
-    monkeypatch.setattr(OpenSeaClient,'build_mint',unexpected)
+    original=OpenSeaClient.build_mint;calls=[]
+    async def stale(*args,**kwargs):
+        calls.append(1)
+        return await original(*args,**kwargs)
+    monkeypatch.setattr(OpenSeaClient,'build_mint',stale)
     lab.w.provider.make_request('evm_setNextBlockTimestamp',[lab.start]);lab.w.provider.make_request('evm_mine',[])
     response=await lab.signer_client.post('/tasks/'+tid+'/prepare')
     assert response.status_code==409,response.text
+    assert calls==[1]  # One bounded refresh; unchanged invalid proof is still rejected.
     async with lab.factory() as db:assert (await db.get(MintTask,tid)).signed_tx_raw is None
 
 

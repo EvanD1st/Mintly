@@ -19,7 +19,7 @@ async def lifespan(app: FastAPI):
     # Initialize DB schema
     await init_db()
     key_owner=None
-    if settings.APP_ENV=='production' and settings.OPENSEA_AUTO_RENEW_KEY and not settings.OPENSEA_KEY_READ_ONLY:
+    if settings.APP_ENV!='production' and settings.OPENSEA_ALLOW_INSTANT_KEYS and settings.OPENSEA_AUTO_RENEW_KEY and not settings.OPENSEA_KEY_READ_ONLY:
         import asyncio
         from app.services.opensea import refresh_shared_key
         key_owner=asyncio.create_task(refresh_shared_key())

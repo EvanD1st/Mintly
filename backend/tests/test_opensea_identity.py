@@ -246,6 +246,7 @@ async def test_lowercase_collection_allowance_survives_optional_public_read_fail
 
 
 async def selected_upcoming(lab,monkeypatch,*,eligible=True,remaining=1,duplicate=False):
+    lab.mint_params=(10,remaining,lab.start,lab.end,1,100,500,True)
     plan,_=await plan_context(lab,monkeypatch)
     await enable(lab)
     from app.services.opensea import OpenSeaClient
@@ -283,7 +284,7 @@ async def test_verified_upcoming_phase_can_be_approved_without_proof_and_execute
     assert result.status_code==200,result.text
     preview=result.json()
     assert preview['eligibility']=='verified_waiting_for_instructions' and not preview['execution_ready']
-    assert preview['snapshot']['execute_at']==lab.start+15
+    assert preview['snapshot']['execute_at']==lab.start
     assert preview['snapshot']['onchain_stage_index'] is None
     assert preview['snapshot']['selected_phase']['uuid']=='3130702aa76547c595b50fc33fcf35c1'
     async with lab.factory() as db:assert await db.scalar(select(func.count()).select_from(MintTask))==0
@@ -298,12 +299,12 @@ async def test_verified_upcoming_phase_can_be_approved_without_proof_and_execute
     from app.automatic_worker import step
     called=[]
     async def unexpected(tid):called.append(tid)
-    assert not await step(lab.factory,unexpected,now=datetime.fromtimestamp(lab.start+14,timezone.utc))
+    assert not await step(lab.factory,unexpected,now=datetime.fromtimestamp(lab.start-1,timezone.utc))
     assert not called
-    lab.w.provider.make_request('evm_setNextBlockTimestamp',[lab.start+15]);lab.w.provider.make_request('evm_mine',[])
+    lab.w.provider.make_request('evm_setNextBlockTimestamp',[lab.start]);lab.w.provider.make_request('evm_mine',[])
     class Clock(datetime):
         @classmethod
-        def now(cls,tz=None):return datetime.fromtimestamp(lab.start+15,tz)
+        def now(cls,tz=None):return datetime.fromtimestamp(lab.start,tz)
     monkeypatch.setattr('app.services.automatic_signer.datetime',Clock)
     await lab.due();await lab.tick();await lab.due();await lab.tick()
     lab.w.provider.make_request('evm_mine',[]);await lab.due();await lab.tick()
@@ -330,7 +331,7 @@ async def test_delayed_phase_checks_fail_closed_and_never_sign_early(auth_lab,mo
         monkeypatch.setattr(OpenSeaClient,'build_mint',unavailable)
     result=await lab.client.post('/api/tasks/guided-preview',json=body)
     if fault in ('eligibility','quantity','allowance','no_selection'):
-        assert result.status_code==409,result.text
+        assert result.status_code==(503 if fault=='no_selection' else 409),result.text
     else:
         assert result.status_code==200,result.text
         request={**result.json()['request'],'review_hash':result.json()['review_hash'],'user_consent_confirmed':True,'idempotency_key':'guarded-'+fault}

@@ -162,6 +162,7 @@ async def make_snapshot(db, req, user_id, *, presale_mint=None):
     stage_price, stage_limit = stage.price_wei, stage.limit_per_wallet
     if deferred_item is not None:
         stage_limit=deferred_item['remaining']
+        stage_price=int(deferred_item['price_wei'])
     if presale_mint is not None:
         p = presale_mint['params']
         if (req.mint_kind == 'public' or presale_mint['kind'] != req.mint_kind
@@ -209,10 +210,9 @@ async def make_snapshot(db, req, user_id, *, presale_mint=None):
     }
     if deferred_stage is not None:
         snapshot['selected_phase']=deferred_stage
-        # The reviewed, persisted target is at least 15 seconds after opening.
-        execute_at=max(execute_at or 0,int(start.timestamp())+15)
+        execute_at=max(execute_at or 0,int(start.timestamp()))
         if execute_at>=int(expiry.timestamp()):
-            raise HTTPException(409,'The phase closes before the delayed submission time.')
+            raise HTTPException(409,'The phase closes before the selected submission time.')
     if execute_at is not None:
         snapshot['execute_at'] = execute_at
     if getattr(req, 'copy_event_id', None):
@@ -252,6 +252,8 @@ def allows_collection(scope, contract):
 async def validate_mint(web3, snapshot, transaction):
     s = snapshot
     mint = decode_mint(transaction, s['contract'], s['account'], s['quantity'])
+    from app.services.mint_diagnostics import record_terms
+    record_terms(s,mint)
     if mint['kind'] != s['mint_kind'] or int(mint['execution']['value']) != s['price_wei'] * s['quantity']:
         raise ValueError('Upstream selected a different mint method, stage or price')
     if s['price_wei'] > s['price_cap_wei'] or s['recipient'].lower() != s['account'].lower():
@@ -274,16 +276,20 @@ async def validate_mint(web3, snapshot, transaction):
     else:
         if s.get('selected_phase'):
             from app.services.mint_stage_choice import pinned
+            from app.services.phase_identity import schedule_matches
             from app.services.seadrop_mint import match_stage
             detail=await OpenSeaClient().get_drop(collection_slug(s['mint_page_url']))
             if (CHAINS.get(detail.get('chain'),(None,))[0]!=s['chain_id']
                     or detail['contract_address'].lower()!=s['contract'].lower()):
                 raise OpenSeaUnavailable('The approved phase network or collection changed.',409)
             selected=match_stage(mint,stage_schedule(detail))
-            if pinned(selected)!=s['selected_phase']:
-                raise OpenSeaUnavailable('Mint instructions differ from the approved phase. No phase fallback is allowed.',409)
+            if not schedule_matches(selected,s['selected_phase'],pinned):
+                raise OpenSeaUnavailable('Mint instructions differ from the approved phase. No phase fallback is allowed.',409,mint_reason='wrong_phase')
         if s.get('onchain_stage_index') is not None and mint['params'][4] != s['onchain_stage_index']:
             raise ValueError('Upstream selected a different on-chain presale stage index')
+        approved_limit=(s.get('selected_phase') or {}).get('wallet_total_limit')
+        if approved_limit is not None and mint['params'][1]!=approved_limit:
+            raise OpenSeaUnavailable('The approved wallet allowance changed. Review the phase again.',409,mint_reason='terms_changed')
         stage = SimpleNamespace(starts_at=datetime.fromtimestamp(s['start'], timezone.utc),
             ends_at=datetime.fromtimestamp(s['end'], timezone.utc), price_wei=s['price_wei'], stage_type='presale')
         await verify_presale(web3, mint, stage)
@@ -303,9 +309,10 @@ async def prepare_mint(web3, snapshot):
             'data': '0x' + MINT_PUBLIC_SELECTOR + encode(['address','address','address','uint256'],
                 [s['contract'], fee, s['account'], s['quantity']]).hex()}
     else:
-        status, tx = await OpenSeaClient().build_mint(collection_slug(s['mint_page_url']), s['account'], s['quantity'])
+        client=OpenSeaClient()
+        status, tx = await client.build_mint(collection_slug(s['mint_page_url']), s['account'], s['quantity'])
         if status != 200 or tx is None:
-            raise OpenSeaUnavailable('Wallet-specific presale data is unavailable; provider access at opening is required.', 503)
+            raise client.mint_error(status)
         if CHAINS.get(tx.get('chain'), (None,))[0] != s['chain_id']:
             raise ValueError('Upstream mint chain mismatch')
     execution=await validate_mint(web3, s, tx)

@@ -15,9 +15,10 @@ async def own_presale(db,req,user_id,web3):
     stage=await db.get(MintStage,req.stage_id)
     if not wallet or wallet.user_id!=user_id or wallet.archived_at or not drop or not stage or stage.drop_id!=drop.id:
         raise HTTPException(404,'Wallet or mint stage not found.')
-    status,tx=await OpenSeaClient().build_mint(collection_slug(drop.mint_page_url),wallet.address,req.quantity)
+    client=OpenSeaClient()
+    status,tx=await client.build_mint(collection_slug(drop.mint_page_url),wallet.address,req.quantity)
     if status!=200 or not tx:
-        raise HTTPException(409,'Wallet-specific whitelist instructions are not available yet. Try again when the project releases them.')
+        raise client.mint_error(status)
     if CHAINS.get(tx.get('chain'),(None,))[0]!=drop.chain_id:
         raise HTTPException(409,'Mint network could not be verified.')
     mint=decode_mint(tx,drop.contract_address,wallet.address,req.quantity)

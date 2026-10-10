@@ -14,10 +14,12 @@ def progress(task):
         label = 'Waiting for mint time'
     elif task.status == 'uncertain' and not task.included_at:
         label = 'Checking transaction status'
+    elif task.status in ('armed','preparing') and task.failure_reason:
+        label = 'Waiting for mint preparation'
     elif task.included_at and task.status not in ('confirmed','reverted'):
         label = 'Included — waiting for confirmations' if task.inclusion_result == 'success' else 'Reverted — waiting for confirmations'
     if terminal:
-        label = {'failed':'Mint stopped','expired':'Mint window ended','disarmed':'Mint paused or cancelled','reverted':'Mint reverted'}[task.status]
+        label = {'failed':'Preparation stopped' if not task.transaction_hash else 'Mint stopped','expired':'Mint window ended','disarmed':'Mint paused or cancelled','reverted':'Mint reverted'}[task.status]
     return {'key':KEYS[index], 'label':label, 'detail':task.failure_reason if terminal or task.status in ('armed','uncertain') else None,
         'steps':[{'key':key,'label':text,'state':('complete' if n < index or (n == index and task.status == 'confirmed') else
             'stopped' if terminal and n == index else 'current' if n == index else 'pending')}

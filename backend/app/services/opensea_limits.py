@@ -1,9 +1,9 @@
 """Database-coordinated OpenSea requests, independent of mint execution locks."""
 from datetime import datetime,timezone,timedelta
 from math import ceil
-from sqlalchemy import select
+from sqlalchemy import select,delete
 from app.database import AsyncSessionLocal
-from app.models import OpenSeaRequestGate
+from app.models import OpenSeaRequestGate,OpenSeaRequestWaiter
 from app.config import settings
 from app.services.mint_plans import aware
 from app.services.mint_diagnostics import retry_seconds
@@ -23,7 +23,7 @@ async def rows(db,names):
         await db.execute(insert(OpenSeaRequestGate).values(name=name,next_request_at=EPOCH,blocked_until=EPOCH).on_conflict_do_nothing(index_elements=['name']))
     return (await db.scalars(select(OpenSeaRequestGate).where(OpenSeaRequestGate.name.in_(names)).order_by(OpenSeaRequestGate.name).with_for_update())).all()
 
-async def acquire(path,*,factory=None,now=None):
+async def acquire(path,*,factory=None,now=None,request_id=None):
     if not settings.OPENSEA_COORDINATE_REQUESTS:return 0,None
     now=now or datetime.now(timezone.utc);name=group(path)
     async with (factory or AsyncSessionLocal)() as db:
@@ -51,6 +51,16 @@ async def acquire(path,*,factory=None,now=None):
                 await db.commit()
                 return 30,'execution_priority'
         gates=await rows(db,['all',name])
+        if request_id:
+            await db.execute(delete(OpenSeaRequestWaiter).where(OpenSeaRequestWaiter.expires_at<=now))
+            waiter=await db.get(OpenSeaRequestWaiter,request_id)
+            if waiter is None:
+                waiter=OpenSeaRequestWaiter(id=request_id,priority=0 if current_phase() in ('copy','preparation') else 1 if name=='mint' else 2,
+                    expires_at=now+timedelta(seconds=max(1,min(10,settings.OPENSEA_QUEUE_WAIT_SECONDS))+1))
+                db.add(waiter);await db.flush()
+            first=await db.scalar(select(OpenSeaRequestWaiter.id).order_by(OpenSeaRequestWaiter.priority,OpenSeaRequestWaiter.created_at,OpenSeaRequestWaiter.id).limit(1))
+            if first!=request_id:
+                await db.commit();return 1,'queued'
         blocked=max(aware(g.blocked_until) for g in gates)
         due=max([blocked]+[aware(g.next_request_at) for g in gates])
         if due>now:
@@ -59,8 +69,25 @@ async def acquire(path,*,factory=None,now=None):
         global_gap=max(1.0,settings.OPENSEA_GLOBAL_REQUEST_SECONDS)
         gap=max(global_gap,settings.OPENSEA_MINT_REQUEST_SECONDS) if name=='mint' else max(global_gap,60) if name=='key_creation' else global_gap
         for g in gates:g.next_request_at=now+timedelta(seconds=global_gap if g.name=='all' else gap)
+        if request_id:await db.delete(waiter)
         await db.commit()
     return 0,None
+
+async def release_waiter(request_id):
+    if not settings.OPENSEA_COORDINATE_REQUESTS:return
+    async with AsyncSessionLocal() as db:
+        await db.execute(delete(OpenSeaRequestWaiter).where(OpenSeaRequestWaiter.id==request_id));await db.commit()
+
+async def permit(path):
+    """Short shared queue; long cooldowns return to each task's durable retry schedule."""
+    import asyncio,time,uuid
+    request_id=str(uuid.uuid4());until=time.monotonic()+max(0,min(10,settings.OPENSEA_QUEUE_WAIT_SECONDS))
+    try:
+        while True:
+            delay,reason=await acquire(path,request_id=request_id)
+            if not delay or reason not in ('paced','queued') or time.monotonic()+delay>until:return delay,reason
+            await asyncio.sleep(delay)
+    finally:await release_waiter(request_id)
 
 async def observe(path,status,headers,*,factory=None,now=None):
     if not settings.OPENSEA_COORDINATE_REQUESTS:return

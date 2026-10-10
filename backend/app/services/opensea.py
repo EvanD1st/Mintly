@@ -1,8 +1,4 @@
-"""Narrow, read-oriented OpenSea Drops integration for linked MetaMask wallets.
-
-An instant API key is free and expires after seven days. It is kept on a
-server-only volume and never returned to a client or included in errors.
-"""
+"""Read-only OpenSea preparation using an operator-provisioned server credential."""
 
 import json
 import asyncio
@@ -48,11 +44,12 @@ def transaction_value_wei(value: str) -> int:
 
 
 class OpenSeaUnavailable(Exception):
-    def __init__(self, message: str, status: int = 503, *, retry_after_seconds: int | None = None, mint_reason: str | None = None):
+    def __init__(self, message: str, status: int = 503, *, retry_after_seconds: int | None = None, mint_reason: str | None = None, upstream_status: int | None = None):
         super().__init__(message)
         self.status = status
         self.retry_after_seconds = retry_after_seconds
         self.mint_reason = mint_reason
+        self.upstream_status = upstream_status
 
 
 def collection_slug(url: str) -> str:
@@ -66,7 +63,7 @@ def collection_slug(url: str) -> str:
     if (parsed.scheme != "https" or parsed.hostname != "opensea.io" or port
             or parsed.username or parsed.password or parsed.query or parsed.fragment
             or len(parts) not in (3, 4) or parts[1] != "collection"
-            or (len(parts) == 4 and parts[3] != "drops")
+            or (len(parts) == 4 and parts[3] not in ("drops", "overview"))
             or not SLUG_RE.fullmatch(parts[2])):
         raise OpenSeaUnavailable("Use a direct https://opensea.io/collection/<slug> drop link.", 400)
     return parts[2]
@@ -83,6 +80,7 @@ def parse_utc(value: str) -> datetime:
 
 
 def stage_schedule(drop: dict) -> list[dict]:
+    from app.services.phase_identity import stage_key,stage_type
     stages = []
     for raw in drop.get("stages", []):
         try:
@@ -95,9 +93,9 @@ def stage_schedule(drop: dict) -> list[dict]:
                     or limit < 0 or currency != "0x" + "0" * 40):
                 raise ValueError("invalid stage range")
             stages.append({
-                "uuid": str(raw["uuid"]),
+                "uuid": stage_key(str(raw["uuid"])),
                 "name": str(raw.get("label") or raw["stage_type"])[:80],
-                "type": str(raw["stage_type"]),
+                "type": stage_type(str(raw["stage_type"])),
                 "starts_at": start,
                 "ends_at": end,
                 "price_wei": price,
@@ -111,6 +109,21 @@ def stage_schedule(drop: dict) -> list[dict]:
 _drop_cache={}
 _verified_mints={}
 _contract_cache={}
+_inflight={}
+
+async def singleflight(key,operation):
+    """Deduplicate unsigned lookups within a process; shared queue meters across processes."""
+    task=_inflight.get(key)
+    if task is None:
+        task=asyncio.create_task(operation());_inflight[key]=task
+        def done(finished):
+            if _inflight.get(key) is finished:_inflight.pop(key,None)
+            if not finished.cancelled():finished.exception()
+        task.add_done_callback(done)
+    return copy.deepcopy(await asyncio.shield(task))
+
+def forget_verified_mint(slug,address,quantity):
+    _verified_mints.pop((slug,address.lower(),quantity),None)
 
 def remember_verified_mint(slug,address,quantity,tx,end):
     # Called only after contract/wallet/proof validation. Never cache arbitrary replies.
@@ -122,14 +135,13 @@ def remember_verified_mint(slug,address,quantity,tx,end):
 class OpenSeaClient:
     async def _request(self, method: str, path: str, *, payload: dict | None = None,
                        key: str | None = None) -> tuple[int, dict]:
+        if path == '/auth/keys' and (settings.APP_ENV == 'production' or not settings.OPENSEA_ALLOW_INSTANT_KEYS):
+            raise OpenSeaUnavailable('The application OpenSea key must be provisioned by the operator.',503,mint_reason='api_key_unavailable')
         import time
         from app.services.mint_diagnostics import record_http
         started=time.monotonic();status=None;retry_after=None;failure=None;mint_reason=None
         from app.services import opensea_limits
-        delay,reason=await opensea_limits.acquire(path)
-        if reason=='paced' and delay<=6:
-            await asyncio.sleep(delay)
-            delay,reason=await opensea_limits.acquire(path)
+        delay,reason=await opensea_limits.permit(path)
         if delay:
             record_http(method,path,None,str(delay),started,reason)
             raise OpenSeaUnavailable('OpenSea request deferred until its shared permit or cooldown.',retry_after_seconds=delay)
@@ -156,7 +168,10 @@ class OpenSeaClient:
                     if not isinstance(data, dict):
                         failure='invalid_response'
                         raise OpenSeaUnavailable("OpenSea returned an unexpected response.")
-                    if status==422 and path.endswith('/mint'):
+                    self.last_status=status
+                    from app.services.mint_diagnostics import retry_seconds
+                    self.last_retry_after=retry_seconds(retry_after)
+                    if status in (400,409,422) and path.endswith('/mint'):
                         from app.services.mint_diagnostics import mint_rejection_reason
                         mint_reason=mint_rejection_reason(data)
                         self.last_mint_reason=mint_reason
@@ -169,17 +184,25 @@ class OpenSeaClient:
             except Exception:pass  # Diagnostic logging never changes the HTTP outcome.
 
     async def _key(self, min_validity_seconds=60) -> str:
+        return await singleflight(('key',settings.OPENSEA_KEY_FILE,min_validity_seconds),lambda:self._stored_key(min_validity_seconds))
+
+    async def _stored_key(self, min_validity_seconds=60) -> str:
         path=Path(settings.OPENSEA_KEY_FILE)
         def saved_key():
             try:
                 saved=json.loads(path.read_text(encoding='utf-8'))
-                if parse_utc(saved['expires_at'])>datetime.now(timezone.utc)+timedelta(seconds=min_validity_seconds):
+                provisioned=saved.get('provisioned') is True
+                if ((provisioned and saved.get('expires_at') is None) or
+                        parse_utc(saved['expires_at'])>datetime.now(timezone.utc)+timedelta(seconds=0 if provisioned else min_validity_seconds)):
                     key=saved['api_key']
                     if isinstance(key,str) and 16<=len(key)<=512:return key
             except (OSError,KeyError,TypeError,ValueError,OpenSeaUnavailable):pass
             return None
         key=saved_key()
         if key:return key
+        if settings.APP_ENV=='production' or not settings.OPENSEA_ALLOW_INSTANT_KEYS:
+            raise OpenSeaUnavailable('The application OpenSea API key is missing or expired. The operator must provision a valid key.',503,
+                retry_after_seconds=60,mint_reason='api_key_unavailable')
         if settings.OPENSEA_KEY_READ_ONLY:
             from app.services.mint_diagnostics import record_http
             record_http('GET','/auth/keys',None,'30',time.monotonic(),'cooldown')
@@ -225,6 +248,9 @@ class OpenSeaClient:
             os.close(lock_fd)
 
     async def get_drop(self, slug: str) -> dict:
+        return await singleflight(('drop',slug),lambda:self._get_drop(slug))
+
+    async def _get_drop(self, slug: str) -> dict:
         if not SLUG_RE.fullmatch(slug):
             raise OpenSeaUnavailable("Invalid OpenSea collection slug.", 400)
         cached=_drop_cache.get(slug)
@@ -232,6 +258,7 @@ class OpenSeaClient:
         status, data = await self._request("GET", f"/drops/{slug}", key=await self._key())
         if status == 404:
             raise OpenSeaUnavailable("This collection has no OpenSea drop.", 404)
+        if status in (401,403,429):raise self.mint_error(status)
         if status != 200:
             raise OpenSeaUnavailable("OpenSea could not verify this drop.")
         if data.get("chain") not in CHAINS:
@@ -271,8 +298,16 @@ class OpenSeaClient:
         return slug
 
     async def build_mint(self, slug: str, wallet_address: str, quantity: int = 1) -> tuple[int, dict | None]:
+        async def load():
+            result=await self._build_mint(slug,wallet_address,quantity)
+            return result,getattr(self,'last_mint_reason',None),getattr(self,'last_retry_after',None)
+        result,self.last_mint_reason,self.last_retry_after=await singleflight(('mint',slug,wallet_address.lower(),quantity),load)
+        return result
+
+    async def _build_mint(self, slug: str, wallet_address: str, quantity: int = 1) -> tuple[int, dict | None]:
         """Read-only preparation: OpenSea returns calldata; this never signs or sends it."""
         self.last_mint_reason=None
+        self.last_retry_after=None
         if not SLUG_RE.fullmatch(slug) or not is_address(wallet_address) or type(quantity) is not int or not 1 <= quantity <= 100:
             raise OpenSeaUnavailable("Invalid drop or wallet address.", 400)
         cached=_verified_mints.get((slug,wallet_address.lower(),quantity))
@@ -291,16 +326,25 @@ class OpenSeaClient:
         if status in (409, 422):
             return status, None
         if status == 429:
-            raise OpenSeaUnavailable("OpenSea is rate-limiting mint checks. Your wallet's eligibility has not been determined; Mintly will retry later.", 503)
+            raise self.mint_error(status)
         if status in (401, 403):
-            raise OpenSeaUnavailable("OpenSea denied the server's mint API access. This is not a wallet eligibility result.", 503)
+            raise self.mint_error(status)
         if status == 404:
             raise OpenSeaUnavailable("OpenSea could not find this mint drop. Check the collection link.", 404)
         if status == 400:
             raise OpenSeaUnavailable("OpenSea rejected the mint request. The drop or wallet is not supported by this mint endpoint.", 400)
         if status >= 500:
-            raise OpenSeaUnavailable("OpenSea's mint service is temporarily unavailable. Mintly will retry later.", 503)
+            raise self.mint_error(status)
         raise OpenSeaUnavailable("OpenSea could not prepare this wallet's mint.")
+
+    def mint_error(self,status):
+        from app.services.mint_diagnostics import MINT_REASONS
+        reason=getattr(self,'last_mint_reason',None) or 'instructions_unavailable'
+        if status in (401,403):reason='api_access_denied'
+        elif status==429:reason='upstream_rate_limited'
+        permanent=reason in ('wallet_not_allowlisted','insufficient_funds','wallet_limit','supply_exhausted','creator_payout_missing','invalid_proof')
+        return OpenSeaUnavailable(MINT_REASONS.get(reason,'Wallet-specific mint instructions are temporarily unavailable.'),
+            409 if permanent else 503,retry_after_seconds=getattr(self,'last_retry_after',None),mint_reason=reason,upstream_status=status)
 
 
 async def estimate_network_fee(transaction: dict, wallet_address: str, chain: str) -> int | None:

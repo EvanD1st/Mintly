@@ -262,9 +262,7 @@ async def step(session_factory=AsyncSessionLocal, sign=request_signature, *, now
                 await db.commit()
                 return True
             permanent = isinstance(error, httpx.HTTPStatusError) and error.response.status_code == 409
-            temporary=isinstance(error,(httpx.RequestError,httpx.HTTPStatusError)) and (
-                not isinstance(error,httpx.HTTPStatusError) or error.response.status_code in (429,500,502,503,504))
-            if permanent or (not temporary and task.preparation_attempts >= 6):
+            if permanent or task.preparation_attempts >= max(1,settings.OPENSEA_PREPARATION_MAX_ATTEMPTS):
                 note = 'Bounded preparation retries exhausted. No transaction broadcast.'
                 if permanent:
                     note = error.response.json().get('detail', 'Signer rejected readiness or policy.')
@@ -275,10 +273,12 @@ async def step(session_factory=AsyncSessionLocal, sign=request_signature, *, now
                     provider_wait=max(provider_wait,row.get('retry_after_seconds') or 0)
                 if isinstance(error,httpx.HTTPStatusError):
                     provider_wait=max(provider_wait,mint_diagnostics.retry_seconds(error.response.headers.get('Retry-After')) or 0)
-                delay=max(provider_wait,max(15,min(2 ** min(task.preparation_attempts,9),300)))
-                # The original approval expiry remains the hard boundary, including long cooldowns.
-                task.next_attempt_at=min(now+timedelta(seconds=delay),aware(task.expires_at_utc))
-                task.failure_reason = 'Preparation deferred; retry remains within the approved submission window.'
+                from app.services.preparation_retry import next_retry
+                task.next_attempt_at,misses_deadline=next_retry(max(now,datetime.now(timezone.utc)),aware(task.expires_at_utc),task.preparation_attempts,provider_wait)
+                reason=error.response.headers.get('X-Mintly-Reason') if isinstance(error,httpx.HTTPStatusError) else None
+                from app.services.mint_diagnostics import MINT_REASONS
+                task.failure_reason = ('Provider capacity or cooldown cannot serve this mint before its approved deadline. No transaction sent.' if misses_deadline else
+                    MINT_REASONS.get(reason,'Preparation temporarily unavailable; retrying within the approved submission window.'))
             await mint_diagnostics.save(db,task,'preparation',attempt_number,attempt_started,
                 'retry_scheduled' if task.status in ('armed','preparing') else task.status,
                 events=mint_diagnostics.from_error(error),status=error.response.status_code if isinstance(error,httpx.HTTPStatusError) else None,error=error)

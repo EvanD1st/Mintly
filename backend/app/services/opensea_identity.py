@@ -103,9 +103,7 @@ class Transport:
             coordinated=bool(headers and headers.get('X-API-KEY'))
             if coordinated:
                 from app.services import opensea_limits
-                delay,reason=await opensea_limits.acquire(path)
-                if reason=='paced' and delay<=6:
-                    await asyncio.sleep(delay);delay,reason=await opensea_limits.acquire(path)
+                delay,reason=await opensea_limits.permit(path)
                 if delay:raise IdentityUnavailable(503)
             async with self.client.stream(method,ORIGIN+path,json=body,headers=headers or {}) as response:
                 if coordinated:await opensea_limits.observe(path,response.status_code,response.headers)
