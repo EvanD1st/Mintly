@@ -83,7 +83,18 @@ async def copy_gas_quote(web3, tx, chain, paid=False):
         raise
 
 
+def accepts_price(rule,price):
+    """Price selection is independent of stage eligibility; missing flag is legacy scope."""
+    free,paid=rule.get('free_only',False),rule.get('paid_only',False)
+    if type(free) is not bool or type(paid) is not bool or (free and paid):
+        raise ValueError('Invalid copy price selection')
+    if paid and rule['price_cap_wei']<=0:
+        raise ValueError('Paid copying needs a positive approved price cap')
+    return (not free or price==0) and (not paid or price>0)
+
+
 def quantity_mode(rule):
+    accepts_price(rule,0)  # Validate the immutable price selection independently of quantity.
     mode = rule.get('quantity_mode', 'fixed')
     if mode not in ('fixed', 'max_free','max_available') or (mode == 'max_free' and (
             not rule['free_only'] or rule['price_cap_wei'] != 0 or rule['quantity'] != 100)):
@@ -413,7 +424,10 @@ async def arm_event(db, event, rule, web3):
             ceiling=min(ceiling,user.daily_limit_wei-sum(daily.values()))
         r={**r,'total_cap_wei':ceiling}
     await no_mixed_stage_copy(db, {'chain_id':o['chain_id'], 'account':r['account'], 'contract':o['contract'], 'mint_kind':kind})
-    if kind == 'public' and (o['price_wei'] > r['price_cap_wei'] or (r['free_only'] and o['price_wei'] != 0)):
+    if kind=='public' and not accepts_price(r,o['price_wei']):
+        event.status,event.note='skipped','This is a free mint. Paid mints is selected.' if r.get('paid_only') else 'This is a paid mint. Free mints only is selected.'
+        return
+    if kind == 'public' and o['price_wei'] > r['price_cap_wei']:
         event.status, event.note = 'skipped', 'Mint price is outside your copy limits.'
         return
     if r['total_cap_wei']<=r['fee_cap_wei'] and r['price_cap_wei']>0:
@@ -437,7 +451,10 @@ async def arm_event(db, event, rule, web3):
         presale, slug = await prepare_presale_copy(web3, o, r)
         quantity, price = presale['quantity'], presale['params'][0]
         drop, stage = await drop_for(db, web3, o, presale=presale, slug=slug)
-        if price > r['price_cap_wei'] or (r['free_only'] and price != 0):
+        if not accepts_price(r,price):
+            event.status,event.note='skipped','Your eligible whitelist mint is free. Paid mints is selected.' if r.get('paid_only') else 'Your eligible whitelist mint is paid. Free mints only is selected.'
+            return
+        if price > r['price_cap_wei']:
             event.status, event.note = 'skipped', 'Your whitelist price is outside your copy limits.'
             return
     if await web3.eth.get_balance(r['account'], 'pending') <= price * quantity:

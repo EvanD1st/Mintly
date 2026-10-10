@@ -247,7 +247,7 @@ async def prepare_task(db, task_id, vault=None):
                         or not quantity_matches or s['expiry'] > r['expiry']
                         or s['price_cap_wei'] != r['price_cap_wei'] or s['fee_cap_wei'] != r['fee_cap_wei']
                         or (s['total_cap_wei'] != r['total_cap_wei'] if mode!='max_available' else not 0<s['total_cap_wei']<=r['total_cap_wei'])
-                        or (r['free_only'] and s['price_wei'] != 0)):
+                        or not copy_mints.accepts_price(r,s['price_wei'])):
                     raise ValueError('Copy mint differs from the independently approved limits')
             duplicate = journal.execute('SELECT task FROM copy_signed WHERE stage=?', (copy_key,)).fetchone()
             if duplicate and duplicate['task'] != task.id:
