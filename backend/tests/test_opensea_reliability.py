@@ -117,6 +117,10 @@ async def test_shared_queue_prioritizes_mint_over_background_and_expires_leases(
     assert (await limits.acquire('/drops/example',factory=factory,now=now))[0]>=6
     assert (await limits.acquire('/drops/example',factory=factory,now=now+timedelta(seconds=7),request_id=str(uuid.uuid4())))[0]==0
 
+
+async def test_default_queue_wait_can_cover_the_shared_gap():
+    assert settings.OPENSEA_QUEUE_WAIT_SECONDS > settings.OPENSEA_GLOBAL_REQUEST_SECONDS
+
 def test_http_date_retry_after_and_fast_fcfs_deadline():
     now=datetime.now(timezone.utc);deadline=now+timedelta(seconds=26)
     wait=diag.retry_seconds(format_datetime(now+timedelta(seconds=20),usegmt=True))
