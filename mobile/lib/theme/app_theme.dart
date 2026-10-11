@@ -45,10 +45,7 @@ class MintlyTheme {
             borderRadius: BorderRadius.circular(13),
           ),
           minimumSize: const Size.fromHeight(48),
-          textStyle: const TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-          ),
+          textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
         ),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
@@ -60,16 +57,16 @@ class MintlyTheme {
             borderRadius: BorderRadius.circular(13),
           ),
           minimumSize: const Size.fromHeight(44),
-          textStyle: const TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.w500,
-          ),
+          textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
         ),
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: MintlyColors.panelLight,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 14,
+          vertical: 12,
+        ),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
           borderSide: const BorderSide(color: MintlyColors.lineLight),
@@ -80,9 +77,15 @@ class MintlyTheme {
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
-          borderSide: const BorderSide(color: MintlyColors.greenLight, width: 2),
+          borderSide: const BorderSide(
+            color: MintlyColors.greenLight,
+            width: 2,
+          ),
         ),
-        hintStyle: const TextStyle(color: MintlyColors.mutedLight, fontSize: 14),
+        hintStyle: const TextStyle(
+          color: MintlyColors.mutedLight,
+          fontSize: 14,
+        ),
       ),
     );
   }
@@ -95,11 +98,46 @@ class MintlyTheme {
       colorScheme: const ColorScheme.dark(
         primary: MintlyColors.greenDark,
         onPrimary: MintlyColors.onGreenDark,
+        secondary: MintlyColors.greenDark,
+        onSecondary: MintlyColors.onGreenDark,
+        secondaryContainer: MintlyColors.softDark,
+        onSecondaryContainer: MintlyColors.inkDark,
         surface: MintlyColors.panelDark,
         onSurface: MintlyColors.inkDark,
         outline: MintlyColors.lineDark,
       ),
       fontFamily: 'Roboto',
+      dividerTheme: const DividerThemeData(
+        color: MintlyColors.lineDark,
+        thickness: 1,
+      ),
+      chipTheme: ChipThemeData(
+        backgroundColor: MintlyColors.panelDark,
+        selectedColor: MintlyColors.softDark,
+        side: const BorderSide(color: MintlyColors.lineDark),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        labelStyle: const TextStyle(
+          fontSize: 12,
+          color: MintlyColors.inkDark,
+          fontFamily: 'Roboto',
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+      ),
+      filledButtonTheme: FilledButtonThemeData(
+        style: FilledButton.styleFrom(
+          backgroundColor: MintlyColors.greenDark,
+          foregroundColor: MintlyColors.onGreenDark,
+          minimumSize: const Size.fromHeight(46),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(13),
+          ),
+          textStyle: const TextStyle(
+            fontFamily: 'Roboto',
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
       appBarTheme: const AppBarTheme(
         backgroundColor: MintlyColors.bgDark,
         elevation: 0,
@@ -107,6 +145,7 @@ class MintlyTheme {
         centerTitle: false,
         titleTextStyle: TextStyle(
           color: MintlyColors.inkDark,
+          fontFamily: 'Roboto',
           fontSize: 24,
           fontWeight: FontWeight.w700,
           letterSpacing: -0.8,
@@ -131,6 +170,7 @@ class MintlyTheme {
           ),
           minimumSize: const Size.fromHeight(48),
           textStyle: const TextStyle(
+            fontFamily: 'Roboto',
             fontSize: 14,
             fontWeight: FontWeight.w600,
           ),
@@ -146,6 +186,7 @@ class MintlyTheme {
           ),
           minimumSize: const Size.fromHeight(44),
           textStyle: const TextStyle(
+            fontFamily: 'Roboto',
             fontSize: 13,
             fontWeight: FontWeight.w500,
           ),
@@ -154,7 +195,10 @@ class MintlyTheme {
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: MintlyColors.panelDark,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 14,
+          vertical: 12,
+        ),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
           borderSide: const BorderSide(color: MintlyColors.lineDark),

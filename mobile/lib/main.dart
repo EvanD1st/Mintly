@@ -30,7 +30,7 @@ class MintlyApp extends StatelessWidget {
       navigatorKey: MintlyNotice.navigatorKey,
       theme: MintlyTheme.light(),
       darkTheme: MintlyTheme.dark(),
-      themeMode: ThemeMode.system,
+      themeMode: ThemeMode.dark,
       home: const SplashScreen(),
     );
   }

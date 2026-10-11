@@ -32,6 +32,34 @@ class ApiService extends ChangeNotifier {
   String _sessionToken = '';
   Map<String, dynamic>? _user;
   int _sessionRevision = 0;
+  final _artwork = <String, ({DateTime expires, Future<String?> value})>{};
+
+  Future<String?> collectionArtwork(String reference) {
+    final now = DateTime.now();
+    final cached = _artwork[reference];
+    if (cached != null && cached.expires.isAfter(now)) return cached.value;
+    final value = () async {
+      try {
+        final data = await _get(
+          '/artwork?reference=${Uri.encodeQueryComponent(reference)}',
+        );
+        final url = data['image_url'];
+        final parsed = url is String ? Uri.tryParse(url) : null;
+        return parsed?.scheme == 'https' && parsed!.userInfo.isEmpty
+            ? url as String
+            : null;
+      } catch (_) {
+        return null;
+      }
+    }();
+    _artwork[reference] = (
+      expires: now.add(const Duration(minutes: 2)),
+      value: value,
+    );
+    if (_artwork.length > 128) _artwork.remove(_artwork.keys.first);
+    return value;
+  }
+
   String sourceStatusText = 'Waiting for live data';
   String checkedWalletLabel = 'No wallet connected';
   String lastCheckedText = 'Wallet-specific eligibility is unverified';
@@ -162,6 +190,7 @@ class ApiService extends ChangeNotifier {
   }
 
   void _resetMetadata() {
+    _artwork.clear();
     sourceStatusText = 'Waiting for live data';
     checkedWalletLabel = 'No wallet connected';
     lastCheckedText = 'Wallet-specific eligibility is unverified';

@@ -63,7 +63,11 @@ void main() {
     await tester.pumpWidget(UncontrolledProviderScope(container: container,
       child: const MaterialApp(home: Scaffold(body: QueueScreen()))));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Set up automatic mint'));
+    await tester.tap(find.text('Review mint'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Review & arm'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Review & arm'));
     await tester.pumpAndSettle();
     expect(contexts, 1);
     expect(find.text('Review automatic mint'), findsOneWidget);
@@ -71,6 +75,8 @@ void main() {
     expect(find.text(account), findsOneWidget);
     expect(tester.widget<TextField>(find.byType(TextField).first).controller!.text, '2');
     await tester.pageBack();
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Remove'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Remove'));
     await tester.pumpAndSettle();

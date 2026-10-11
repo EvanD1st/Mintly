@@ -87,15 +87,26 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
+      expect(find.text('Pending'), findsOneWidget);
+      expect(find.textContaining('Transaction: 0xabc'), findsNothing);
+      await tester.tap(find.text('View details'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Approval & recovery history'));
+      await tester.pumpAndSettle();
       expect(find.text('Status: submitted'), findsOneWidget);
       expect(find.textContaining('Transaction: 0xabc'), findsOneWidget);
       expect(find.text('Same-nonce recovery: submitted'), findsOneWidget);
       expect(find.text('Original transaction: 0xoriginal'), findsOneWidget);
-      expect(find.text('Replacement transaction: 0xreplacement'), findsOneWidget);
+      expect(
+        find.text('Replacement transaction: 0xreplacement'),
+        findsOneWidget,
+      );
+      await tester.pageBack();
+      await tester.pumpAndSettle();
       await tester.drag(find.byType(ListView), const Offset(0, 350));
       await tester.pumpAndSettle();
-      expect(find.text('Status: confirmed'), findsOneWidget);
-      expect(find.textContaining('Actual spend:'), findsOneWidget);
+      expect(find.text('Confirmed'), findsOneWidget);
+      expect(find.text('Total spent'), findsOneWidget);
       await tester.tap(find.byType(DropdownButtonFormField<String>));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Plan history').last);

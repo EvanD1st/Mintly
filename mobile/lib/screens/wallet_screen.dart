@@ -1,3 +1,4 @@
+import '../widgets/network_budget_card.dart';
 import '../widgets/mintly_notice.dart';
 import '../widgets/wallet_readiness_panel.dart';
 import '../services/wat_time.dart';
@@ -31,6 +32,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
   }
 
   void _refresh() => setState(() {
+    ref.invalidate(networkBudgetsProvider);
     _wallets = ref.read(apiServiceProvider).fetchWallets();
     _policies = ref.read(apiServiceProvider).fetchAutomaticPolicies();
     _readiness = ref.read(apiServiceProvider).fetchWalletReadiness().catchError((_) => <String, dynamic>{'unavailable': true});
@@ -241,7 +243,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
         children: [
           Expanded(
             child: Text(
-              'Wallets',
+              'Wallet',
               style: Theme.of(
                 context,
               ).textTheme.headlineLarge?.copyWith(fontWeight: FontWeight.bold),
@@ -259,7 +261,10 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
           ),
         ],
       ),
+      const SizedBox(height: 6),
+      const Text('Your wallets and spending permissions.'),
       const SizedBox(height: 20),
+      const NetworkBudgetCard(),
       FutureBuilder<List<Map<String, dynamic>>>(
         future: _wallets,
         builder: (context, wallets) {

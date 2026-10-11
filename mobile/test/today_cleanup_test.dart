@@ -85,7 +85,7 @@ void main() {
       await tester.tap(find.byTooltip('Remove drop'));
       await tester.pumpAndSettle();
       expect(find.text('Existing drop'), findsNothing);
-    expect(container.read(mintlyProvider).selectedDrop, isNull);
+      expect(container.read(mintlyProvider).selectedDrop, isNull);
       await container.read(mintlyProvider.notifier).loadInitialData();
       await tester.pumpAndSettle();
       expect(find.text('Existing drop'), findsNothing);
@@ -121,6 +121,11 @@ void main() {
         expect(find.text('Automatic mint: cancelled'), findsNothing);
         expect(find.text('Cancelled in Mintly'), findsNothing);
         expect(find.text('Mint plans'), findsOneWidget);
+        if (canRevoke) {
+          await tester.ensureVisible(find.text('Wallet permissions'));
+          await tester.tap(find.text('Wallet permissions'));
+          await tester.pumpAndSettle();
+        }
         expect(
           find.text('Revoke on-chain'),
           canRevoke ? findsOneWidget : findsNothing,

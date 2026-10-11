@@ -148,7 +148,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(find.text('Copy minting'), findsOneWidget);
+      expect(find.text('Copy'), findsOneWidget);
       expect(approved, isNull);
       await tester.ensureVisible(find.text('Set up copy'));
       await tester.pumpAndSettle();
@@ -207,7 +207,7 @@ void main() {
       expect(approved?['paid_only'], true);
       expect(approved?['include_presales'], true);
       expect(approved?.containsKey('private_key'), false);
-      expect(find.text('Copy minting'), findsOneWidget);
+      expect(find.text('Copy'), findsOneWidget);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
     },
