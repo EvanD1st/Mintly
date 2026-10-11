@@ -620,7 +620,7 @@ async def process_copy_events(db,watch_id,chain):
                 events=[]
                 attempts=event.preparation_attempts+1
                 try:
-                    with mint_diagnostics.capture('','copy',event_id=event.id) as events:
+                    with mint_diagnostics.capture('','copy',event_id=event.id,owner_id=event.user_id) as events:
                         async with db.begin_nested():await arm_event(db,event,rule,web3)
                     event.last_error_category=None;event.last_upstream_status=None;event.next_attempt_at=None
                 except OpenSeaUnavailable as error:

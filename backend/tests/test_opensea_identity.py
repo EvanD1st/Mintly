@@ -242,10 +242,12 @@ async def test_lowercase_collection_allowance_survives_optional_public_read_fail
     response=await lab.client.get('/api/mint-plans/'+plan['id']+'/stages')
     assert response.status_code==200,response.text
     assert response.json()['stages'][0]['remaining']==20
-    assert response.json()['note'] is None
+    assert response.json()['note'] == ('Public mint terms could not be verified on chain. Try again before selecting the public phase.'
+        if public_failure else None)
+    assert response.json()['stages'][0]['eligibility']==('unverified' if public_failure else 'eligible')
 
 
-async def selected_upcoming(lab,monkeypatch,*,eligible=True,remaining=1,duplicate=False):
+async def selected_upcoming(lab,monkeypatch,*,eligible=True,remaining=1,duplicate=False,public_fault=None):
     lab.mint_params=(10,remaining,lab.start,lab.end,1,100,500,True)
     plan,_=await plan_context(lab,monkeypatch)
     await enable(lab)
@@ -254,14 +256,25 @@ async def selected_upcoming(lab,monkeypatch,*,eligible=True,remaining=1,duplicat
     async def detail(self,slug):
         row={'uuid':uid,'stage_type':'signed_presale','label':'GTD','start_time':datetime.fromtimestamp(lab.start,timezone.utc).isoformat(),
             'end_time':datetime.fromtimestamp(lab.end,timezone.utc).isoformat(),'price':'10','max_per_wallet':'1','price_currency_address':'0x'+'0'*40}
+        public={**row,'uuid':'public-phase','stage_type':'public_sale','label':'Public',
+            'start_time':datetime.fromtimestamp(lab.end+60,timezone.utc).isoformat(),
+            'end_time':datetime.fromtimestamp(lab.end+900,timezone.utc).isoformat()}
         return {'chain':'local-test','contract_address':lab.nft.address,'collection_name':'GTD test',
-            'opensea_url':'https://opensea.io/collection/local-test','stages':[row,{**row,'uuid':'another'}] if duplicate else [row]}
+            'opensea_url':'https://opensea.io/collection/local-test',
+            'stages':[row,{**row,'uuid':'another'}] if duplicate else [row,public] if public_fault else [row]}
     async def key(self):return 'api-key-disposable-1234'
     async def result(*args,**kwargs):
         return {'address':lab.owner.address,'stages':[{'stage_uuid':str(uuid.UUID(uid)),'eligible':eligible,
             'max_total_mintable_by_wallet':remaining,'remaining':None,'price_wei':10}]}
     monkeypatch.setattr(OpenSeaClient,'get_drop',detail);monkeypatch.setattr(OpenSeaClient,'_key',key)
     monkeypatch.setattr('app.api.opensea_access.broker',result)
+    if public_fault=='unset':
+        lab.w.provider.make_request('hardhat_impersonateAccount',[lab.nft.address])
+        lab.w.eth.wait_for_transaction_receipt(lab.sea.functions.updatePublicDrop((0,0,0,0,0,False)).transact({'from':lab.nft.address}))
+        lab.w.provider.make_request('hardhat_stopImpersonatingAccount',[lab.nft.address])
+    elif public_fault=='read_failure':
+        async def unavailable(*args,**kwargs):raise RuntimeError('disposable public RPC failure')
+        monkeypatch.setattr('app.services.copy_mints.public_stage',unavailable)
     response=await lab.client.post('/api/mint-plans/'+plan['id']+'/stage',json={'stage_uuid':uid,'quantity':1})
     assert response.status_code==200,response.text
     context=await lab.client.post('/api/mint-plans/'+plan['id']+'/automatic-context')
@@ -272,6 +285,31 @@ async def selected_upcoming(lab,monkeypatch,*,eligible=True,remaining=1,duplicat
         'drop_id':context.json()['drop']['id'],'stage_id':context.json()['drop']['stages'][0]['id'],
         'quantity':1,'maximum_total_eth':'0.0005','scheduled_for_utc':datetime.fromtimestamp(lab.start,timezone.utc).isoformat()}
     return plan,body
+
+
+@pytest.mark.parametrize('public_fault',['unset','read_failure'])
+async def test_selected_gtd_survives_unrelated_public_failure_through_arming(auth_lab,monkeypatch,public_fault):
+    lab,_,_=auth_lab
+    plan,body=await selected_upcoming(lab,monkeypatch,public_fault=public_fault)
+    stages=await lab.client.get('/api/mint-plans/'+plan['id']+'/stages')
+    assert stages.status_code==200,stages.text
+    assert stages.json()['stages'][0]['eligibility']=='eligible'
+    assert stages.json()['stages'][0]['remaining']==1
+    assert stages.json()['stages'][1]['eligibility']=='unverified'
+    public=await lab.client.post('/api/mint-plans/'+plan['id']+'/stage',json={'stage_uuid':'public-phase','quantity':1})
+    assert public.status_code==409 and 'public' in public.text.lower()
+    lab.kind='signed'
+    preview=await lab.client.post('/api/tasks/guided-preview',json=body)
+    assert preview.status_code==200,preview.text
+    reviewed=preview.json()
+    assert reviewed['snapshot']['selected_phase']['uuid']=='3130702aa76547c595b50fc33fcf35c1'
+    armed=await lab.client.post('/api/tasks/arm',json={**reviewed['request'],
+        'review_hash':reviewed['review_hash'],'user_consent_confirmed':True,
+        'idempotency_key':'gtd-unrelated-public-'+public_fault})
+    assert armed.status_code==200,armed.text
+    async with lab.factory() as db:
+        task=await db.get(MintTask,armed.json()['id'])
+        assert task.status=='armed' and not task.signed_tx_raw
 
 
 @pytest.mark.parametrize('quantity',[1,2])

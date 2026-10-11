@@ -14,7 +14,7 @@ from fastapi.encoders import jsonable_encoder
 from app.schemas.drop import DropSchema
 from app.services import automatic
 from app.services.mint_plans import aware, refresh_mint_plan, verified_stage_schedule
-from app.services.opensea import CHAINS, OpenSeaClient, OpenSeaUnavailable, collection_slug
+from app.services.opensea import CHAINS, OpenSeaClient, OpenSeaUnavailable, collection_slug, stage_schedule
 
 router = APIRouter(prefix="/mint-plans", tags=["mint-plans"])
 
@@ -180,7 +180,12 @@ async def automatic_context(plan_id: str, user: User = Depends(get_current_user)
         transaction = {}
         await refresh_mint_plan(plan, wallet, client, detail=detail, transaction_out=transaction, db=db)
         from app.services.phase_identity import stage_key,schedule_matches
-        schedule = await verified_stage_schedule(detail, plan.chain_id, plan.contract_address)
+        # A selected presale is checked against its own OpenSea phase and
+        # wallet-specific instructions. An unrelated public SeaDrop read must
+        # not make that independent approval unavailable.
+        schedule = (await verified_stage_schedule(detail, plan.chain_id, plan.contract_address)
+                    if not plan.selected_stage or plan.selected_stage.get('type') == 'public_sale'
+                    else stage_schedule(detail))
         selected = next((s for s in schedule if stage_key(s['uuid']) == stage_key(plan.stage_uuid)), None)
         if (not plan.selected_stage and selected and selected['type'] == 'public_sale'
                 and (aware(plan.starts_at), aware(plan.ends_at), plan.price_wei)
