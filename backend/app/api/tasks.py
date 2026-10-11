@@ -160,7 +160,7 @@ async def task_response(db, task):
     auth = await db.get(MintAuthorization, task.authorization_id)
     s = auth.snapshot
     recovery = await db.scalar(select(MintRecovery).where(MintRecovery.task_id == task.id))
-    return TaskSchema(id=task.id, wallet_id=task.wallet_id, drop_id=task.drop_id,
+    return TaskSchema(id=task.id, plan_id=task.plan_id, wallet_id=task.wallet_id, drop_id=task.drop_id,
         stage_id=task.stage_id, status=task.status, is_demo=task.is_demo,
         scheduled_for_utc=task.scheduled_for_utc,
         expires_at_utc=recovery.expires_at if recovery and recovery.activated_at else task.expires_at_utc,
@@ -215,7 +215,7 @@ async def list_mint_queue(db: AsyncSession = Depends(get_db), user: User = Depen
             MintAuthorization.id == task.authorization_id,
         ))).scalar_one_or_none()
         formatted.append(TaskSchema(
-            id=task.id, wallet_id=task.wallet_id, drop_id=task.drop_id, stage_id=task.stage_id,
+            id=task.id, plan_id=task.plan_id, wallet_id=task.wallet_id, drop_id=task.drop_id, stage_id=task.stage_id,
             status=task.status, is_demo=False, scheduled_for_utc=task.scheduled_for_utc,
             expires_at_utc=task.expires_at_utc, quantity=auth.quantity if auth else 1,
             unit_price_eth=stage.price_eth_str if stage else "",

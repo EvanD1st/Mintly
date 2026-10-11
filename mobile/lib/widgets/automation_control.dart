@@ -4,7 +4,8 @@ import '../state/app_state.dart';
 import 'mintly_notice.dart';
 
 class AutomationControl extends ConsumerStatefulWidget {
-  const AutomationControl({super.key});
+  final bool compact;
+  const AutomationControl({super.key, this.compact = false});
   @override
   ConsumerState<AutomationControl> createState() => _AutomationControlState();
 }
@@ -60,6 +61,34 @@ class _AutomationControlState extends ConsumerState<AutomationControl> {
         );
       }
       final paused = snapshot.data?['paused'] == true;
+      if (widget.compact) {
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  paused ? 'All automation paused' : 'Minting & copying',
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+              ),
+              TextButton(
+                key: const ValueKey('pause-all-automation'),
+                onPressed: snapshot.hasData && !_busy
+                    ? () => _change(!paused)
+                    : null,
+                child: Text(
+                  _busy
+                      ? 'Saving…'
+                      : paused
+                      ? 'Resume'
+                      : 'Pause all',
+                ),
+              ),
+            ],
+          ),
+        );
+      }
       return ListTile(
         title: Text(paused ? 'All automation paused' : 'Automatic minting & copying', style: const TextStyle(fontWeight: FontWeight.w600)),
         subtitle: Text(paused ? 'Enable actions separately after resuming.' : 'Stop both bots for your account.'),

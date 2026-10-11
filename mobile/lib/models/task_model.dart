@@ -1,5 +1,6 @@
 class MintTaskModel {
   final String id;
+  final String? planId;
   final String walletId;
   final String dropId;
   final String stageId;
@@ -22,6 +23,7 @@ class MintTaskModel {
 
   MintTaskModel({
     required this.id,
+    this.planId,
     required this.walletId,
     required this.dropId,
     required this.stageId,
@@ -46,6 +48,7 @@ class MintTaskModel {
   factory MintTaskModel.fromJson(Map<String, dynamic> json) {
     return MintTaskModel(
       id: json['id'] ?? '',
+      planId: json['plan_id'],
       walletId: json['wallet_id'] ?? '',
       dropId: json['drop_id'] ?? '',
       stageId: json['stage_id'] ?? '',

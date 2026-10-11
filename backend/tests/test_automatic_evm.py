@@ -817,6 +817,9 @@ async def test_remove_plan_cancels_before_signing_preserves_owner_history_and_re
     r = await lab.client.post('/api/tasks/arm', json=request)
     assert r.status_code == 200, r.text
     task_id = r.json()['id']
+    assert r.json()['plan_id'] == plan['id']
+    queue = (await lab.client.get('/api/tasks/queue')).json()['tasks']
+    assert next(task for task in queue if task['id'] == task_id)['plan_id'] == plan['id']
     duplicate = await lab.client.post('/api/tasks/arm', json={**request, 'idempotency_key': 'another-intent-key'})
     assert duplicate.status_code == 409
     assert (await lab.client.post('/api/tasks/arm', json=request)).json()['id'] == task_id

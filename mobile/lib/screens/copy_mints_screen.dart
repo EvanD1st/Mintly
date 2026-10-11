@@ -1,3 +1,6 @@
+import '../widgets/network_budget_card.dart';
+import '../widgets/collection_thumbnail.dart';
+import '../widgets/screen_components.dart';
 import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';
@@ -16,13 +19,14 @@ import 'wallet_setup_screen.dart';
 class CopyGlyph extends StatelessWidget {
   final String kind;
   final double size;
-  const CopyGlyph(this.kind, {super.key, this.size = 24});
+  final Color? color;
+  const CopyGlyph(this.kind, {super.key, this.size = 24, this.color});
   @override
   Widget build(BuildContext context) => Semantics(
     label: kind,
     child: CustomPaint(
       size: Size.square(size),
-      painter: _GlyphPainter(kind, Theme.of(context).colorScheme.primary),
+      painter: _GlyphPainter(kind, color ?? Theme.of(context).colorScheme.primary),
     ),
   );
 }
@@ -312,6 +316,8 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
       final api = ref.read(apiServiceProvider);
       final data = await api.fetchCopyMints();
       if (!mounted || generation != _generation) return;
+      ref.invalidate(networkBudgetsProvider);
+      if (!silent) ref.invalidate(collectionArtworkProvider);
       final watches = (data['watches'] as List).cast<Map>();
       if (_filter != null && !watches.any((w) => w['id'] == _filter)) {
         _filter = null;
@@ -650,6 +656,8 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
               for (final chain in watch['chains'] as List)
                 _Chip(_network(chain)),
               _Chip(watch['check_only'] == true ? 'Check-only · no spending' : active ? 'Copying on' : 'Watching only'),
+              for (final rule in rules.take(1))
+                if (rule['snapshot'] is Map) _Chip((rule['snapshot'] as Map)['free_only'] == true ? 'Free mints only' : (rule['snapshot'] as Map)['paid_only'] == true ? 'Paid mints' : 'Free & paid mints'),
             ],
           ),
           const SizedBox(height: 18),
@@ -713,16 +721,17 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const AutomationControl(),
-        Text(
-          'Copy minting',
-          style: Theme.of(
-            context,
-          ).textTheme.headlineLarge?.copyWith(fontWeight: FontWeight.w700),
+        ScreenHeading(
+          'Copy',
+          'Follow wallets. Mint on your terms.',
+          action: IconButton(
+            tooltip: 'Follow another wallet',
+            icon: const CopyGlyph('add'),
+            onPressed: _busy || _data == null ? null : () => _follow(),
+          ),
         ),
-        const SizedBox(height: 7),
-        const Text('Follow wallets. Mint on your terms.'),
-        const SizedBox(height: 22),
+        const AutomationControl(compact: true),
+        const NetworkBudgetCard(),
         _Panel(
           highlighted: true,
           child: Row(
@@ -875,7 +884,7 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _Avatar('${o['name']}'),
+              CollectionThumbnail(name: '${o['name']}', reference: 'copy:${event['id']}'),
               const SizedBox(width: 13),
               Expanded(
                 child: Column(
@@ -1108,21 +1117,6 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(
-      actions: [
-        IconButton(
-          tooltip: 'Follow another wallet',
-          icon: const CopyGlyph('add'),
-          onPressed: _busy || _data == null ? null : () => _follow(),
-        ),
-        Padding(
-          padding: const EdgeInsets.only(right: 18),
-          child: Center(
-            child: _Chip(_active ? 'Copying on' : 'Copying paused'),
-          ),
-        ),
-      ],
-    ),
     body: RefreshIndicator(
       onRefresh: _load,
       child: _loading
@@ -1164,9 +1158,9 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
         ),
         child: Row(
           children: [
-            for (final (index, name, glyph) in [
-              (0, 'Following', 'copy'),
-              (1, 'Activity', 'activity'),
+            for (final (index, name) in [
+              (0, 'Following'),
+              (1, 'Activity'),
             ])
               Expanded(
                 child: TextButton(
@@ -1177,22 +1171,21 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
                     });
                     if (index == 1) _load();
                   },
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        CopyGlyph(glyph),
-                        const SizedBox(height: 5),
-                        Text(
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    decoration: BoxDecoration(
+                      color: _tab == index ? Theme.of(context).colorScheme.primary.withValues(alpha: .12) : Colors.transparent,
+                      borderRadius: BorderRadius.circular(18),
+                    ),
+                    child: Text(
                           name,
+                          textAlign: TextAlign.center,
                           style: TextStyle(
                             fontWeight: _tab == index
                                 ? FontWeight.w700
                                 : FontWeight.w400,
                           ),
-                        ),
-                      ],
                     ),
                   ),
                 ),

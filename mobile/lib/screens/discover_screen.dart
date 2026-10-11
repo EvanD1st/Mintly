@@ -1,3 +1,4 @@
+import '../widgets/collection_thumbnail.dart';
 import '../widgets/mintly_notice.dart';
 import '../theme/compatible_icons.dart';
 import 'package:flutter/material.dart';
@@ -32,7 +33,10 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
       context,
     ).colorScheme.onSurface.withValues(alpha: .65);
     return RefreshIndicator(
-      onRefresh: notifier.loadInitialData,
+      onRefresh: () async {
+        ref.invalidate(collectionArtworkProvider);
+        await notifier.loadInitialData();
+      },
       child: ListView(
         padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
         children: [
@@ -43,10 +47,7 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
             style: TextStyle(color: muted, fontSize: 11, letterSpacing: 1.5),
           ),
           const SizedBox(height: 6),
-          Text(
-            'Find your next mint.',
-            style: Theme.of(context).textTheme.headlineMedium,
-          ),
+          Text('Today', style: Theme.of(context).textTheme.headlineMedium),
           const SizedBox(height: 5),
           Text(
             'Welcome, ${api.username}. Review source details before using MetaMask.',
@@ -163,8 +164,12 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
         : '${_wat(stage.startTimeUtc)} WAT';
     return Card(
       child: ListTile(
+        leading: CollectionThumbnail(
+          name: drop.name,
+          reference: 'drop:${drop.id}',
+          size: 52,
+        ),
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-        leading: const CircleAvatar(child: Icon(Icons.diamond_outlined)),
         title: Text(drop.name),
         subtitle: Text(
           '${drop.chain} · ${drop.siteLabel}\n$schedule · $price\n${drop.statusLabel}',
@@ -179,7 +184,8 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
                   try {
                     await notifier.removeDrop(drop.id);
                     if (context.mounted) {
-                      MintlyNotice.show(context,
+                      MintlyNotice.show(
+                        context,
                         const SnackBar(
                           content: Text('Drop removed from Today.'),
                         ),
@@ -187,7 +193,10 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
                     }
                   } catch (error) {
                     if (context.mounted) {
-                      MintlyNotice.show(context, SnackBar(content: Text('$error')));
+                      MintlyNotice.show(
+                        context,
+                        SnackBar(content: Text('$error')),
+                      );
                     }
                   } finally {
                     if (mounted) setState(() => _removing.remove(drop.id));
