@@ -19,6 +19,9 @@ async def rows(db,names):
     from sqlalchemy.dialects.postgresql import insert as pg_insert
     from sqlalchemy.dialects.sqlite import insert as sqlite_insert
     insert=pg_insert if db.bind.dialect.name=='postgresql' else sqlite_insert
+    # Inserts can also take row locks on conflicts. Use the same order for
+    # creation and SELECT FOR UPDATE, including cooldown writers.
+    names=sorted(set(names))
     for name in names:
         await db.execute(insert(OpenSeaRequestGate).values(name=name,next_request_at=EPOCH,blocked_until=EPOCH).on_conflict_do_nothing(index_elements=['name']))
     return (await db.scalars(select(OpenSeaRequestGate).where(OpenSeaRequestGate.name.in_(names)).order_by(OpenSeaRequestGate.name).with_for_update())).all()
@@ -50,7 +53,11 @@ async def acquire(path,*,factory=None,now=None,request_id=None):
             if pending_copy or pending_task:
                 await db.commit()
                 return 30,'execution_priority'
-        gates=await rows(db,['all',name])
+        # Every endpoint arbitrates the shared waiter queue using the same
+        # last mint owner. Lock that state even for reads, without applying
+        # mint pacing/cooldowns to those reads or consuming a mint permit.
+        shared=await rows(db,['all','mint',name])
+        gates=[gate for gate in shared if gate.name in ('all',name)]
         owner=current_owner() if name=='mint' else None
         if request_id:
             await db.execute(delete(OpenSeaRequestWaiter).where(OpenSeaRequestWaiter.expires_at<=now))
@@ -64,7 +71,7 @@ async def acquire(path,*,factory=None,now=None,request_id=None):
                 OpenSeaRequestWaiter.priority,OpenSeaRequestWaiter.created_at,OpenSeaRequestWaiter.id))).all()
             highest=waiting[0].priority
             peers=[item for item in waiting if item.priority==highest]
-            last_owner=next((gate.last_owner_id for gate in gates if gate.name=='mint'),None)
+            last_owner=next(gate.last_owner_id for gate in shared if gate.name=='mint')
             # Among equally urgent mint requests, give another account the
             # next turn before the previous account consumes more permits.
             first=next((item.id for item in peers if item.owner_id and item.owner_id!=last_owner),peers[0].id)
