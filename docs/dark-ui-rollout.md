@@ -21,6 +21,8 @@ No signer, observer, copy worker, retry schedule, global execution lock, OpenSea
 
 Run `flutter analyze` and `flutter test` in `mobile`. The redesign tests exercise a 360px phone at 1.0 and 1.4 text scale, allowance switching/refresh, inactive/expired grants, session cache isolation, plan/task linkage, copy skips, and retained transaction details. On Windows with the preview font installed they save actual Flutter screenshots under `mobile/build/dark-redesign` (sample account data, fallback artwork).
 
+Run `flutter test --dart-define=MINTLY_TEST_DEFAULT_FONT=true test/dark_redesign_test.dart` to exercise the same wide fallback font used by Linux CI on Windows as well. Navigation items and section headings have bounded widths; the Activity record selector expands within the available width. Tests scroll to controls before tapping at enlarged text sizes.
+
 Run the full backend suite with a disposable local Hardhat EVM on port 18545. `tests/test_artwork.py` covers account access, CDN validation, contract/collection binding, concurrent cache use, optional failures and yielding to urgent waiters. CI also runs it with the existing PostgreSQL regression suite.
 
 No database migration or new credential is required. Deploy the backend response additions and mobile build together for complete artwork and plan linkage; older backends show fallback artwork and continue to support existing actions. No production deployment is included in this implementation. HyperEVM, ApeChain and Ink activation remains a separate network-support change; this UI does not advertise unsupported networks as available.

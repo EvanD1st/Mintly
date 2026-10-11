@@ -240,9 +240,11 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
     padding: const EdgeInsets.only(bottom: 12),
     child: Row(
       children: [
-        Text(
-          title,
-          style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w700),
+        Flexible(
+          child: Text(
+            title,
+            style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w700),
+          ),
         ),
         const SizedBox(width: 10),
         Text(

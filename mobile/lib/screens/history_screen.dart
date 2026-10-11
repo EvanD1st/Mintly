@@ -487,6 +487,7 @@ class _HistoryState extends ConsumerState<HistoryScreen> {
           DropdownButtonFormField<String>(
             key: ValueKey(_section),
             initialValue: _section,
+            isExpanded: true,
             icon: const RotatedBox(
               quarterTurns: 1,
               child: Icon(MintlyIcons.chevronRight),

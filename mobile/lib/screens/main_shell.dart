@@ -107,41 +107,52 @@ class _MainShellState extends ConsumerState<MainShell>
     Color inactiveColor,
   ) {
     final isSelected = _currentIndex == index;
-    return InkWell(
-      onTap: () {
-        setState(() => _currentIndex = index);
-        if (index == 2 || index == 4) ref.invalidate(networkBudgetsProvider);
-        if (index == 1) ref.read(mintlyProvider.notifier).loadInitialData();
-      },
-      borderRadius: BorderRadius.circular(12),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        decoration: BoxDecoration(
-          color: isSelected
-              ? activeColor.withValues(alpha: .12)
-              : Colors.transparent,
-          borderRadius: BorderRadius.circular(14),
-        ),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (index == 2) CopyGlyph('copy', size: 22, color: isSelected ? activeColor : inactiveColor)
-            else Icon(
-              icon,
-              size: 22,
-              color: isSelected ? activeColor : inactiveColor,
-            ),
-            const SizedBox(height: 3),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 10,
-                fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
-                color: isSelected ? activeColor : inactiveColor,
+    return Expanded(
+      child: InkWell(
+        onTap: () {
+          setState(() => _currentIndex = index);
+          if (index == 2 || index == 4) ref.invalidate(networkBudgetsProvider);
+          if (index == 1) ref.read(mintlyProvider.notifier).loadInitialData();
+        },
+        borderRadius: BorderRadius.circular(12),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          decoration: BoxDecoration(
+            color: isSelected
+                ? activeColor.withValues(alpha: .12)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(14),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 10),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (index == 2)
+                CopyGlyph(
+                  'copy',
+                  size: 22,
+                  color: isSelected ? activeColor : inactiveColor,
+                )
+              else
+                Icon(
+                  icon,
+                  size: 22,
+                  color: isSelected ? activeColor : inactiveColor,
+                ),
+              const SizedBox(height: 3),
+              Text(
+                label,
+                textAlign: TextAlign.center,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                  color: isSelected ? activeColor : inactiveColor,
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

@@ -100,7 +100,10 @@ void main() {
         addTearDown(tester.view.resetPhysicalSize);
         addTearDown(tester.view.resetDevicePixelRatio);
         final font = File('C:/Windows/Fonts/arial.ttf');
-        if (font.existsSync()) {
+        const defaultTestFont = bool.fromEnvironment(
+          'MINTLY_TEST_DEFAULT_FONT',
+        );
+        if (!defaultTestFont && font.existsSync()) {
           await (FontLoader('Roboto')..addFont(
                 Future.value(ByteData.sublistView(font.readAsBytesSync())),
               ))
@@ -197,7 +200,23 @@ void main() {
                 },
               ];
             } else if (path.endsWith('/tasks/queue')) {
-              data = {'tasks': armed ? [{'id':'task', 'plan_id':'plan', 'drop_id':'drop', 'drop_name':'Paper Worlds', 'status':'armed', 'chain':'Base', 'stage_name':'Whitelist', 'quantity':2, 'time_wat_label':'11 Oct · 16:00 WAT'}] : []};
+              data = {
+                'tasks': armed
+                    ? [
+                        {
+                          'id': 'task',
+                          'plan_id': 'plan',
+                          'drop_id': 'drop',
+                          'drop_name': 'Paper Worlds',
+                          'status': 'armed',
+                          'chain': 'Base',
+                          'stage_name': 'Whitelist',
+                          'quantity': 2,
+                          'time_wat_label': '11 Oct · 16:00 WAT',
+                        },
+                      ]
+                    : [],
+              };
             } else if (path.endsWith('/drops')) {
               data = {'drops': []};
             } else if (path.endsWith('/activity') ||
@@ -239,7 +258,7 @@ void main() {
         Future<void> capture(String name) async {
           expect(tester.takeException(), isNull);
           expect(find.text('Mintly'), findsNothing);
-          if (!font.existsSync() || scale != 1.0) return;
+          if (defaultTestFont || !font.existsSync() || scale != 1.0) return;
           await tester.runAsync(() async {
             final image =
                 await (captureKey.currentContext!.findRenderObject()
@@ -297,14 +316,21 @@ void main() {
         expect(find.text('Total spent'), findsOneWidget);
         expect(find.textContaining('0xconfirmed'), findsNothing);
         await tester.ensureVisible(find.text('View details'));
+        await tester.pumpAndSettle();
         await tester.tap(find.text('View details'));
         await tester.pumpAndSettle();
         await tester.ensureVisible(find.text('Approval & recovery history'));
+        await tester.pumpAndSettle();
         await tester.tap(find.text('Approval & recovery history'));
         await tester.pumpAndSettle();
         expect(find.text('Transaction: 0xconfirmed'), findsOneWidget);
         await capture('mint-details');
         await tester.pageBack();
+        await tester.pumpAndSettle();
+        await tester.scrollUntilVisible(
+          find.text('Copies'), -300,
+          scrollable: find.byType(Scrollable).first,
+        );
         await tester.pumpAndSettle();
         await tester.tap(find.text('Copies'));
         await tester.pumpAndSettle();
