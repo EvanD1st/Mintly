@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../state/app_state.dart';
 import '../theme/compatible_icons.dart';
+import 'refresh_glyph.dart';
 
 String formatNative(dynamic raw) {
   final value = BigInt.tryParse('$raw') ?? BigInt.zero;
@@ -109,7 +110,7 @@ class _NetworkBudgetCardState extends ConsumerState<NetworkBudgetCard> {
                   IconButton(
                     tooltip: 'Refresh budget',
                     onPressed: () => ref.invalidate(networkBudgetsProvider),
-                    icon: const Icon(Icons.refresh, size: 19),
+                    icon: const RefreshGlyph(size: 19),
                   ),
                 ],
               ),

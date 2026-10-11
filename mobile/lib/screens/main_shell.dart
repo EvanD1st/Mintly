@@ -82,7 +82,7 @@ class _MainShellState extends ConsumerState<MainShell>
                   green,
                   muted,
                 ),
-                _buildNavItem(2, Icons.copy_outlined, 'Copy', green, muted),
+                _buildNavItem(2, Icons.history, 'Copy', green, muted),
                 _buildNavItem(3, Icons.history, 'Activity', green, muted),
                 _buildNavItem(
                   4,

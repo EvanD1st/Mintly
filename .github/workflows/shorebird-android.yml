@@ -38,7 +38,8 @@ jobs:
       MINTLY_KEYSTORE_PASSWORD: ${{ secrets.MINTLY_KEYSTORE_PASSWORD }}
       MINTLY_KEY_PASSWORD: ${{ secrets.MINTLY_KEY_PASSWORD }}
       MINTLY_KEY_ALIAS: ${{ secrets.MINTLY_KEY_ALIAS }}
-      RELEASE_VERSION: ${{ inputs.release_version || vars.MINTLY_SHOREBIRD_RELEASE_VERSION }}
+      RELEASE_VERSION: ${{ inputs.release_version || vars.MINTLY_SHOREBIRD_PATCH_RELEASE_VERSIONS || vars.MINTLY_SHOREBIRD_RELEASE_VERSION }}
+      AUDITED_OTA: ${{ github.event_name == 'push' || inputs.audited_wallet_ota == true }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -97,21 +98,23 @@ jobs:
           curl --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/shorebirdtech/install/main/install.sh -sSf | bash
           echo "$HOME/.config/shorebird/bin" >> "$GITHUB_PATH"
       - name: Test compatibility with earliest installed icon fonts
-        if: steps.scope.outputs.skip != 'true' && inputs.audited_wallet_ota == true
+        if: steps.scope.outputs.skip != 'true' && env.AUDITED_OTA == 'true'
         working-directory: mobile
-        run: flutter test --dart-define=MINTLY_LEGACY_ICONS=true
+        run: |
+          flutter test --dart-define=MINTLY_LEGACY_ICONS=true
+          flutter test --dart-define=MINTLY_RELEASE_5_ICONS=true
       - name: Create signed Android release
         if: steps.scope.outputs.skip != 'true' && inputs.operation == 'release'
         working-directory: mobile
         run: shorebird --json release android --artifact apk --flutter-version 3.44.8
       - name: Publish Dart patch
-        if: steps.scope.outputs.skip != 'true' && (github.event_name == 'push' || inputs.operation == 'patch') && inputs.audited_wallet_ota != true
+        if: steps.scope.outputs.skip != 'true' && inputs.operation == 'patch' && env.AUDITED_OTA != 'true'
         working-directory: mobile
         run: |
           : "${RELEASE_VERSION:?Set MINTLY_SHOREBIRD_RELEASE_VERSION or dispatch with release_version}"
           shorebird --json patch android --release-version "$RELEASE_VERSION"
       - name: Publish audited wallet OTA
-        if: steps.scope.outputs.skip != 'true' && inputs.operation == 'patch' && inputs.audited_wallet_ota == true
+        if: steps.scope.outputs.skip != 'true' && (github.event_name == 'push' || inputs.operation == 'patch') && env.AUDITED_OTA == 'true'
         working-directory: mobile
         run: |
           : "${RELEASE_VERSION:?Dispatch with release_version}"
@@ -119,7 +122,7 @@ jobs:
           python -m unittest discover -s ../deploy -p test_shorebird_wallet_ota.py
           python ../deploy/shorebird-wallet-ota.py --release-version "$RELEASE_VERSION"
       - name: Upload OTA compatibility audit
-        if: always() && inputs.audited_wallet_ota == true
+        if: always() && env.AUDITED_OTA == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: mintly-wallet-ota-audit

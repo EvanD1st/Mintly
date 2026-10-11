@@ -146,6 +146,8 @@ def patch_release(version, track, audit_only):
     legacy_icons = version in {"1.0.0+1", "1.0.1+2"}
     if legacy_icons:
         command.append("--dart-define=MINTLY_LEGACY_ICONS=true")
+    if version == "1.1.2+5":
+        command.append("--dart-define=MINTLY_RELEASE_5_ICONS=true")
     # Isolate Shorebird downloads so the archive audited is the exact release
     # selected by the CLI, rather than a guessed or stale release artifact.
     with installed_native_sources(version), installed_plugin_graph(legacy_icons), tempfile.TemporaryDirectory(prefix="mintly-ota-") as scratch:
@@ -165,6 +167,7 @@ def patch_release(version, track, audit_only):
                 subprocess.run(command + ["--dry-run", "--allow-asset-diffs"], env=env, check=True)
             result = audit(candidates[0], built)
             result.update(release_version=version, track=track, legacy_icons=legacy_icons,
+                          release_5_icons=version == "1.1.2+5",
                           browser_links="copy and paste" if legacy_icons else "native launcher",
                           preserved_installed_launcher=preserved_launcher,
                           native_checks="Shorebird enabled; no override")
