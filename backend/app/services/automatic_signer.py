@@ -61,6 +61,8 @@ async def preflight_task(db, task_id, vault=None):
         raise ValueError('Task is not available for advance checks')
     auth = await db.get(MintAuthorization, task.authorization_id)
     s = copy.deepcopy(auth.snapshot)
+    from app.services.mint_diagnostics import set_owner
+    set_owner(s['user_id'])
     grant = await automatic.grant_for(db, auth.grant_id, s['user_id'])
     if auth.is_revoked or aware(task.expires_at_utc) <= datetime.now(timezone.utc):
         raise ValueError('Task expired or was cancelled')
@@ -168,6 +170,8 @@ async def prepare_task(db, task_id, vault=None):
         raise ValueError('Task is cancelled or already terminal')
     auth = await db.get(MintAuthorization, task.authorization_id)
     s = copy.deepcopy(auth.snapshot)
+    from app.services.mint_diagnostics import set_owner
+    set_owner(s['user_id'])
     grant = await automatic.grant_for(db, auth.grant_id, s['user_id'])
     wallet = await db.get(Wallet, task.wallet_id)
     user = await db.get(User, grant.user_id)

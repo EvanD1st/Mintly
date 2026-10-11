@@ -3,6 +3,7 @@ import asyncio,json,os,time,uuid
 from datetime import datetime,timezone,timedelta
 from pathlib import Path
 import httpx,pytest
+from email.utils import format_datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 from app.config import settings
@@ -82,6 +83,48 @@ async def test_exhausted_account_bucket_blocks_all_workers_until_reset(test_db,m
     await limits.observe('/drops/example',200,{'X-RateLimit-Remaining':'0','X-RateLimit-Reset':str(int(now.timestamp())+120)},factory=factory,now=now)
     delay,reason=await limits.acquire('/drops/example/mint',factory=factory,now=now+timedelta(seconds=1))
     assert delay>=118 and reason=='cooldown'
+
+
+@pytest.mark.parametrize('header', ['seconds','http_date'])
+async def test_explicit_503_retry_after_blocks_only_its_endpoint_across_sessions(test_db,monkeypatch,header):
+    monkeypatch.setattr(settings,'OPENSEA_COORDINATE_REQUESTS',True)
+    factory=async_sessionmaker(test_db.bind,expire_on_commit=False)
+    now=datetime.now(timezone.utc).replace(microsecond=0)
+    value='60' if header=='seconds' else format_datetime(now+timedelta(seconds=60),usegmt=True)
+    await limits.observe('/drops/example/mint',503,{'Retry-After':value},factory=factory,now=now)
+    async with factory() as other_session:
+        assert other_session is not test_db
+        delay,reason=await limits.acquire('/drops/example/mint',factory=factory,now=now+timedelta(seconds=20))
+    assert 39<=delay<=40 and reason=='cooldown'
+    assert (await limits.acquire('/drops/example',factory=factory,now=now+timedelta(seconds=20)))[0]==0
+    assert (await limits.acquire('/drops/example/mint',factory=factory,now=now+timedelta(seconds=61)))[0]==0
+
+
+async def test_malformed_503_body_preserves_status_retry_and_shared_cooldown(test_db,monkeypatch):
+    monkeypatch.setattr(settings,'OPENSEA_COORDINATE_REQUESTS',True)
+    factory=async_sessionmaker(test_db.bind,expire_on_commit=False)
+    monkeypatch.setattr(limits,'AsyncSessionLocal',factory)
+    async def permitted(*args,**kwargs):return 0,None
+    monkeypatch.setattr(limits,'permit',permitted)
+    class Content:
+        async def read(self,*args):return b'<html>temporarily unavailable</html>'
+    class Response:
+        status=503;headers={'Retry-After':'60'};content_length=None;content=Content()
+        async def __aenter__(self):return self
+        async def __aexit__(self,*args):pass
+    class Session:
+        def __init__(self,*args,**kwargs):pass
+        async def __aenter__(self):return self
+        async def __aexit__(self,*args):pass
+        def request(self,*args,**kwargs):return Response()
+    monkeypatch.setattr('app.services.opensea.aiohttp.ClientSession',Session)
+    with diag.capture(str(uuid.uuid4()),'preparation') as events:
+        with pytest.raises(OpenSeaUnavailable) as caught:
+            await OpenSeaClient()._request('POST','/drops/example/mint')
+    assert caught.value.upstream_status==503 and caught.value.retry_after_seconds==60
+    assert events[0]['http_status']==503 and events[0]['retry_after_seconds']==60
+    delay,reason=await limits.acquire('/drops/example/mint',factory=factory)
+    assert delay>=58 and reason=='cooldown'
 
 
 async def test_cooldown_prevents_network_requests_and_reports_local_deferral(test_db,monkeypatch):

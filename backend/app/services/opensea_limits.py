@@ -27,7 +27,7 @@ async def acquire(path,*,factory=None,now=None,request_id=None):
     if not settings.OPENSEA_COORDINATE_REQUESTS:return 0,None
     now=now or datetime.now(timezone.utc);name=group(path)
     async with (factory or AsyncSessionLocal)() as db:
-        from app.services.mint_diagnostics import current_phase
+        from app.services.mint_diagnostics import current_phase,current_owner
         if name=='mint' and current_phase()=='preflight':
             from app.models import CopyEvent,CopyRule,CopyWatch,CopyCheck,MintTask,Wallet,User
             from app.services.automatic import MODE
@@ -51,14 +51,23 @@ async def acquire(path,*,factory=None,now=None,request_id=None):
                 await db.commit()
                 return 30,'execution_priority'
         gates=await rows(db,['all',name])
+        owner=current_owner() if name=='mint' else None
         if request_id:
             await db.execute(delete(OpenSeaRequestWaiter).where(OpenSeaRequestWaiter.expires_at<=now))
             waiter=await db.get(OpenSeaRequestWaiter,request_id)
             if waiter is None:
                 waiter=OpenSeaRequestWaiter(id=request_id,priority=0 if current_phase() in ('copy','preparation') else 1 if name=='mint' else 2,
+                    owner_id=owner,
                     expires_at=now+timedelta(seconds=max(1,min(10,settings.OPENSEA_QUEUE_WAIT_SECONDS))+1))
                 db.add(waiter);await db.flush()
-            first=await db.scalar(select(OpenSeaRequestWaiter.id).order_by(OpenSeaRequestWaiter.priority,OpenSeaRequestWaiter.created_at,OpenSeaRequestWaiter.id).limit(1))
+            waiting=(await db.scalars(select(OpenSeaRequestWaiter).order_by(
+                OpenSeaRequestWaiter.priority,OpenSeaRequestWaiter.created_at,OpenSeaRequestWaiter.id))).all()
+            highest=waiting[0].priority
+            peers=[item for item in waiting if item.priority==highest]
+            last_owner=next((gate.last_owner_id for gate in gates if gate.name=='mint'),None)
+            # Among equally urgent mint requests, give another account the
+            # next turn before the previous account consumes more permits.
+            first=next((item.id for item in peers if item.owner_id and item.owner_id!=last_owner),peers[0].id)
             if first!=request_id:
                 await db.commit();return 1,'queued'
         blocked=max(aware(g.blocked_until) for g in gates)
@@ -68,7 +77,9 @@ async def acquire(path,*,factory=None,now=None,request_id=None):
             return max(1,ceil((due-now).total_seconds())),'cooldown' if blocked>now else 'paced'
         global_gap=max(1.0,settings.OPENSEA_GLOBAL_REQUEST_SECONDS)
         gap=max(global_gap,settings.OPENSEA_MINT_REQUEST_SECONDS) if name=='mint' else max(global_gap,60) if name=='key_creation' else global_gap
-        for g in gates:g.next_request_at=now+timedelta(seconds=global_gap if g.name=='all' else gap)
+        for g in gates:
+            g.next_request_at=now+timedelta(seconds=global_gap if g.name=='all' else gap)
+            if g.name=='mint' and owner:g.last_owner_id=owner
         if request_id:await db.delete(waiter)
         await db.commit()
     return 0,None
@@ -99,11 +110,11 @@ async def observe(path,status,headers,*,factory=None,now=None):
         if 0<seconds<=86400:reset=now+timedelta(seconds=seconds)
     except (ValueError,TypeError):pass
     name=group(path);updates={}
-    if status==429:
+    if status==429 or status==503 and wait is not None:
         # Reset may describe a different nonempty bucket (e.g. 599/600).
         # Retry-After is authoritative for this endpoint unless that bucket is exhausted.
         until=now+timedelta(seconds=wait if wait is not None else 60)
-        if reset and headers.get('X-RateLimit-Remaining')=='0':until=max(until,reset)
+        if status==429 and reset and headers.get('X-RateLimit-Remaining')=='0':until=max(until,reset)
         updates[name]=until
     if headers.get('X-RateLimit-Remaining')=='0' and reset:updates['all']=reset
     if not updates:return

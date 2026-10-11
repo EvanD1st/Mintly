@@ -118,6 +118,25 @@ async def test_shared_queue_prioritizes_mint_over_background_and_expires_leases(
     assert (await limits.acquire('/drops/example',factory=factory,now=now+timedelta(seconds=7),request_id=str(uuid.uuid4())))[0]==0
 
 
+async def test_equal_priority_copy_and_armed_mints_alternate_accounts(test_db,monkeypatch):
+    monkeypatch.setattr(settings,'OPENSEA_COORDINATE_REQUESTS',True)
+    factory=async_sessionmaker(test_db.bind,expire_on_commit=False)
+    now=datetime.now(timezone.utc);owner_a=str(uuid.uuid4());owner_b=str(uuid.uuid4())
+    with diag.capture(str(uuid.uuid4()),'preparation',owner_id=owner_a):
+        assert (await limits.acquire('/drops/example/mint',factory=factory,now=now))[0]==0
+    a,b=str(uuid.uuid4()),str(uuid.uuid4())
+    async with factory() as db:
+        db.add_all([OpenSeaRequestWaiter(id=a,priority=0,owner_id=owner_a,expires_at=now+timedelta(seconds=50)),
+                    OpenSeaRequestWaiter(id=b,priority=0,owner_id=owner_b,expires_at=now+timedelta(seconds=50))])
+        await db.commit()
+    with diag.capture('', 'copy',owner_id=owner_a):
+        assert await limits.acquire('/drops/example/mint',factory=factory,now=now+timedelta(seconds=20),request_id=a)==(1,'queued')
+    with diag.capture('', 'copy',owner_id=owner_b):
+        assert (await limits.acquire('/drops/example/mint',factory=factory,now=now+timedelta(seconds=20),request_id=b))[0]==0
+    with diag.capture('', 'copy',owner_id=owner_a):
+        assert (await limits.acquire('/drops/example/mint',factory=factory,now=now+timedelta(seconds=40),request_id=a))[0]==0
+
+
 async def test_default_queue_wait_can_cover_the_shared_gap():
     assert settings.OPENSEA_QUEUE_WAIT_SECONDS > settings.OPENSEA_GLOBAL_REQUEST_SECONDS
 
@@ -171,6 +190,27 @@ async def test_fast_fcfs_budget_admits_two_wallets_and_reports_third_deadline(te
     assert next_retry(retry,end,1,wait)==(end,True)
     client=OpenSeaClient();client.last_mint_reason='supply_exhausted'
     assert client.mint_error(422).status==409
+
+
+async def test_six_wallet_capacity_with_and_without_preflight_instructions(test_db,monkeypatch):
+    monkeypatch.setattr(settings,'OPENSEA_COORDINATE_REQUESTS',True)
+    monkeypatch.setattr(settings,'OPENSEA_GLOBAL_REQUEST_SECONDS',6)
+    monkeypatch.setattr(settings,'OPENSEA_MINT_REQUEST_SECONDS',20)
+    factory=async_sessionmaker(test_db.bind,expire_on_commit=False)
+    start=datetime.now(timezone.utc);deadline=start+timedelta(seconds=26)
+    fresh_times=[]
+    for wallet in range(6):
+        candidate=start if wallet==0 else fresh_times[-1]+timedelta(seconds=20)
+        delay,reason=await limits.acquire('/drops/example/mint',factory=factory,now=candidate)
+        assert delay==0 and reason is None
+        fresh_times.append(candidate)
+    assert [int((at-start).total_seconds()) for at in fresh_times]==[0,20,40,60,80,100]
+    assert sum(at<deadline for at in fresh_times)==2
+    # Valid, revalidated preflight instructions avoid these six mint-builder
+    # requests; this only measures provider capacity, not chain inclusion.
+    preflight_valid=[True]*6
+    assert sum(not valid for valid in preflight_valid)==0
+    assert next_retry(start+timedelta(seconds=20),deadline,1,20)==(deadline,True)
 
 async def test_new_unsigned_proof_refreshes_without_changing_approval(lab,monkeypatch):
     from eth_abi import encode

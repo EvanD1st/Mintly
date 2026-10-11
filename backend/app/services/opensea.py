@@ -153,6 +153,8 @@ class OpenSeaClient:
                 async with session.request(method, f"{API_ROOT}{path}", headers=headers,
                                            json=payload, allow_redirects=False) as response:
                     status=response.status;retry_after=response.headers.get('Retry-After')
+                    from app.services.mint_diagnostics import retry_seconds
+                    self.last_status=status;self.last_retry_after=retry_seconds(retry_after)
                     await opensea_limits.observe(path,status,response.headers)
                     if 300 <= response.status < 400:
                         failure='redirect'
@@ -167,12 +169,10 @@ class OpenSeaClient:
                     data = json.loads(body) if body else {}
                     if not isinstance(data, dict):
                         failure='invalid_response'
-                        raise OpenSeaUnavailable("OpenSea returned an unexpected response.")
-                    self.last_status=status
+                        raise OpenSeaUnavailable("OpenSea returned an unexpected response.",
+                            retry_after_seconds=self.last_retry_after,upstream_status=status)
                     from app.services.mint_diagnostics import provider_code
                     upstream_code=provider_code(data)
-                    from app.services.mint_diagnostics import retry_seconds
-                    self.last_retry_after=retry_seconds(retry_after)
                     if status in (400,409,422) and path.endswith('/mint'):
                         from app.services.mint_diagnostics import mint_rejection_reason
                         mint_reason=mint_rejection_reason(data)
@@ -183,7 +183,9 @@ class OpenSeaClient:
                     return response.status, data
         except (aiohttp.ClientError, TimeoutError, ValueError) as error:
             failure='timeout' if isinstance(error,TimeoutError) else 'invalid_response' if isinstance(error,ValueError) else 'network_error'
-            raise OpenSeaUnavailable("OpenSea is temporarily unavailable.") from error
+            from app.services.mint_diagnostics import retry_seconds
+            raise OpenSeaUnavailable("OpenSea is temporarily unavailable.",
+                retry_after_seconds=retry_seconds(retry_after),upstream_status=status) from error
         finally:
             try:record_http(method,path,status,retry_after,started,failure,mint_reason=mint_reason,upstream_code=upstream_code)
             except Exception:pass  # Diagnostic logging never changes the HTTP outcome.

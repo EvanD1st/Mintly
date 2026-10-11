@@ -88,10 +88,11 @@ def endpoint(path):
 
 
 @contextmanager
-def capture(task_id,phase,*,event_id=None):
+def capture(task_id,phase,*,event_id=None,owner_id=None):
     context={'task_id':task_id if re.fullmatch(r'[a-fA-F0-9-]{36}',task_id) else None,
         'phase':phase if phase in ('preflight','preparation','copy') else 'unknown',
-        'event_id':event_id if isinstance(event_id,str) and re.fullmatch(r'[a-f0-9]{64}',event_id) else None,'events':[]}
+        'event_id':event_id if isinstance(event_id,str) and re.fullmatch(r'[a-f0-9]{64}',event_id) else None,
+        'owner_id':owner_id if isinstance(owner_id,str) and re.fullmatch(r'[a-fA-F0-9-]{36}',owner_id) else None,'events':[]}
     token=_context.set(context)
     try:yield context['events']
     finally:_context.reset(token)
@@ -100,6 +101,17 @@ def capture(task_id,phase,*,event_id=None):
 def current_phase():
     context=_context.get()
     return context['phase'] if context else None
+
+
+def current_owner():
+    context=_context.get()
+    return context['owner_id'] if context else None
+
+
+def set_owner(owner_id):
+    context=_context.get()
+    if context is not None and isinstance(owner_id,str) and re.fullmatch(r'[a-fA-F0-9-]{36}',owner_id):
+        context['owner_id']=owner_id
 
 
 def record_terms(snapshot,mint):

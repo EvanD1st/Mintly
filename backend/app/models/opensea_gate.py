@@ -9,9 +9,11 @@ class OpenSeaRequestGate(Base):
     name:Mapped[str]=mapped_column(String(24),primary_key=True)
     next_request_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),nullable=False)
     blocked_until:Mapped[datetime]=mapped_column(DateTime(timezone=True),nullable=False)
+    last_owner_id:Mapped[str | None]=mapped_column(String(36),nullable=True)
 
 class OpenSeaRequestWaiter(Base):
     __tablename__='opensea_request_waiters'
     id:Mapped[str]=mapped_column(String(36),primary_key=True)
     priority:Mapped[int]=mapped_column(Integer,nullable=False)
+    owner_id:Mapped[str | None]=mapped_column(String(36),nullable=True)
     expires_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),nullable=False,index=True)
