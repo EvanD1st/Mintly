@@ -2,10 +2,15 @@ services:
   backend:
     environment:
       OPENSEA_KEY_FILE: /run/opensea/key.json
+      OPENSEA_SHARED_KEY_GID: "10001"
+      OPENSEA_COORDINATE_REQUESTS: "true"
+      OPENSEA_AUTO_RENEW_KEY: ${MINTLY_OPENSEA_AUTO_RENEW:-false}
     volumes:
       - ${MINTLY_OPENSEA_DIR:?Set MINTLY_OPENSEA_DIR}:/run/opensea:rw
   worker:
     environment:
       OPENSEA_KEY_FILE: /run/opensea/key.json
+      OPENSEA_SHARED_KEY_GID: "10001"
+      OPENSEA_COORDINATE_REQUESTS: "true"
     volumes:
       - ${MINTLY_OPENSEA_DIR:?Set MINTLY_OPENSEA_DIR}:/run/opensea:rw

@@ -1,0 +1,55 @@
+{
+  "source_commit": "da34b230d207a77b941659358a62515cb8085bc2",
+  "checked_at": "2026-10-09T18:34:36.032740+00:00",
+  "ci": {
+    "run_id": 37972264543,
+    "url": "https://github.com/EvanD1st/Mintly/actions/runs/37972264543",
+    "backend_passed": 406,
+    "postgresql_passed": 228,
+    "flutter_passed": 84,
+    "native_session_tests": "passed",
+    "production_startup": "passed"
+  },
+  "deployment": {
+    "release": "opensea-resilience-da34b23",
+    "exit_code": 0,
+    "services_healthy": true,
+    "schema": "018_opensea_requests",
+    "mobile_ota_required": false
+  },
+  "live_checks": {
+    "all_services_reuse_same_existing_key": true,
+    "key_mode": "0640",
+    "key_uid": 0,
+    "key_gid": 10001,
+    "signer_key_mount_read_only": true,
+    "copy_worker_key_mount_read_only": true,
+    "api_owner_auto_renew_enabled": true,
+    "shared_request_coordination_enabled": true,
+    "provider_mint_cooldown_persisted": true,
+    "stopped_task_remains_terminal_unsigned": true
+  },
+  "boundaries": {
+    "customer_tasks_created_as_test": false,
+    "customer_signatures_or_broadcasts_triggered_as_test": false,
+    "failed_tasks_revived": false,
+    "spending_caps_changed": false,
+    "nonce_rules_changed": false,
+    "public_fallback_enabled": false,
+    "approval_expiry_extended": false,
+    "wallet_proof_checks_bypassed": false,
+    "wallet_secrets_exposed_to_api_or_copy_worker": false
+  },
+  "caches": {
+    "public_schedule_seconds": 15,
+    "verified_process_instructions_seconds": 60,
+    "signer_private_encrypted_seconds": 300,
+    "always_revalidate_before_signing": true
+  },
+  "retry_policy": {
+    "honours_retry_after": true,
+    "coordinates_across_workers": true,
+    "transient_retries_within_original_expiry": true,
+    "permanent_rejections_stay_terminal": true
+  }
+}

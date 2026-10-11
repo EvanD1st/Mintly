@@ -258,11 +258,11 @@ async def test_daily_budget_concurrent_arms_cannot_overbook(lab,limits):
 
 @pytest.mark.parametrize('status,index,label',[
     ('armed',0,'Waiting for mint time'),('prepared',1,'Preparing'),('submitted',2,'Sent'),
-    ('uncertain',2,'Checking transaction status'),('confirmed',4,'Confirmed'),('failed',0,'Mint stopped')])
+    ('uncertain',2,'Checking transaction status'),('confirmed',4,'Confirmed'),('failed',0,'Preparation stopped')])
 def test_progress_labels_follow_evidence(status,index,label):
     task=SimpleNamespace(status=status,included_at=None,inclusion_result=None,preparation_started_at=None,
         signed_tx_raw='saved' if status=='prepared' else None,broadcast_attempts=1 if status in ('submitted','uncertain') else 0,
-        confirmed_at=None,failure_reason=None)
+        confirmed_at=None,failure_reason=None,transaction_hash=None)
     value=progress(task)
     assert value['label']==label and value['key']==('checking','preparing','sent','included','confirmed')[index]
     if status!='confirmed':assert value['steps'][-1]['state']=='pending'
@@ -271,7 +271,7 @@ def test_progress_labels_follow_evidence(status,index,label):
 @pytest.mark.parametrize('outcome',['success','reverted'])
 def test_inclusion_is_not_confirmation(outcome):
     task=SimpleNamespace(status='submitted',included_at=datetime.now(timezone.utc),inclusion_result=outcome,
-        preparation_started_at=None,signed_tx_raw='saved',broadcast_attempts=1,confirmed_at=None,failure_reason=None)
+        preparation_started_at=None,signed_tx_raw='saved',broadcast_attempts=1,confirmed_at=None,failure_reason=None,transaction_hash=None)
     value=progress(task)
     assert 'waiting for confirmations' in value['label'] and value['steps'][-1]['state']=='pending'
 

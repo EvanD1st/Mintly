@@ -298,13 +298,14 @@ async def lab(test_db, monkeypatch, tmp_path):
         return await step(factory, signing, now=datetime.fromtimestamp(w.eth.get_block('latest').timestamp, timezone.utc))
     async def build_mint(self,slug,address,quantity):
         kind=state.kind
+        mint_params=getattr(state,'mint_params',params)
         if kind=='allowlist':
-            data='0x'+ALLOW_SELECTOR+encode(['address','address','address','uint256',PARAM_TYPE,'bytes32[]'],[nft.address,fee,address,quantity,params,[]]).hex()
+            data='0x'+ALLOW_SELECTOR+encode(['address','address','address','uint256',PARAM_TYPE,'bytes32[]'],[nft.address,fee,address,quantity,mint_params,[]]).hex()
         else:
-            mint=dict(contract=nft.address,wallet=address,fee=fee,params=params,salt=17)
+            mint=dict(contract=nft.address,wallet=address,fee=fee,params=mint_params,salt=17)
             sig=Account.sign_message(encode_typed_data(full_message=signed_mint_typed_data(mint,31337)),presale_signer.key).signature
-            data='0x'+SIGNED_SELECTOR+encode(['address','address','address','uint256',PARAM_TYPE,'uint256','bytes'],[nft.address,fee,address,quantity,params,17,sig]).hex()
-        return 200,dict(to=SEADROP_V1_ADDRESS,data=data,value=str(quantity*10),chain='local-test')
+            data='0x'+SIGNED_SELECTOR+encode(['address','address','address','uint256',PARAM_TYPE,'uint256','bytes'],[nft.address,fee,address,quantity,mint_params,17,sig]).hex()
+        return 200,dict(to=SEADROP_V1_ADDRESS,data=data,value=str(quantity*mint_params[0]),chain='local-test')
     monkeypatch.setattr('app.services.opensea.OpenSeaClient.build_mint',build_mint)
     monkeypatch.setitem(automatic.CHAINS,'local-test',(31337,'Local EVM'))
     state=SimpleNamespace(w=w,sea=sea,nft=nft,owner=owner,user=user,grant=grant,stage=stage,drop=drop,wallet=wallet,

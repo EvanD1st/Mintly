@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-24.04
     services:
       postgres-tests:
-        image: postgres:16-alpine
+        image: public.ecr.aws/docker/library/postgres:16-alpine
         env:
           POSTGRES_USER: mintly_test
           POSTGRES_PASSWORD: disposable-ci-only
@@ -56,12 +56,16 @@ jobs:
         working-directory: backend
         run: |
           node --test tests/wallet-capabilities.browser.cjs
-          python -m pytest tests/test_automatic_evm.py tests/test_wallet_relink_networks_evm.py tests/test_copy_wallet_networks.py tests/test_copy_presales.py tests/test_wat_scheduling.py tests/test_automation_readiness.py tests/test_mint_controls.py tests/test_guided_journeys.py tests/test_opensea_identity.py -v
+          python -m pytest tests/test_automatic_evm.py tests/test_wallet_relink_networks_evm.py tests/test_copy_wallet_networks.py tests/test_copy_presales.py tests/test_wat_scheduling.py tests/test_automation_readiness.py tests/test_mint_controls.py tests/test_guided_journeys.py tests/test_opensea_identity.py tests/test_mint_diagnostics.py tests/test_opensea_resilience.py tests/test_copy_event_retry.py tests/test_copy_failure_reasons.py tests/test_copy_price_modes.py tests/test_opensea_reliability.py -v
         env:
           MINTLY_TEST_RPC: http://127.0.0.1:18545
           MINTLY_TEST_DATABASE_URL: postgresql+asyncpg://mintly_test:disposable-ci-only@127.0.0.1:15432/mintly_test
       - name: Check shell syntax and clean production startup
         run: |
+          # Official-image mirror avoids Docker Hub's shared-runner pull quota.
+          docker tag public.ecr.aws/docker/library/postgres:16-alpine postgres:16-alpine
+          docker pull public.ecr.aws/docker/library/python:3.12-slim
+          docker tag public.ecr.aws/docker/library/python:3.12-slim python:3.12-slim
           for script in deploy/*.sh; do bash -n "$script"; done
           APP_DIR="$RUNNER_TEMP/mintly" bash deploy/deploy-ubuntu.sh
           test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8095/api/wallets)" = 401

@@ -60,7 +60,8 @@ void main() {
     expect(find.text('Pending maximum: 0.0002 ETH'),findsOneWidget);
   });
 
-  testWidgets('Check-only setup uses an owned wallet without a signing policy and never approves a grant', (tester) async {
+  for (final free in [true,false]) {
+  testWidgets('Check-only setup uses an owned wallet without a signing policy and never approves a grant: free=$free', (tester) async {
     tester.view.physicalSize = const Size(390,844);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -91,9 +92,15 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.textContaining('My wallet').last);
     await tester.pumpAndSettle();
+    if (free) {
+      await tester.scrollUntilVisible(find.text('Free mints only'),150,scrollable:list);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Free mints only'));
+      await tester.pumpAndSettle();
+    }
     await tester.scrollUntilVisible(find.text('Max mint price per NFT'),180,scrollable:list);
     await tester.pumpAndSettle();
-    await tester.enterText(find.widgetWithText(TextFormField,'Max mint price per NFT'),'0');
+    if (!free) await tester.enterText(find.widgetWithText(TextFormField,'Max mint price per NFT'),'0.00001');
     await tester.scrollUntilVisible(find.text('Gas spending limit'),180,scrollable:list);
     await tester.pumpAndSettle();
     await tester.enterText(find.widgetWithText(TextFormField,'Gas spending limit'),'0.0005');
@@ -114,7 +121,11 @@ void main() {
     expect(checked?['wallet_id'],'receiver');
     expect(checked?.containsKey('grant_ids'),false);
     expect(checked?.containsKey('consent'),false);
+    expect(checked?['free_only'],free);
+    expect(checked?['paid_only'],!free);
+    expect(checked?['include_presales'],true);
   });
+  }
 
   test('Wallet alerts must belong to the signed-in account', () async {
     final api=ApiService(client:MockClient((request) async=>http.Response('{"token":"test","user":{"id":"member","username":"member"}}',200)));

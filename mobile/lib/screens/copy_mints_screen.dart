@@ -1336,6 +1336,7 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
       'fee_cap_eth': _gas.text.trim(),
       'budget_eth': _budget.text.trim(),
       'free_only': _free,
+      'paid_only': !_free,
       'include_presales': _includePresales,
       'expires_at': _expiry!.toIso8601String(),
       if (!_checkOnly) 'consent': true,
@@ -1489,13 +1490,13 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
                   const Text('Which mints should Mintly copy?',style:TextStyle(fontWeight:FontWeight.w700)),
                   const SizedBox(height:8),
                   Wrap(spacing:8,runSpacing:8,children:[
-                    for (final choice in [(true,'Free mints only'),(false,'Public / whitelist mints')])
+                    for (final choice in [(true,'Free mints only'),(false,'Paid mints')])
                       OutlinedButton(onPressed:locked ? null : () => setState(() {
                         _free = choice.$1; _consent = false;
                         if (_free) _price.text = '0';
                       }),style:OutlinedButton.styleFrom(backgroundColor:_free == choice.$1 ? Theme.of(context).colorScheme.primary.withValues(alpha:.12) : null),child:Text(choice.$2)),
                   ]),
-                  const Text('Public and eligible whitelist stages. Network fees still apply.',style:TextStyle(fontSize:12)),
+                  Text(_free ? 'Copies free public and whitelist stages you qualify for. Gas fees may apply.' : 'Copies paid public and whitelist stages you qualify for, within your limits. Gas fees may apply.',style:const TextStyle(fontSize:12)),
                   const SizedBox(height:14),
                   if (_free) const _Panel(child:Text('Free mints use the maximum available for your wallet, within your limits (up to 100 NFTs).'))
                   else _Panel(child:Column(crossAxisAlignment:CrossAxisAlignment.stretch,children:[
@@ -1521,7 +1522,7 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
                           keyboardType: const TextInputType.numberWithOptions(
                             decimal: true,
                           ),
-                          validator: _amount,
+                          validator: (value) => _amount(value) ?? (!_free && !RegExp(r'[1-9]').hasMatch(value ?? '') ? 'Enter a positive maximum price for paid mints.' : null),
                           decoration: const InputDecoration(
                             labelText: 'Max mint price per NFT',
                             suffixText: 'ETH',
@@ -1603,7 +1604,7 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
                           ? 'Start check-only monitoring with these limits. No spending approval is given.'
                           : _free
                           ? 'Approve maximum free public and eligible whitelist minting (up to 100 NFTs), including gas within these limits.'
-                          : 'Approve public and eligible whitelist copying${_quantityChoice == 'max' ? ' at the maximum available quantity (up to 100 NFTs)' : ' at my selected quantity'}, including gas within these limits.',
+                          : 'Approve paid public and eligible whitelist copying${_quantityChoice == 'max' ? ' at the maximum available quantity (up to 100 NFTs)' : ' at my selected quantity'}, including gas within these limits.',
                     ),
                   ),
                   if (_error != null)

@@ -13,8 +13,7 @@ from app.models import MintPlan, MintPlanRecord, MintPermission, MintTask, Drop,
 from fastapi.encoders import jsonable_encoder
 from app.schemas.drop import DropSchema
 from app.services import automatic
-from app.services.opensea import stage_schedule
-from app.services.mint_plans import aware, refresh_mint_plan
+from app.services.mint_plans import aware, refresh_mint_plan, verified_stage_schedule
 from app.services.opensea import CHAINS, OpenSeaClient, OpenSeaUnavailable, collection_slug
 
 router = APIRouter(prefix="/mint-plans", tags=["mint-plans"])
@@ -62,7 +61,7 @@ def response(plan: MintPlan, wallet: Wallet) -> dict:
 
 
 def api_error(error: OpenSeaUnavailable) -> HTTPException:
-    return HTTPException(status_code=error.status, detail=str(error))
+    return HTTPException(status_code=error.status, detail=str(error),headers={'Retry-After':str(error.retry_after_seconds)} if error.retry_after_seconds else None)
 
 
 @router.post("")
@@ -180,18 +179,24 @@ async def automatic_context(plan_id: str, user: User = Depends(get_current_user)
         before = jsonable_encoder(response(plan, wallet))
         transaction = {}
         await refresh_mint_plan(plan, wallet, client, detail=detail, transaction_out=transaction, db=db)
-        selected = next((s for s in stage_schedule(detail) if s['uuid'] == plan.stage_uuid), None)
+        from app.services.phase_identity import stage_key,schedule_matches
+        schedule = await verified_stage_schedule(detail, plan.chain_id, plan.contract_address)
+        selected = next((s for s in schedule if stage_key(s['uuid']) == stage_key(plan.stage_uuid)), None)
+        if (not plan.selected_stage and selected and selected['type'] == 'public_sale'
+                and (aware(plan.starts_at), aware(plan.ends_at), plan.price_wei)
+                != (selected['starts_at'], selected['ends_at'], selected['price_wei'])):
+            raise HTTPException(409, 'Public mint terms changed on chain. Choose the mint phase again before reviewing it.')
         if plan.selected_stage:
             from app.services.mint_stage_choice import pinned
-            if not selected or pinned(selected)!=plan.selected_stage:
+            if not selected or not schedule_matches(selected,plan.selected_stage,pinned):
                 raise HTTPException(409,'Your selected phase changed. Review its details again.')
-            overlaps=[s for s in stage_schedule(detail) if s['type']!='public_sale' and selected['type']!='public_sale'
+            overlaps=[s for s in schedule if s['type']!='public_sale' and selected['type']!='public_sale'
                 and (s['starts_at'],s['ends_at'])==(selected['starts_at'],selected['ends_at'])]
             if len(overlaps)>1:
                 raise HTTPException(409,'The project has overlapping whitelist phases whose exact mint instructions cannot be distinguished. Automatic minting is unavailable for this selection.')
         kinds = {'signed_presale':'signed','public_sale': 'public', 'allowlist': 'allowlist', 'signed': 'signed',
                  'allowlist_sale': 'allowlist', 'signed_sale': 'signed'}
-        if not selected or selected['price_wei'] is None or (not plan.selected_stage and selected['max_per_wallet'] < plan.quantity):
+        if not selected or plan.price_wei is None or (not plan.selected_stage and selected['max_per_wallet'] < plan.quantity):
             raise HTTPException(409, 'No mint stage with sufficient quantity is available.')
         # OpenSea stage types vary; unknown methods require explicit review rather than guessing.
         kind = kinds.get(selected['type'])
@@ -203,9 +208,15 @@ async def automatic_context(plan_id: str, user: User = Depends(get_current_user)
         if kind is None:
             raise HTTPException(409, 'This stage type is not supported for automatic minting.')
         automatic.enabled(plan.chain_id)
+        from app.services.mint_stage_choice import pinned
         drop_id = automatic.digest(['plan', plan.id, plan.chain_id, plan.contract_address.lower(),
-                                    plan.collection_name, jsonable_encoder(selected)])
+                                    pinned(selected),plan.price_wei,(plan.selected_stage or {}).get('wallet_total_limit')])
         stage_id = automatic.digest(['stage', drop_id])
+        previous=await db.get(MintStage,plan.automatic_stage_id) if plan.automatic_stage_id else None
+        if (previous and previous.drop_id==plan.automatic_drop_id and
+                (aware(previous.start_time_utc),aware(previous.end_time_utc),previous.price_wei,previous.limit_per_wallet)==
+                (selected['starts_at'],selected['ends_at'],plan.price_wei,(plan.selected_stage or {}).get('wallet_total_limit') or selected['max_per_wallet'])):
+            drop_id,stage_id=plan.automatic_drop_id,plan.automatic_stage_id
         drop = await db.get(Drop, drop_id)
         if drop is None:
             drop = Drop(id=drop_id, name=plan.collection_name, chain=plan.chain, chain_id=plan.chain_id,
@@ -214,8 +225,8 @@ async def automatic_context(plan_id: str, user: User = Depends(get_current_user)
                 status_kind='unknown', is_supported_integration=True, is_demo=False)
             drop.stages = [MintStage(id=stage_id, drop_id=drop_id, stage_name=selected['name'][:50],
                 start_time_utc=selected['starts_at'], end_time_utc=selected['ends_at'],
-                price_wei=selected['price_wei'], price_eth_str=eth_amount(selected['price_wei']),
-                limit_per_wallet=selected['max_per_wallet'], eligibility_status='unknown')]
+                price_wei=plan.price_wei, price_eth_str=eth_amount(plan.price_wei),
+                limit_per_wallet=(plan.selected_stage or {}).get('wallet_total_limit') or selected['max_per_wallet'], eligibility_status='unknown')]
             db.add(drop)
         plan.automatic_drop_id, plan.automatic_stage_id = drop_id, stage_id
         if any(before[k] != jsonable_encoder(response(plan, wallet))[k]

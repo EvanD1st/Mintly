@@ -1,5 +1,5 @@
 """Observe verified public SeaDrop mints; never replay another wallet's calldata."""
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from types import SimpleNamespace
 import uuid
 from eth_abi import decode, encode
@@ -83,7 +83,18 @@ async def copy_gas_quote(web3, tx, chain, paid=False):
         raise
 
 
+def accepts_price(rule,price):
+    """Price selection is independent of stage eligibility; missing flag is legacy scope."""
+    free,paid=rule.get('free_only',False),rule.get('paid_only',False)
+    if type(free) is not bool or type(paid) is not bool or (free and paid):
+        raise ValueError('Invalid copy price selection')
+    if paid and rule['price_cap_wei']<=0:
+        raise ValueError('Paid copying needs a positive approved price cap')
+    return (not free or price==0) and (not paid or price>0)
+
+
 def quantity_mode(rule):
+    accepts_price(rule,0)  # Validate the immutable price selection independently of quantity.
     mode = rule.get('quantity_mode', 'fixed')
     if mode not in ('fixed', 'max_free','max_available') or (mode == 'max_free' and (
             not rule['free_only'] or rule['price_cap_wei'] != 0 or rule['quantity'] != 100)):
@@ -255,8 +266,14 @@ async def prepare_presale_copy(web3, observation, rule):
         slug = await client.collection_for_contract(observation['chain_id'], observation['contract'])
         async def build(quantity):
             status, transaction = await client.build_mint(slug, rule['account'], quantity)
+            if status==422:
+                from app.services.mint_diagnostics import MINT_REASONS
+                reason=getattr(client,'last_mint_reason',None) or 'precondition_unknown'
+                raise OpenSeaUnavailable(MINT_REASONS[reason],retry_after_seconds=60,mint_reason=reason)
+            if status==409:
+                raise OpenSeaUnavailable('Wallet-specific whitelist instructions are not available yet.',retry_after_seconds=60)
             if status != 200 or transaction is None:
-                raise HTTPException(409, 'Your wallet cannot mint this whitelist stage.')
+                raise OpenSeaUnavailable('Whitelist mint preparation is temporarily unavailable.',retry_after_seconds=60)
             if OPENSEA_CHAINS.get(transaction.get('chain'), (None,))[0] != observation['chain_id']:
                 raise HTTPException(409, 'Whitelist mint network could not be verified.')
             mint = decode_mint(transaction, observation['contract'], rule['account'], quantity)
@@ -277,7 +294,17 @@ async def prepare_presale_copy(web3, observation, rule):
             if count < 1:
                 raise HTTPException(409, 'No whitelist mint allowance or supply remains.')
             if count != 1:
-                mint = await build(count)
+                # Quantity is not part of SeaDrop's signed/Merkle eligibility payload.
+                # Reuse the receiving wallet's verified proof; never request a second signature.
+                from app.services.seadrop_mint import BASE_TYPES,PARAM_TYPE
+                values=[mint['contract'],mint['fee'],mint['wallet'],count,mint['params']]
+                types=BASE_TYPES+[PARAM_TYPE]
+                if mint['kind']=='allowlist':types+=['bytes32[]'];values+=[mint['proof']]
+                else:types+=['uint256','bytes'];values+=[mint['salt'],mint['signature']]
+                tx={'to':mint['execution']['target'],'value':str(mint['params'][0]*count),
+                    'data':'0x'+(ALLOW_SELECTOR if mint['kind']=='allowlist' else SIGNED_SELECTOR)+encode(types,values).hex()}
+                mint=decode_mint(tx,observation['contract'],rule['account'],count)
+                await verify_presale(web3,mint)
         return mint, slug
     except OpenSeaUnavailable as error:
         if error.status in (400,404,409,422):
@@ -397,7 +424,10 @@ async def arm_event(db, event, rule, web3):
             ceiling=min(ceiling,user.daily_limit_wei-sum(daily.values()))
         r={**r,'total_cap_wei':ceiling}
     await no_mixed_stage_copy(db, {'chain_id':o['chain_id'], 'account':r['account'], 'contract':o['contract'], 'mint_kind':kind})
-    if kind == 'public' and (o['price_wei'] > r['price_cap_wei'] or (r['free_only'] and o['price_wei'] != 0)):
+    if kind=='public' and not accepts_price(r,o['price_wei']):
+        event.status,event.note='skipped','This is a free mint. Paid mints is selected.' if r.get('paid_only') else 'This is a paid mint. Free mints only is selected.'
+        return
+    if kind == 'public' and o['price_wei'] > r['price_cap_wei']:
         event.status, event.note = 'skipped', 'Mint price is outside your copy limits.'
         return
     if r['total_cap_wei']<=r['fee_cap_wei'] and r['price_cap_wei']>0:
@@ -421,7 +451,10 @@ async def arm_event(db, event, rule, web3):
         presale, slug = await prepare_presale_copy(web3, o, r)
         quantity, price = presale['quantity'], presale['params'][0]
         drop, stage = await drop_for(db, web3, o, presale=presale, slug=slug)
-        if price > r['price_cap_wei'] or (r['free_only'] and price != 0):
+        if not accepts_price(r,price):
+            event.status,event.note='skipped','Your eligible whitelist mint is free. Paid mints is selected.' if r.get('paid_only') else 'Your eligible whitelist mint is paid. Free mints only is selected.'
+            return
+        if price > r['price_cap_wei']:
             event.status, event.note = 'skipped', 'Your whitelist price is outside your copy limits.'
             return
     if await web3.eth.get_balance(r['account'], 'pending') <= price * quantity:
@@ -544,30 +577,91 @@ async def scan_watch(db, watch, chain):
     from app.services.copy_checks import process
     await process(db,watch,chain)
     await db.commit()
-    await automatic.lock_execution(db)
-    await db.refresh(watch)
-    if watch.archived_at or chain not in watch.chains:
-        return
-    rules = (await db.scalars(select(CopyRule).where(CopyRule.watch_id == watch_id,
-        CopyRule.chain_id == chain, CopyRule.status == 'active'))).all()
-    if not rules:
-        return
-    web3 = await automatic.provider_for(chain)
+    await process_copy_events(db,watch_id,chain)
+
+
+async def process_copy_events(db,watch_id,chain):
+    """Each observation commits independently; a provider deferral cannot roll back peers."""
+    from app.services import mint_diagnostics
+    from sqlalchemy import or_
+    now=datetime.now(timezone.utc)
+    ids=(await db.scalars(select(CopyEvent.id).where(CopyEvent.watch_id==watch_id,
+        CopyEvent.status=='detected',CopyEvent.task_id.is_(None),CopyEvent.observation['chain_id'].as_integer()==chain,
+        or_(CopyEvent.next_attempt_at.is_(None),CopyEvent.next_attempt_at<=now)).order_by(
+            CopyEvent.observation['end'].as_integer(),CopyEvent.created_at,CopyEvent.id).limit(50))).all()
+    await db.commit()
+    web3=await automatic.provider_for(chain)
     try:
-        events = (await db.scalars(select(CopyEvent).where(CopyEvent.watch_id == watch_id,
-            CopyEvent.status == 'detected', CopyEvent.task_id.is_(None)).order_by(CopyEvent.created_at).limit(50))).all()
-        for event in events:
-            if event.observation['chain_id'] != chain:
-                continue
+        for event_id in ids:
+            await automatic.lock_execution(db)
+            watch=await db.get(CopyWatch,watch_id,populate_existing=True)
+            event=await db.get(CopyEvent,event_id,populate_existing=True)
+            if not watch or watch.archived_at or chain not in watch.chains:
+                await db.commit();return
+            if not event or event.status!='detected' or event.task_id or event.observation['chain_id']!=chain:
+                await db.commit();continue
+            now=datetime.now(timezone.utc)
+            if event.next_attempt_at and aware(event.next_attempt_at)>now:
+                await db.commit();continue
+            rules=(await db.scalars(select(CopyRule).where(CopyRule.watch_id==watch_id,CopyRule.chain_id==chain,
+                CopyRule.status=='active',CopyRule.expires_at>now))).all()
+            if not rules:
+                await db.commit();continue
+            end=datetime.fromtimestamp(event.observation['end'],timezone.utc)
+            if end<=now:
+                event.status='skipped';event.note='The observed mint phase has ended. No transaction sent.'
+                event.next_attempt_at=None;event.last_error_category='phase_ended';event.last_checked_at=now
+                await db.commit();continue
+            if all(event.observation['block_number']<=r.resume_after_block for r in rules):
+                event.status='skipped';event.note='Detected before this copy approval. No automatic mint authorized.'
+                event.last_checked_at=datetime.now(timezone.utc);event.next_attempt_at=None;event.last_error_category='before_approval'
+                await db.commit();continue
             for rule in rules:
+                events=[]
+                attempts=event.preparation_attempts+1
                 try:
-                    async with db.begin_nested():
-                        await arm_event(db, event, rule, web3)
+                    with mint_diagnostics.capture('','copy',event_id=event.id) as events:
+                        async with db.begin_nested():await arm_event(db,event,rule,web3)
+                    event.last_error_category=None;event.last_upstream_status=None;event.next_attempt_at=None
+                except OpenSeaUnavailable as error:
+                    await db.refresh(event);await db.refresh(rule)
+                    checked=datetime.now(timezone.utc)
+                    delay=max(30,error.retry_after_seconds or 0,*[e.get('retry_after_seconds') or 0 for e in events])
+                    if error.mint_reason=='precondition_unknown':delay=max(delay,min(900,60*2**min(attempts-1,4)))
+                    event.next_attempt_at=min(checked+timedelta(seconds=delay),end,aware(rule.expires_at))
+                    category=error.mint_reason or mint_diagnostics.category(mint_diagnostics.clean_events(events),503,error)
+                    event.note=('Waiting: OpenSea rejected a mint precondition; its specific reason is unknown. ' if error.mint_reason=='precondition_unknown' else
+                        'OpenSea rate limit is delaying mint instructions. ' if category=='upstream_rate_limited' else
+                        'Waiting for wallet-specific mint instructions. ')+ 'Retry at '+(event.next_attempt_at+timedelta(hours=1)).strftime('%H:%M:%S WAT')+'.'
+                    if error.mint_reason in mint_diagnostics.MINT_REASONS and error.mint_reason!='precondition_unknown':
+                        event.status='skipped';event.next_attempt_at=None
+                        event.note=funding_note(chain,int(event.observation['price_wei'])>0) if error.mint_reason=='insufficient_funds' else mint_diagnostics.MINT_REASONS[error.mint_reason]
+                    event.last_error_category=category
+                    event.last_upstream_status=next((e['http_status'] for e in reversed(events) if e.get('http_status') is not None),None)
                 except HTTPException as error:
-                    event.status, event.note = 'skipped', str(error.detail)
+                    await db.refresh(event);await db.refresh(rule)
+                    from app.services.daily_budget import LIMIT_NOTE
+                    if error.status_code==429 and error.detail==LIMIT_NOTE:
+                        event.status='skipped';event.note=LIMIT_NOTE;event.next_attempt_at=None;event.last_error_category='daily_limit'
+                    elif error.status_code>=500 or error.status_code==429:
+                        event.next_attempt_at=min(datetime.now(timezone.utc)+timedelta(seconds=60),end,aware(rule.expires_at))
+                        event.note='Copy checks temporarily unavailable. Mintly will retry within this phase.'
+                        event.last_error_category='temporary_checks_unavailable'
+                    else:
+                        event.status='skipped';event.note=str(error.detail);event.next_attempt_at=None;event.last_error_category='validation_rejected'
                 except ValueError:
-                    event.status, event.note = 'skipped', 'Stage, source receipt or receiving-wallet eligibility changed.'
-                if event.task_id or event.status == 'skipped':
-                    break
-    finally:
-        await web3.provider.disconnect()
+                    await db.refresh(event)
+                    event.status='skipped';event.note='Stage, source receipt or receiving-wallet eligibility changed.'
+                    event.next_attempt_at=None;event.last_error_category='validation_rejected'
+                except Exception:
+                    await db.refresh(event);await db.refresh(rule)
+                    event.next_attempt_at=min(datetime.now(timezone.utc)+timedelta(seconds=60),end,aware(rule.expires_at))
+                    event.note='Copy preparation temporarily unavailable. Mintly will retry within this phase.'
+                    event.last_error_category='temporary_preparation_error'
+                event.last_checked_at=datetime.now(timezone.utc)
+                event.preparation_attempts=attempts
+                event.upstream_events=mint_diagnostics.clean_events(events)
+                event.last_upstream_status=next((e['http_status'] for e in reversed(event.upstream_events) if e.get('http_status') is not None),None)
+                if event.task_id or event.status=='skipped' or event.next_attempt_at:break
+            await db.commit()
+    finally:await web3.provider.disconnect()

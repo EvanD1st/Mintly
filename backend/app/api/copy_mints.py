@@ -36,6 +36,7 @@ class RuleRequest(BaseModel):
     fee_cap_eth: str = Field(pattern=r'^[0-9]+(\.[0-9]+)?$', max_length=40)
     budget_eth: str = Field(pattern=r'^[0-9]+(\.[0-9]+)?$', max_length=40)
     free_only: bool = False
+    paid_only: bool = Field(default=False,strict=True)
     include_presales: bool = False
     expires_at: datetime
     consent: bool
@@ -51,6 +52,7 @@ class WalletRuleRequest(BaseModel):
     fee_cap_eth: str = Field(pattern=r'^[0-9]+(\.[0-9]+)?$', max_length=40)
     budget_eth: str = Field(pattern=r'^[0-9]+(\.[0-9]+)?$', max_length=40)
     free_only: bool = False
+    paid_only: bool = Field(default=False,strict=True)
     include_presales: bool = False
     expires_at: datetime
     consent: bool
@@ -70,6 +72,7 @@ class CheckRequest(BaseModel):
     fee_cap_eth:str=Field(pattern=r'^[0-9]+(\.[0-9]+)?$',max_length=40)
     budget_eth:str=Field(pattern=r'^[0-9]+(\.[0-9]+)?$',max_length=40)
     free_only:bool=False
+    paid_only:bool=Field(default=False,strict=True)
     include_presales:bool=False
     expires_at:datetime
 
@@ -87,6 +90,12 @@ async def start_checks(watch_id:str,req:CheckRequest,user=Depends(get_current_us
     if req.expires_at.tzinfo is None or not datetime.now(timezone.utc)<aware(req.expires_at)<=datetime.now(timezone.utc)+timedelta(days=30):
         raise HTTPException(422,'Choose a check period of up to 30 days.')
     price,fee,budget=map(automatic.wei,(req.price_cap_eth,req.fee_cap_eth,req.budget_eth))
+    if req.free_only and req.paid_only:
+        raise HTTPException(422,'Choose free mints only or paid mints.')
+    if req.paid_only and price<=0:
+        raise HTTPException(422,'Paid mints requires a positive maximum mint price.')
+    if req.free_only and price!=0:
+        raise HTTPException(422,'Free mints only requires a zero mint-price cap.')
     if fee<=0 or budget<fee or price*req.quantity+fee>=2**63:
         raise HTTPException(422,'Enter finite positive gas and budget limits.')
     version=automatic.digest([user.id,watch_id,req.model_dump(mode='json')])
@@ -104,6 +113,7 @@ async def start_checks(watch_id:str,req:CheckRequest,user=Depends(get_current_us
         'quantity_mode':req.quantity_mode,'price_cap_wei':price,'fee_cap_wei':fee,'budget_wei':budget,
         'free_only':req.free_only,'mint_kinds':['public','allowlist','signed'] if req.include_presales else ['public'],
         'after_blocks':after,'total_cap_wei':min(budget,price*req.quantity+fee)}
+    if req.paid_only:snapshot['paid_only']=True
     for rule in (await db.scalars(select(CopyRule).where(CopyRule.watch_id==watch_id,CopyRule.user_id==user.id,
             CopyRule.status.in_(['active','registering'])))).all():
         await copying.pause_rule(db,rule)
@@ -344,6 +354,10 @@ async def save_rule(watch_id, req, user, db, *, group=None):
             aware(grant.expires_at), datetime.now(timezone.utc) + timedelta(days=30)):
         raise HTTPException(422, 'Approve finite limits and an expiry within your wallet policy.')
     price, fee, budget = map(automatic.wei, (req.price_cap_eth, req.fee_cap_eth, req.budget_eth))
+    if req.free_only and req.paid_only:
+        raise HTTPException(422,'Choose free mints only or paid mints.')
+    if req.paid_only and price<=0:
+        raise HTTPException(422,'Paid mints requires a positive maximum mint price.')
     total = price * req.quantity + fee
     if req.quantity_mode=='max_available':
         total=min(total,budget,int(grant.scope['max_task_wei']))
@@ -359,6 +373,7 @@ async def save_rule(watch_id, req, user, db, *, group=None):
         account=grant.account, source_address=watch.address, chain_id=grant.chain_id, quantity=req.quantity,
         price_cap_wei=price, fee_cap_wei=fee, total_cap_wei=total, budget_wei=budget,
         free_only=req.free_only, expiry=int(expiry.timestamp()))
+    if req.paid_only:request['paid_only']=True
     if group is not None:
         request['budget_group'] = group
     if req.include_presales:
@@ -368,6 +383,7 @@ async def save_rule(watch_id, req, user, db, *, group=None):
         request['quantity_mode'] = req.quantity_mode
     if old:
         if (old.snapshot.get('mint_kinds', ['public']) != request.get('mint_kinds', ['public'])
+                or old.snapshot.get('paid_only',False)!=req.paid_only
                 or old.snapshot.get('budget_group') != group or old.snapshot.get('quantity_mode', 'fixed') != req.quantity_mode
                 or any(old.snapshot.get(k) != v for k, v in request.items())):
             raise HTTPException(409, 'Approval request changed. Open a new review.')
@@ -459,6 +475,9 @@ async def activity(watch_id: str | None = None, offset: int = Query(0, ge=0), li
             'observed_at': event.created_at, 'observation': o,
             'status': 'skipped' if funding and unsigned else (task.status if task else event.status),
             'note': note, 'task_id': event.task_id,
+            'next_attempt_at':event.next_attempt_at,'last_checked_at':event.last_checked_at,
+            'last_error_category':event.last_error_category,'last_upstream_status':event.last_upstream_status,
+            'upstream_events':event.upstream_events or [],'preparation_attempts':event.preparation_attempts,
             'retryable': funding and unsigned and (task is None or task.status == 'failed') and not watch.archived_at
                 and o.get('end', 0) > int(datetime.now(timezone.utc).timestamp()),
             'transaction_hash': task.transaction_hash if task else None,
