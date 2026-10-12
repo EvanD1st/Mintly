@@ -79,7 +79,8 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
                 ('review', 'Saved'),
                 ('tasks', 'Armed / active'),
               ])
-                ChoiceChip(
+                FilterChip(
+                  deleteIcon: const SizedBox.shrink(),
                   label: Text(item.$2),
                   selected: _filter == item.$1,
                   onSelected: (_) => setState(() => _filter = item.$1),
