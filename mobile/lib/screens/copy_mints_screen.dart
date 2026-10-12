@@ -1534,7 +1534,7 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
           : _quantityChoice == 'max'
           ? 'max_available'
           : 'fixed',
-      'native_symbol': _currency,
+      if (_currency != 'ETH') 'native_symbol': _currency,
       'price_cap_eth': _price.text.trim(),
       'fee_cap_eth': _gas.text.trim(),
       'budget_eth': _budget.text.trim(),
