@@ -112,16 +112,37 @@ void main() {
         addTearDown(tester.view.resetDevicePixelRatio);
         final fontRoot =
             '${Platform.environment['FLUTTER_ROOT'] ?? 'C:/Users/USER/develop/flutter'}/bin/cache/artifacts/material_fonts';
-        final font = File('$fontRoot/roboto-regular.ttf');
+        File bundledFont(String name) {
+          final roots = [
+            fontRoot,
+            '${File(Platform.resolvedExecutable).parent.parent.parent.path}/material_fonts',
+          ];
+          for (final root in roots) {
+            final folder = Directory(root);
+            if (!folder.existsSync()) continue;
+            for (final entry in folder.listSync().whereType<File>()) {
+              if (entry.uri.pathSegments.last.toLowerCase() ==
+                  name.toLowerCase()) {
+                return entry;
+              }
+            }
+          }
+          return File('$fontRoot/$name');
+        }
+
+        final font = bundledFont('Roboto-Regular.ttf');
         const defaultTestFont = bool.fromEnvironment(
           'MINTLY_TEST_DEFAULT_FONT',
         );
+        if (!defaultTestFont && Platform.environment['GITHUB_ACTIONS'] == 'true') {
+          expect(font.existsSync(), isTrue, reason: 'CI previews require the bundled Roboto font.');
+        }
         if (!defaultTestFont && font.existsSync()) {
           await (FontLoader('Roboto')..addFont(
                 Future.value(ByteData.sublistView(font.readAsBytesSync())),
               ))
               .load();
-          final icons = File('$fontRoot/materialicons-regular.otf');
+          final icons = bundledFont('MaterialIcons-Regular.otf');
           if (icons.existsSync()) {
             await (FontLoader('MaterialIcons')..addFont(
                   Future.value(ByteData.sublistView(icons.readAsBytesSync())),
