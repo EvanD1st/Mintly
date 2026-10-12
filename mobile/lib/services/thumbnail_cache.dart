@@ -29,6 +29,8 @@ class ThumbnailCache {
   final http.Client client;
   final _pending = <String, Future<Uint8List?>>{};
   final _memory = <String, Uint8List>{};
+  final _lanes = [Future<void>.value(), Future<void>.value()];
+  var _nextLane = 0;
   ThumbnailCache({http.Client? client}) : client = client ?? http.Client();
 
   Future<Uint8List?> lastImage(String reference) async {
@@ -44,7 +46,7 @@ class ThumbnailCache {
 
   Future<Uint8List?> load(String reference, String url) async {
     if (!trustedThumbnailUrl(url)) return null;
-    final bytes = await (_pending[url] ??= _load(url));
+    final bytes = await (_pending[url] ??= _schedule(url));
     _pending.remove(url);
     if (bytes != null) {
       await storage.writeThumbnail(
@@ -53,6 +55,14 @@ class ThumbnailCache {
       );
     }
     return bytes;
+  }
+
+  Future<Uint8List?> _schedule(String url) {
+    if (_memory.containsKey(url)) return Future.value(_memory[url]);
+    final lane = _nextLane++ % _lanes.length;
+    final result = _lanes[lane].then((_) => _load(url));
+    _lanes[lane] = result.then<void>((_) {}, onError: (Object _) {});
+    return result;
   }
 
   Future<Uint8List?> _load(String url) async {
@@ -80,10 +90,13 @@ class ThumbnailCache {
         }
         final downloaded = buffer.takeBytes();
         if (downloaded.isEmpty) return null;
-        final encodedBuffer = await ui.ImmutableBuffer.fromUint8List(downloaded);
+        final encodedBuffer = await ui.ImmutableBuffer.fromUint8List(
+          downloaded,
+        );
         final descriptor = await ui.ImageDescriptor.encoded(encodedBuffer);
         try {
-          if (descriptor.width * descriptor.height > 16 * 1024 * 1024) return null;
+          if (descriptor.width * descriptor.height > 16 * 1024 * 1024)
+            return null;
         } finally {
           descriptor.dispose();
           encodedBuffer.dispose();
