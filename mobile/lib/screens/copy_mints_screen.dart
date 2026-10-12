@@ -1178,10 +1178,10 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    '${(check['observation'] as Map)['name']}',
-                    style: const TextStyle(fontWeight: FontWeight.w700),
-                  ),
+                  Row(children:[CollectionThumbnail(name:'${(check['observation'] as Map)['name']}',
+                    reference:check['event_id']==null?'':'copy:${check['event_id']}',size:44),
+                    const SizedBox(width:10),Expanded(child:Text('${(check['observation'] as Map)['name']}',
+                      style:const TextStyle(fontWeight:FontWeight.w700)))]),
                   Text(
                     check['status'] == 'would_copy'
                         ? 'Would copy'

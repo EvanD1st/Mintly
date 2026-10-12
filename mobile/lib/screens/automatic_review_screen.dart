@@ -8,6 +8,7 @@ import '../models/mint_plan_model.dart';
 import '../state/app_state.dart';
 import '../services/wat_time.dart';
 import 'wallet_setup_screen.dart';
+import '../widgets/collection_thumbnail.dart';
 
 class AutomaticReviewScreen extends ConsumerStatefulWidget {
   final DropModel drop;
@@ -345,10 +346,9 @@ class _AutomaticReviewState extends ConsumerState<AutomaticReviewScreen> {
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
-          Text(
-            widget.drop.name,
-            style: Theme.of(context).textTheme.headlineSmall,
-          ),
+          Row(children:[CollectionThumbnail(name:widget.drop.name,
+            reference:widget.copyEventId!=null?'copy:${widget.copyEventId}':widget.plan!=null?'plan:${widget.plan!.id}':'drop:${widget.drop.id}'),
+            const SizedBox(width:12),Expanded(child:Text(widget.drop.name,style:Theme.of(context).textTheme.headlineSmall))]),
           const SizedBox(height: 12),
           const Text(
             'Choose your wallet, NFT quantity, WAT mint time and maximum total spend. Mintly verifies the exact stage and signing approval before you confirm.',
