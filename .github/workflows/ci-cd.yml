@@ -50,10 +50,12 @@ jobs:
           done
       - name: Run backend tests
         working-directory: backend
-        run: python -m pytest tests -v
+        run: python -m pytest tests -p tests.latency_trace -v --durations=30
         env:
           ALLOW_LIVE_BROADCAST: "false"
           SIGNER_MODE: demo
+          MINTLY_LATENCY_REPORT: ../audit/sqlite-feature-latency.json
+          MINTLY_LATENCY_LABEL: GitHub Ubuntu Python3.12 SQLite local SeaDrop
           MINTLY_TEST_RPC: http://127.0.0.1:18545
           MINTLY_TEST_RPC_999: http://127.0.0.1:18546
           MINTLY_TEST_RPC_33139: http://127.0.0.1:18547
@@ -62,10 +64,12 @@ jobs:
         working-directory: backend
         run: |
           node --test tests/wallet-capabilities.browser.cjs
-          python -m pytest tests/test_automatic_evm.py tests/test_wallet_relink_networks_evm.py tests/test_copy_wallet_networks.py tests/test_copy_presales.py tests/test_wat_scheduling.py tests/test_automation_readiness.py tests/test_mint_controls.py tests/test_guided_journeys.py tests/test_opensea_identity.py tests/test_mint_diagnostics.py tests/test_opensea_resilience.py tests/test_copy_event_retry.py tests/test_copy_failure_reasons.py tests/test_copy_price_modes.py tests/test_opensea_reliability.py tests/test_opensea_multiwallet.py tests/test_artwork.py tests/test_native_networks.py -v
+          python -m pytest tests -p tests.latency_trace -v --durations=30
         env:
           MINTLY_TEST_RPC: http://127.0.0.1:18545
           MINTLY_TEST_DATABASE_URL: postgresql+asyncpg://mintly_test:disposable-ci-only@127.0.0.1:15432/mintly_test
+          MINTLY_LATENCY_REPORT: ../audit/postgres-feature-latency.json
+          MINTLY_LATENCY_LABEL: GitHub Ubuntu Python3.12 PostgreSQL16 local SeaDrop
           MINTLY_TEST_RPC_999: http://127.0.0.1:18546
           MINTLY_TEST_RPC_33139: http://127.0.0.1:18547
           MINTLY_TEST_RPC_57073: http://127.0.0.1:18548
@@ -78,6 +82,11 @@ jobs:
           for script in deploy/*.sh; do bash -n "$script"; done
           APP_DIR="$RUNNER_TEMP/mintly" bash deploy/deploy-ubuntu.sh
           test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8095/api/wallets)" = 401
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: feature-latency-report
+          path: audit/*.json
       - name: Container logs on failure
         if: failure()
         run: |
@@ -100,6 +109,13 @@ jobs:
       - run: flutter analyze
       - run: flutter test
         if: success() || failure()
+        env:
+          MINTLY_WIDGET_LATENCY_REPORT: ../audit/mobile-widget-latency.jsonl
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mobile-widget-latency-report
+          path: audit/mobile-widget-latency.jsonl
       - name: Save rendered dark screens
         if: always()
         uses: actions/upload-artifact@v4
