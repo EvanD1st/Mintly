@@ -189,7 +189,7 @@ class _NetworkBudgetCardState extends ConsumerState<NetworkBudgetCard> {
                           minWidth: 270,
                           maxWidth: 320,
                         ),
-                        child: Container(
+                        icon: Container(
                           width: 30,
                           height: 30,
                           alignment: Alignment.center,
