@@ -134,8 +134,13 @@ void main() {
         const defaultTestFont = bool.fromEnvironment(
           'MINTLY_TEST_DEFAULT_FONT',
         );
-        if (!defaultTestFont && Platform.environment['GITHUB_ACTIONS'] == 'true') {
-          expect(font.existsSync(), isTrue, reason: 'CI previews require the bundled Roboto font.');
+        if (!defaultTestFont &&
+            Platform.environment['GITHUB_ACTIONS'] == 'true') {
+          expect(
+            font.existsSync(),
+            isTrue,
+            reason: 'CI previews require the bundled Roboto font.',
+          );
         }
         if (!defaultTestFont && font.existsSync()) {
           await (FontLoader('Roboto')..addFont(

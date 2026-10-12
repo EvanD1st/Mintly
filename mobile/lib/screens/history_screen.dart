@@ -326,7 +326,25 @@ class _HistoryState extends ConsumerState<HistoryScreen> {
     final gasUsed = BigInt.tryParse('${data['actual_gas_used']}');
     final gasPrice = BigInt.tryParse('${data['actual_effective_gas_price']}');
     final gas = gasUsed != null && gasPrice != null ? gasUsed * gasPrice : null;
-    final mint = total != null && gas != null && total >= gas
+    // Base totals include parent-data/operator fees not separately exposed here.
+    final chainId = auth?['chain_id'];
+    final completeGas = chainId != null
+        ? [1, 4663, 11155111, 31337].contains(chainId)
+        : [
+            'Ethereum',
+            'Robinhood',
+            'Robinhood Chain',
+            'Ethereum Sepolia',
+            'Sepolia',
+            'Local EVM',
+            'Local test',
+          ].contains(data['chain']);
+    final mint =
+        completeGas &&
+            total != null &&
+            gas != null &&
+            gas >= BigInt.zero &&
+            total >= gas
         ? total - gas
         : null;
     return Column(
@@ -405,16 +423,19 @@ class _HistoryState extends ConsumerState<HistoryScreen> {
                     message: '${_eth(mint)} ETH',
                     child: DetailRow(
                       'Mint value',
-                      mint == BigInt.zero
+                      mint == BigInt.zero && data['status'] == 'confirmed'
                           ? 'Free'
                           : '${compactNative(mint)} ETH',
                     ),
                   ),
-                if (gas != null && total != null && total >= gas)
+                if (gas != null &&
+                    gas >= BigInt.zero &&
+                    total != null &&
+                    total >= gas)
                   Tooltip(
                     message: '${_eth(gas)} ETH',
                     child: DetailRow(
-                      'Network fee',
+                      completeGas ? 'Network fee' : 'Execution gas',
                       '${compactNative(gas)} ETH',
                     ),
                   ),
@@ -433,6 +454,11 @@ class _HistoryState extends ConsumerState<HistoryScreen> {
                 if (total != null && gas == null)
                   const Text(
                     'Includes mint value and charged network fees.',
+                    style: TextStyle(fontSize: 10),
+                  ),
+                if (total != null && gas != null && !completeGas)
+                  const Text(
+                    'Additional network fees are included in the total.',
                     style: TextStyle(fontSize: 10),
                   ),
               ],

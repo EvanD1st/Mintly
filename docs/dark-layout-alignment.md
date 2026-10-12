@@ -8,6 +8,7 @@ This follow-up aligns the app with the approved dark Mint plans, Copy and Activi
 - Copy keeps followed-wallet management, check-only state, free/paid preferences, network status and activity actions. Its smaller budget card places the amount and network together, with available allowance, spent and reserved totals below. The dropdown aligns network names and amounts in rows.
 - Activity opens a combined feed of mint transactions, copy events and account updates. Each stream retains its own pagination cursor. A copy event linked to a mint task is displayed once using the task's transaction record; its followed-wallet label is retained. Individual feeds and the existing approval/recovery records remain available.
 - Detail pages retain bottom navigation. Spend and timeline rows appear only when the API supplies the corresponding receipt values and timestamps. An approved cap is labelled as a cap, rather than as an actual reservation.
+- Base receipt totals include parent-data and operator fees that are not separately exposed in history. Its details show the verified total and execution gas; they do not infer NFT value by subtracting incomplete fee data.
 - Artwork remains optional. Existing authenticated artwork requests and image failure fallbacks are preserved. Task cards and history prefer their saved plan reference when one exists. Preview fixtures use fallback artwork and sample account data; they are not production mint results.
 
 ## Budget meaning

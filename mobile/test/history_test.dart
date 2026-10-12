@@ -9,6 +9,75 @@ import 'package:mintly/services/api_service.dart';
 import 'package:mintly/state/app_state.dart';
 
 void main() {
+  for (final chain in ['Ethereum', 'Base']) {
+    testWidgets(
+      '$chain actual spend does not misattribute additional network fees',
+      (tester) async {
+        final api = ApiService(
+          client: MockClient((request) async {
+            if (request.url.path.endsWith('/auth/login')) {
+              return http.Response(
+                '{"token":"test","user":{"username":"member"}}',
+                200,
+              );
+            }
+            expect(request.method, 'GET');
+            if (request.url.path.endsWith('/artwork')) {
+              return http.Response('{"image_url":null}', 200);
+            }
+            return http.Response(
+              jsonEncode({
+                'records': [
+                  {
+                    'id': 'task',
+                    'drop_name': 'Receipt collection',
+                    'status': 'confirmed',
+                    'chain': chain,
+                    'quantity': 1,
+                    'created_at': '2026-10-11T10:00:00Z',
+                    'actual_gas_used': '21000',
+                    'actual_effective_gas_price': '1000000000',
+                    'actual_total_cost_wei': chain == 'Base'
+                        ? '26000000000000'
+                        : '21000000000000',
+                  },
+                ],
+                'next_offset': null,
+              }),
+              200,
+            );
+          }),
+        );
+        await api.login('member', 'password');
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [apiServiceProvider.overrideWith((ref) => api)],
+            child: const MaterialApp(
+              home: HistoryScreen(initialSection: 'mints'),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('View details'));
+        await tester.pumpAndSettle();
+        if (chain == 'Base') {
+          expect(find.text('Execution gas'), findsOneWidget);
+          expect(find.text('0.000026 ETH'), findsOneWidget);
+          expect(find.text('Mint value'), findsNothing);
+          expect(find.text('Free'), findsNothing);
+          expect(
+            find.text('Additional network fees are included in the total.'),
+            findsOneWidget,
+          );
+        } else {
+          expect(find.text('Network fee'), findsOneWidget);
+          expect(find.text('Mint value'), findsOneWidget);
+          expect(find.text('Free'), findsOneWidget);
+        }
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
   testWidgets(
     'all activity uses independent cursors and shows copied tasks once',
     (tester) async {
