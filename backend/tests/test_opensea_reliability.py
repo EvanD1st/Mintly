@@ -105,8 +105,10 @@ async def test_identical_concurrent_lookups_share_one_request_but_not_mutable_re
     a['value']=2
     assert calls==[1] and b['value']==1
 
-async def test_shared_queue_prioritizes_mint_over_background_and_expires_leases(test_db,monkeypatch):
+@pytest.mark.parametrize('gap',[2,6])
+async def test_shared_queue_prioritizes_mint_over_background_and_expires_leases(test_db,monkeypatch,gap):
     monkeypatch.setattr(settings,'OPENSEA_COORDINATE_REQUESTS',True)
+    monkeypatch.setattr(settings,'OPENSEA_GLOBAL_REQUEST_SECONDS',gap)
     factory=async_sessionmaker(test_db.bind,expire_on_commit=False);now=datetime.now(timezone.utc)
     background=str(uuid.uuid4());urgent=str(uuid.uuid4())
     async with factory() as db:
@@ -114,7 +116,7 @@ async def test_shared_queue_prioritizes_mint_over_background_and_expires_leases(
                     OpenSeaRequestWaiter(id=urgent,priority=0,expires_at=now+timedelta(seconds=5))]);await db.commit()
     assert await limits.acquire('/drops/example',factory=factory,now=now,request_id=background)==(1,'queued')
     assert (await limits.acquire('/drops/example/mint',factory=factory,now=now,request_id=urgent))[0]==0
-    assert (await limits.acquire('/drops/example',factory=factory,now=now))[0]>=6
+    assert (await limits.acquire('/drops/example',factory=factory,now=now))[0]==gap
     assert (await limits.acquire('/drops/example',factory=factory,now=now+timedelta(seconds=7),request_id=str(uuid.uuid4())))[0]==0
 
 
