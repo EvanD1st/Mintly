@@ -91,7 +91,9 @@ def stage_schedule(drop: dict) -> list[dict]:
             price = int(raw["price"]) if raw.get("price") is not None else None
             limit = int(raw["max_per_wallet"])
             currency = str(raw.get("price_currency_address") or "").lower()
-            if (end <= start or price is not None and not 0 <= price < 2**63
+            # Discovery can include deliberately expensive, unselected stages.
+            # Transaction and authorization caps are enforced on the chosen mint.
+            if (end <= start or price is not None and not 0 <= price < 2**256
                     or limit < 0 or currency != "0x" + "0" * 40):
                 raise ValueError("invalid stage range")
             stages.append({
