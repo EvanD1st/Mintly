@@ -48,6 +48,8 @@ async def own_presale(db,req,user_id,web3):
 
 async def prepare(db,body,user_id):
     grant=await automatic.grant_for(db,body.grant_id,user_id)
+    from app.services.networks import require_currency
+    require_currency(grant.chain_id,getattr(body,'native_symbol',None))
     wallet=await db.get(Wallet,body.wallet_id)
     drop=await db.get(Drop,body.drop_id)
     stage=await db.get(MintStage,body.stage_id)
@@ -101,7 +103,7 @@ async def prepare(db,body,user_id):
             raise HTTPException(422,'Maximum total spend must include the NFT price and a positive gas allowance.')
         from app.schemas.task import DraftTaskRequest
         from app.services.parser import format_wei_to_eth
-        req=DraftTaskRequest(guided=True,plan_id=body.plan_id,copy_event_id=body.copy_event_id,wallet_id=wallet.id,
+        req=DraftTaskRequest(native_symbol=getattr(body,'native_symbol',None),guided=True,plan_id=body.plan_id,copy_event_id=body.copy_event_id,wallet_id=wallet.id,
             grant_id=grant.id,drop_id=drop.id,stage_id=stage.id,quantity=body.quantity,mint_kind=kind,
             price_cap_eth=format_wei_to_eth(price),fee_cap_eth=format_wei_to_eth(fee),total_cap_eth=format_wei_to_eth(total),
             scheduled_for_utc=body.scheduled_for_utc,onchain_stage_index=index,conditional_eligibility=deferred)

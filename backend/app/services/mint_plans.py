@@ -91,7 +91,8 @@ async def refresh_mint_plan(plan: MintPlan, wallet: Wallet, client: OpenSeaClien
     plan.price_wei = plan.selected_stage['price_wei'] if getattr(plan,'selected_stage',None) and selected else selected["price_wei"] if selected else None
     plan.mint_value_wei = None
     plan.estimated_network_fee_wei = None
-    quote = await eth_usdt_quote()
+    from app.services.networks import symbol
+    quote = await eth_usdt_quote() if symbol(plan.chain_id) == 'ETH' else None
     plan.eth_usdt_rate = quote[0] if quote else None
     plan.rate_checked_at = quote[1] if quote else None
 

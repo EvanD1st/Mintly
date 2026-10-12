@@ -1,3 +1,4 @@
+import '../models/network_metadata.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
@@ -239,7 +240,7 @@ class _HistoryState extends ConsumerState<HistoryScreen> {
             ],
             if (authorization?['price_cap_wei'] != null)
               Text(
-                'Price ceiling per NFT: ${_eth(authorization!['price_cap_wei'])} ETH',
+                'Price ceiling per NFT: ${_eth(authorization!['price_cap_wei'])} ${nativeSymbol(data['chain_id'] ?? (data['authorization'] as Map?)?['chain_id'] ?? data['chain'])}',
               ),
             if (data['authorized_at'] != null)
               Text('Authorized: ${_time(data['authorized_at'])}'),
@@ -252,26 +253,40 @@ class _HistoryState extends ConsumerState<HistoryScreen> {
                 'Scheduled: ${_time(data['scheduled_for_utc'] ?? data['starts_at'])}',
               ),
             if (data['price_eth'] != null)
-              Text('Price per NFT: ${data['price_eth']} ETH'),
+              Text(
+                'Price per NFT: ${data['price_eth']} ${nativeSymbol(data['chain_id'] ?? (data['authorization'] as Map?)?['chain_id'] ?? data['chain'])}',
+              ),
             if (data['fee_cap_eth'] != null)
-              Text('Gas limit: ${data['fee_cap_eth']} ETH'),
+              Text(
+                'Gas limit: ${data['fee_cap_eth']} ${nativeSymbol(data['chain_id'] ?? (data['authorization'] as Map?)?['chain_id'] ?? data['chain'])}',
+              ),
             if (data['total_cap_eth'] != null)
-              Text('Authorized total: ${data['total_cap_eth']} ETH'),
+              Text(
+                'Authorized total: ${data['total_cap_eth']} ${nativeSymbol(data['chain_id'] ?? (data['authorization'] as Map?)?['chain_id'] ?? data['chain'])}',
+              ),
             if (data['actual_total_cost_wei'] != null)
-              Text('Actual spend: ${_eth(data['actual_total_cost_wei'])} ETH'),
+              Text(
+                'Actual spend: ${_eth(data['actual_total_cost_wei'])} ${nativeSymbol(data['chain_id'] ?? (data['authorization'] as Map?)?['chain_id'] ?? data['chain'])}',
+              ),
             if (data['wallet_address'] != null)
               SelectableText('Wallet: ${data['wallet_address']}'),
             if (data['source_address'] != null)
               SelectableText('Following: ${data['source_address']}'),
             if (data['budget_wei'] != null)
-              Text('Copy budget: ${_eth(data['budget_wei'])} ETH'),
+              Text(
+                'Copy budget: ${_eth(data['budget_wei'])} ${nativeSymbol(data['chain_id'] ?? (data['authorization'] as Map?)?['chain_id'] ?? data['chain'])}',
+              ),
             if (data['spent_wei'] != null)
-              Text('Copy spend: ${_eth(data['spent_wei'])} ETH'),
+              Text(
+                'Copy spend: ${_eth(data['spent_wei'])} ${nativeSymbol(data['chain_id'] ?? (data['authorization'] as Map?)?['chain_id'] ?? data['chain'])}',
+              ),
             if (data['reserved_wei'] != null)
-              Text('Pending reservations: ${_eth(data['reserved_wei'])} ETH'),
+              Text(
+                'Pending reservations: ${_eth(data['reserved_wei'])} ${nativeSymbol(data['chain_id'] ?? (data['authorization'] as Map?)?['chain_id'] ?? data['chain'])}',
+              ),
             if (authorization?['fee_cap_wei'] != null)
               Text(
-                'Network fee ceiling: ${_eth(authorization!['fee_cap_wei'])} ETH',
+                'Network fee ceiling: ${_eth(authorization!['fee_cap_wei'])} ${nativeSymbol(data['chain_id'] ?? (data['authorization'] as Map?)?['chain_id'] ?? data['chain'])}',
               ),
             if (data['expires_at'] != null)
               Text('Permission ends: ${_time(data['expires_at'])}'),
@@ -329,7 +344,7 @@ class _HistoryState extends ConsumerState<HistoryScreen> {
     // Base totals include parent-data/operator fees not separately exposed here.
     final chainId = auth?['chain_id'];
     final completeGas = chainId != null
-        ? [1, 4663, 11155111, 31337].contains(chainId)
+        ? [1, 4663, 999, 33139, 11155111, 31337].contains(chainId)
         : [
             'Ethereum',
             'Robinhood',
@@ -420,12 +435,13 @@ class _HistoryState extends ConsumerState<HistoryScreen> {
                 const Divider(height: 15),
                 if (mint != null)
                   Tooltip(
-                    message: '${_eth(mint)} ETH',
+                    message:
+                        '${_eth(mint)} ${nativeSymbol(data['chain_id'] ?? (data['authorization'] as Map?)?['chain_id'] ?? data['chain'])}',
                     child: DetailRow(
                       'Mint value',
                       mint == BigInt.zero && data['status'] == 'confirmed'
                           ? 'Free'
-                          : '${compactNative(mint)} ETH',
+                          : '${compactNative(mint)} ${nativeSymbol(data['chain_id'] ?? (data['authorization'] as Map?)?['chain_id'] ?? data['chain'])}',
                     ),
                   ),
                 if (gas != null &&
@@ -433,22 +449,23 @@ class _HistoryState extends ConsumerState<HistoryScreen> {
                     total != null &&
                     total >= gas)
                   Tooltip(
-                    message: '${_eth(gas)} ETH',
+                    message:
+                        '${_eth(gas)} ${nativeSymbol(data['chain_id'] ?? (data['authorization'] as Map?)?['chain_id'] ?? data['chain'])}',
                     child: DetailRow(
                       completeGas ? 'Network fee' : 'Execution gas',
-                      '${compactNative(gas)} ETH',
+                      '${compactNative(gas)} ${nativeSymbol(data['chain_id'] ?? (data['authorization'] as Map?)?['chain_id'] ?? data['chain'])}',
                     ),
                   ),
                 if (total != null)
                   DetailRow(
                     'Total spent',
-                    '${_eth(total)} ETH',
+                    '${_eth(total)} ${nativeSymbol(data['chain_id'] ?? (data['authorization'] as Map?)?['chain_id'] ?? data['chain'])}',
                     emphasis: true,
                   ),
                 if (total == null)
                   DetailRow(
                     'Approved spending cap',
-                    '${data['total_cap_eth']} ETH',
+                    '${data['total_cap_eth']} ${nativeSymbol(data['chain_id'] ?? (data['authorization'] as Map?)?['chain_id'] ?? data['chain'])}',
                     emphasis: true,
                   ),
                 if (total != null && gas == null)
@@ -682,7 +699,16 @@ class _HistoryState extends ConsumerState<HistoryScreen> {
                   children: [
                     if (spent != null) ...[
                       const Text('Total spent', style: TextStyle(fontSize: 10)),
-                      NativeAmountText(spent, fontSize: 13, bold: true),
+                      NativeAmountText(
+                        spent,
+                        symbol: nativeSymbol(
+                          data['chain_id'] ??
+                              (data['authorization'] as Map?)?['chain_id'] ??
+                              data['chain'],
+                        ),
+                        fontSize: 13,
+                        bold: true,
+                      ),
                     ],
                     if (hasCap) ...[
                       const Text(
@@ -690,7 +716,7 @@ class _HistoryState extends ConsumerState<HistoryScreen> {
                         style: TextStyle(fontSize: 10),
                       ),
                       Text(
-                        '$cap ETH',
+                        '$cap ${nativeSymbol(data['chain_id'] ?? (data['authorization'] as Map?)?['chain_id'] ?? data['chain'])}',
                         style: const TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w600,

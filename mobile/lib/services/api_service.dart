@@ -29,6 +29,7 @@ class ApiService extends ChangeNotifier {
     _storage = next.then<void>((_) {}, onError: (Object _) {});
     return next;
   }
+
   String _sessionToken = '';
   Map<String, dynamic>? _user;
   int _sessionRevision = 0;
@@ -66,7 +67,9 @@ class ApiService extends ChangeNotifier {
 
   bool sessionRemembered = false;
   bool restoringSession = false;
-  ApiService({http.Client? client, SessionVault? vault}) : _client = client ?? http.Client(), _vault = vault ?? PlatformSessionVault();
+  ApiService({http.Client? client, SessionVault? vault})
+    : _client = client ?? http.Client(),
+      _vault = vault ?? PlatformSessionVault();
 
   bool get isLiveBackendConnected => _sessionToken.isNotEmpty;
   String get username => _user?['username'] as String? ?? '';
@@ -125,7 +128,15 @@ class ApiService extends ChangeNotifier {
     final expiry = result['expires_at'];
     final revision = _sessionRevision;
     final token = _sessionToken;
-    final remembered = expiry is String && await _store(() => _vault.save({'token':token,'expires_at':expiry,'origin':baseUrl}));
+    final remembered =
+        expiry is String &&
+        await _store(
+          () => _vault.save({
+            'token': token,
+            'expires_at': expiry,
+            'origin': baseUrl,
+          }),
+        );
     if (expiry is! String) unawaited(_store(() => _vault.clear()));
     if (revision != _sessionRevision) return;
     sessionRemembered = remembered;
@@ -134,11 +145,17 @@ class ApiService extends ChangeNotifier {
 
   void _expiredSession() {
     disconnectBackend();
-    scheduleMicrotask(() => MintlyNotice.navigatorKey.currentState?.popUntil((route) => route.isFirst));
+    scheduleMicrotask(
+      () => MintlyNotice.navigatorKey.currentState?.popUntil(
+        (route) => route.isFirst,
+      ),
+    );
   }
 
   Future<bool> restoreSession() async {
-    if (isLiveBackendConnected || restoringSession) return isLiveBackendConnected;
+    if (isLiveBackendConnected || restoringSession) {
+      return isLiveBackendConnected;
+    }
     restoringSession = true;
     final revision = _sessionRevision;
     try {
@@ -147,19 +164,41 @@ class ApiService extends ChangeNotifier {
       if (revision != _sessionRevision) return false;
       if (saved == null) return false;
       final expiry = DateTime.tryParse('${saved['expires_at']}');
-      if (saved['origin'] != baseUrl || expiry == null || !expiry.toUtc().isAfter(DateTime.now().toUtc()) || saved['token'] is! String) {
-        await _store(() => _vault.clear()); return false;
+      if (saved['origin'] != baseUrl ||
+          expiry == null ||
+          !expiry.toUtc().isAfter(DateTime.now().toUtc()) ||
+          saved['token'] is! String) {
+        await _store(() => _vault.clear());
+        return false;
       }
-      final response = await _client.get(Uri.parse('$baseUrl/auth/me'), headers:{'Authorization':'Bearer ${saved['token']}'}).timeout(const Duration(seconds:12));
+      final response = await _client
+          .get(
+            Uri.parse('$baseUrl/auth/me'),
+            headers: {'Authorization': 'Bearer ${saved['token']}'},
+          )
+          .timeout(const Duration(seconds: 12));
       if (revision != _sessionRevision) return false;
-      if (response.statusCode == 401) { await _store(() => _vault.clear()); return false; }
-      final user = _decode(response) as Map<String,dynamic>;
-      if (user['id'] is! String || user['username'] is! String) { await _store(() => _vault.clear()); return false; }
-      _sessionToken = saved['token'] as String; _user = user; _sessionRevision++;
-      sessionRemembered = true; _resetMetadata(); notifyListeners();
+      if (response.statusCode == 401) {
+        await _store(() => _vault.clear());
+        return false;
+      }
+      final user = _decode(response) as Map<String, dynamic>;
+      if (user['id'] is! String || user['username'] is! String) {
+        await _store(() => _vault.clear());
+        return false;
+      }
+      _sessionToken = saved['token'] as String;
+      _user = user;
+      _sessionRevision++;
+      sessionRemembered = true;
+      _resetMetadata();
+      notifyListeners();
       return true;
-    } catch (_) { return false; }
-    finally { restoringSession = false; }
+    } catch (_) {
+      return false;
+    } finally {
+      restoringSession = false;
+    }
   }
 
   Future<void> changePassword(String oldPassword, String newPassword) async {
@@ -208,14 +247,20 @@ class ApiService extends ChangeNotifier {
     super.dispose();
   }
 
-  Future<dynamic> _get(String path,{Duration timeout=const Duration(seconds:15)}) async {
+  Future<dynamic> _get(
+    String path, {
+    Duration timeout = const Duration(seconds: 15),
+  }) async {
     _requireHttps();
     final revision = _sessionRevision;
     final response = await _client
         .get(Uri.parse('$baseUrl$path'), headers: _headers)
         .timeout(timeout);
     _checkSession(revision);
-    if (response.statusCode == 401) { _expiredSession(); throw const ApiException('Your session ended. Sign in again.'); }
+    if (response.statusCode == 401) {
+      _expiredSession();
+      throw const ApiException('Your session ended. Sign in again.');
+    }
     return _decode(response);
   }
 
@@ -234,7 +279,10 @@ class ApiService extends ChangeNotifier {
         )
         .timeout(timeout);
     _checkSession(revision);
-    if (response.statusCode == 401) { _expiredSession(); throw const ApiException('Your session ended. Sign in again.'); }
+    if (response.statusCode == 401) {
+      _expiredSession();
+      throw const ApiException('Your session ended. Sign in again.');
+    }
     return _decode(response);
   }
 
@@ -245,7 +293,10 @@ class ApiService extends ChangeNotifier {
         .delete(Uri.parse('$baseUrl$path'), headers: _headers)
         .timeout(const Duration(seconds: 15));
     _checkSession(revision);
-    if (response.statusCode == 401) { _expiredSession(); throw const ApiException('Your session ended. Sign in again.'); }
+    if (response.statusCode == 401) {
+      _expiredSession();
+      throw const ApiException('Your session ended. Sign in again.');
+    }
     return _decode(response);
   }
 
@@ -265,38 +316,87 @@ class ApiService extends ChangeNotifier {
       (await _get('/source/status')) as Map<String, dynamic>;
 
   Future<Map<String, dynamic>> fetchWalletReadiness() async =>
-      (await _get('/wallets/readiness')) as Map<String, dynamic>;
+      (await _get('/wallets/readiness?native_currencies=true'))
+          as Map<String, dynamic>;
 
-  Future<Map<String,dynamic>> fetchOpenSeaAccess(String walletId) async =>
-      Map<String,dynamic>.from(await _get('/wallets/$walletId/opensea-access'));
-  Future<Map<String,dynamic>> setOpenSeaAccess(String walletId,bool enabled) async =>
-      Map<String,dynamic>.from(await _post('/wallets/$walletId/opensea-access',
-        {'enabled':enabled,'consent':enabled,'terms_accepted':enabled},timeout:const Duration(seconds:90)));
-  Future<Map<String,dynamic>> fetchMintStages(String planId) async =>
-      Map<String,dynamic>.from(await _get('/mint-plans/$planId/stages',timeout:const Duration(seconds:90)));
-  Future<MintPlanModel> selectMintStage(String planId,String stageId,int quantity) async =>
-      MintPlanModel.fromJson(await _post('/mint-plans/$planId/stage',{'stage_uuid':stageId,'quantity':quantity},timeout:const Duration(seconds:90)));
+  Future<Map<String, dynamic>> fetchOpenSeaAccess(String walletId) async =>
+      Map<String, dynamic>.from(
+        await _get('/wallets/$walletId/opensea-access'),
+      );
+  Future<Map<String, dynamic>> setOpenSeaAccess(
+    String walletId,
+    bool enabled,
+  ) async => Map<String, dynamic>.from(
+    await _post('/wallets/$walletId/opensea-access', {
+      'enabled': enabled,
+      'consent': enabled,
+      'terms_accepted': enabled,
+    }, timeout: const Duration(seconds: 90)),
+  );
+  Future<Map<String, dynamic>> fetchMintStages(String planId) async =>
+      Map<String, dynamic>.from(
+        await _get(
+          '/mint-plans/$planId/stages',
+          timeout: const Duration(seconds: 90),
+        ),
+      );
+  Future<MintPlanModel> selectMintStage(
+    String planId,
+    String stageId,
+    int quantity,
+  ) async => MintPlanModel.fromJson(
+    await _post('/mint-plans/$planId/stage', {
+      'stage_uuid': stageId,
+      'quantity': quantity,
+    }, timeout: const Duration(seconds: 90)),
+  );
 
   Future<void> addWatchWallet(String address, String label) async {
     await _post('/wallets/watch', {'address': address, 'label': label});
   }
 
-  Future<Map<String,dynamic>> previewGuidedMint(Map<String,dynamic> request) async =>
-      (await _post('/tasks/guided-preview',request,timeout:const Duration(seconds:30))) as Map<String,dynamic>;
+  Future<Map<String, dynamic>> previewGuidedMint(
+    Map<String, dynamic> request,
+  ) async =>
+      (await _post(
+            '/tasks/guided-preview',
+            request,
+            timeout: const Duration(seconds: 30),
+          ))
+          as Map<String, dynamic>;
 
   Future<Map<String, dynamic>> fetchAutomationStatus() async =>
       (await _get('/automatic/status')) as Map<String, dynamic>;
 
-  Future<Map<String, dynamic>> fetchDailyLimit() async =>
-      (await _get('/automatic/daily-limit')) as Map<String, dynamic>;
+  Future<Map<String, dynamic>> fetchDailyLimit({
+    String currency = 'ETH',
+  }) async =>
+      (await _get(
+            '/automatic/daily-limit${currency == 'ETH' ? '' : '?currency=$currency'}',
+          ))
+          as Map<String, dynamic>;
 
-  Future<Map<String, dynamic>> setDailyLimit(String? eth) async =>
-      (await _post('/automatic/daily-limit', {'limit_eth': eth, 'consent': true},
-        timeout: const Duration(seconds: 50))) as Map<String, dynamic>;
+  Future<Map<String, dynamic>> setDailyLimit(
+    String? eth, {
+    String currency = 'ETH',
+  }) async =>
+      (await _post('/automatic/daily-limit', {
+            'limit_eth': eth,
+            'consent': true,
+            if (currency != 'ETH') 'currency': currency,
+          }, timeout: const Duration(seconds: 50)))
+          as Map<String, dynamic>;
 
-  Future<Map<String, dynamic>> startCopyChecks(String watch, Map<String, dynamic> limits) async =>
-      (await _post('/copy-mints/watches/${Uri.encodeComponent(watch)}/checks', limits,
-        timeout: const Duration(seconds: 40))) as Map<String, dynamic>;
+  Future<Map<String, dynamic>> startCopyChecks(
+    String watch,
+    Map<String, dynamic> limits,
+  ) async =>
+      (await _post(
+            '/copy-mints/watches/${Uri.encodeComponent(watch)}/checks',
+            limits,
+            timeout: const Duration(seconds: 40),
+          ))
+          as Map<String, dynamic>;
 
   Future<void> stopCopyChecks(String watch) async {
     await _delete('/copy-mints/watches/${Uri.encodeComponent(watch)}/checks');
@@ -306,14 +406,15 @@ class ApiService extends ChangeNotifier {
       (await _get('/copy-mints/check-results')) as Map<String, dynamic>;
 
   Future<Map<String, dynamic>> setAutomationPaused(bool paused) async =>
-      (await _post('/automatic/pause', {'paused': paused})) as Map<String, dynamic>;
+      (await _post('/automatic/pause', {'paused': paused}))
+          as Map<String, dynamic>;
 
   Future<void> removeDrop(String id) async {
     await _delete('/drops/${Uri.encodeComponent(id)}');
   }
 
   Future<List<MintTaskModel>> fetchQueue() async {
-    final data = await _get('/tasks/queue') as Map<String, dynamic>;
+    final data = await _get('/tasks/queue?native_currencies=true') as Map<String, dynamic>;
     return (data['tasks'] as List)
         .map((t) => MintTaskModel.fromJson(t))
         .toList();
@@ -358,12 +459,15 @@ class ApiService extends ChangeNotifier {
   Future<Map<String, dynamic>> previewAutomaticTask(
     Map<String, dynamic> request,
   ) async {
-    final result = (await _post('/tasks/draft', request)) as Map<String,dynamic>;
+    final result =
+        (await _post('/tasks/draft', request)) as Map<String, dynamic>;
     if (request['scheduled_for_utc'] != null) {
       final time = DateTime.parse('${request['scheduled_for_utc']}').toUtc();
-      final expected = (time.microsecondsSinceEpoch+999999) ~/ 1000000;
+      final expected = (time.microsecondsSinceEpoch + 999999) ~/ 1000000;
       if ((result['snapshot'] as Map?)?['execute_at'] != expected) {
-        throw const ApiException('The server did not confirm your selected mint time. Refresh before setting automatic minting.');
+        throw const ApiException(
+          'The server did not confirm your selected mint time. Refresh before setting automatic minting.',
+        );
       }
     }
     return result;
@@ -379,17 +483,22 @@ class ApiService extends ChangeNotifier {
       );
     }
     if (request['scheduled_for_utc'] != null) {
-      final requested = DateTime.parse('${request['scheduled_for_utc']}').toUtc();
-      final expected = (requested.microsecondsSinceEpoch+999999) ~/ 1000000;
-      if (task.scheduledForUtc.toUtc().millisecondsSinceEpoch ~/ 1000 != expected) {
-        throw const ApiException('The saved mint time could not be confirmed. Refresh the queue before retrying.');
+      final requested = DateTime.parse(
+        '${request['scheduled_for_utc']}',
+      ).toUtc();
+      final expected = (requested.microsecondsSinceEpoch + 999999) ~/ 1000000;
+      if (task.scheduledForUtc.toUtc().millisecondsSinceEpoch ~/ 1000 !=
+          expected) {
+        throw const ApiException(
+          'The saved mint time could not be confirmed. Refresh the queue before retrying.',
+        );
       }
     }
     return task;
   }
 
   Future<List<Map<String, dynamic>>> fetchAutomaticPolicies() async =>
-      ((await _get('/automatic/policies')) as List)
+      ((await _get('/automatic/policies?native_currencies=true')) as List)
           .cast<Map<String, dynamic>>();
 
   Future<void> disableAutomaticPolicy(String id) async {
@@ -397,13 +506,14 @@ class ApiService extends ChangeNotifier {
   }
 
   Future<Map<String, dynamic>> fetchCopyMints() async =>
-      (await _get('/copy-mints')) as Map<String, dynamic>;
+      (await _get('/copy-mints?native_currencies=true'))
+          as Map<String, dynamic>;
   Future<Map<String, dynamic>> fetchCopyActivity({
     String? watchId,
     int offset = 0,
   }) async =>
       (await _get(
-            '/copy-mints/activity?offset=$offset${watchId == null ? '' : '&watch_id=${Uri.encodeComponent(watchId)}'}',
+            '/copy-mints/activity?native_currencies=true&offset=$offset${watchId == null ? '' : '&watch_id=${Uri.encodeComponent(watchId)}'}',
           ))
           as Map<String, dynamic>;
   Future<void> followCopyWallet(Map<String, dynamic> request) async {
@@ -433,34 +543,53 @@ class ApiService extends ChangeNotifier {
           ))
           as Map<String, dynamic>;
   Future<Map<String, dynamic>> approveWalletCopyRules(
-    String watchId, Map<String, dynamic> request,
+    String watchId,
+    Map<String, dynamic> request,
   ) async {
-    final result = await _post('/copy-mints/watches/$watchId/wallet-rules', request,
-        timeout: const Duration(seconds: 90));
+    final result = await _post(
+      '/copy-mints/watches/$watchId/wallet-rules',
+      request,
+      timeout: const Duration(seconds: 90),
+    );
     final rules = result is Map ? result['rules'] : null;
     final ids = request['grant_ids'] as List;
-    if (result is! Map || result['id'] != request['request_id'] || rules is! List ||
-        rules.length != ids.length || rules.any((r) => r is! Map || r['snapshot'] is! Map) ||
-        rules.map((r) => r['snapshot']['grant_id']).toSet().length != ids.length ||
+    if (result is! Map ||
+        result['id'] != request['request_id'] ||
+        rules is! List ||
+        rules.length != ids.length ||
+        rules.any((r) => r is! Map || r['snapshot'] is! Map) ||
+        rules.map((r) => r['snapshot']['grant_id']).toSet().length !=
+            ids.length ||
         ids.any((id) => !rules.any((r) => r['snapshot']['grant_id'] == id))) {
-      throw const ApiException('Copy approval could not be confirmed. Retry with the same limits.');
+      throw const ApiException(
+        'Copy approval could not be confirmed. Retry with the same limits.',
+      );
     }
     return Map<String, dynamic>.from(result);
   }
 
   Future<void> retryCopyMint(String eventId) async {
-    final result = await _post('/copy-mints/events/$eventId/retry', {},
-        timeout: const Duration(seconds: 60));
-    if (result is! Map || result['status'] != 'queued' || result['task_id'] is! String) {
-      throw const ApiException('Retry was not confirmed. Refresh copy activity.');
+    final result = await _post(
+      '/copy-mints/events/$eventId/retry',
+      {},
+      timeout: const Duration(seconds: 60),
+    );
+    if (result is! Map ||
+        result['status'] != 'queued' ||
+        result['task_id'] is! String) {
+      throw const ApiException(
+        'Retry was not confirmed. Refresh copy activity.',
+      );
     }
   }
+
   Future<Map<String, dynamic>> copyMintContext(String eventId) async =>
       (await _get('/copy-mints/events/$eventId/context'))
           as Map<String, dynamic>;
 
   Future<Map<String, dynamic>> custodyImportConfig() async =>
-      (await _get('/automatic/import/config')) as Map<String, dynamic>;
+      (await _get('/automatic/import/config?native_currencies=true'))
+          as Map<String, dynamic>;
 
   Future<void> importCustodyWallet(Map<String, dynamic> payload) async {
     try {
@@ -524,7 +653,7 @@ class ApiService extends ChangeNotifier {
     String section, {
     int offset = 0,
   }) async =>
-      (await _get('/history?section=$section&offset=$offset'))
+      (await _get('/history?native_currencies=true&section=$section&offset=$offset'))
           as Map<String, dynamic>;
 
   Future<Map<String, dynamic>> automaticPlanContext(String id) async =>
@@ -557,7 +686,7 @@ class ApiService extends ChangeNotifier {
   }
 
   Future<List<MintPlanModel>> fetchMintPlans() async {
-    final data = await _get('/mint-plans') as List;
+    final data = await _get('/mint-plans?native_currencies=true') as List;
     return data
         .map((item) => MintPlanModel.fromJson(item as Map<String, dynamic>))
         .toList();

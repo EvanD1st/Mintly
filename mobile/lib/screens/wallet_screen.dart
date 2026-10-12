@@ -1,4 +1,5 @@
 import '../widgets/network_budget_card.dart';
+import '../models/network_metadata.dart';
 import '../widgets/screen_components.dart';
 import '../widgets/mintly_notice.dart';
 import '../widgets/wallet_readiness_panel.dart';
@@ -177,14 +178,14 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
                       children: [
                         Text('Automatic minting: ${policy['status']}'),
                         Text(
-                          'Network: ${{1: 'Ethereum', 8453: 'Base', 4663: 'Robinhood'}[policy['chain_id']] ?? 'Chain ${policy['chain_id']}'}',
+                          'Network: ${networkNames[policy['chain_id']] ?? 'Chain ${policy['chain_id']}'}',
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          'Remaining budget: ${_eth(policy['remaining_wei'])} ETH',
+                          'Remaining budget: ${_eth(policy['remaining_wei'])} ${nativeSymbol(policy['chain_id'])}',
                         ),
                         Text(
-                          'Pending mints: ${_eth(policy['reserved_wei'])} ETH reserved',
+                          'Pending mints: ${_eth(policy['reserved_wei'])} ${nativeSymbol(policy['chain_id'])} reserved',
                         ),
                         Text(
                           'Expires: ${DateTime.tryParse('${policy['expires_at']}') == null ? policy['expires_at'] : WatTime.label(DateTime.parse('${policy['expires_at']}'))}',

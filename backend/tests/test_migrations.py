@@ -13,6 +13,32 @@ import app.models
 from app.models import MintPermission
 
 
+def test_native_budget_upgrade_preserves_approvals_and_exact_large_amounts(monkeypatch,tmp_path):
+    import sqlalchemy as sa
+    from datetime import datetime,timezone
+    from app.models import AutomaticGrant
+    path=tmp_path/'native-upgrade.db'
+    monkeypatch.setattr(settings,'DATABASE_URL',f'sqlite+aiosqlite:///{path.as_posix()}')
+    command.upgrade(Config('alembic.ini'),'022_opensea_owner_fairness')
+    engine=create_engine(f'sqlite:///{path.as_posix()}')
+    now=datetime.now(timezone.utc)
+    try:
+        with engine.begin() as conn:
+            grants=sa.Table('automatic_grants',sa.MetaData(),autoload_with=conn)
+            conn.execute(grants.insert().values(id='legacy',user_id='owner',wallet_id='wallet',adapter='custodial_v1',
+                chain_id=1,account='0x'+'1'*40,context_hash='immutable-context',scope={'max_task_wei':42},
+                expires_at=now,status='enabled',budget_wei=42,reserved_wei=7,spent_wei=3,created_at=now,updated_at=now))
+        command.upgrade(Config('alembic.ini'),'head')
+        with engine.begin() as conn:
+            row=conn.execute(sa.select(AutomaticGrant.__table__)).mappings().one()
+            assert (row['budget_wei'],row['reserved_wei'],row['spent_wei'])==(42,7,3)
+            assert row['context_hash']=='immutable-context' and row['scope']=={'max_task_wei':42}
+            exact=12500000000000000001
+            conn.execute(AutomaticGrant.__table__.update().values(budget_wei=exact))
+            assert conn.execute(sa.select(AutomaticGrant.budget_wei)).scalar_one()==exact
+    finally: engine.dispose()
+
+
 def test_fresh_database_migrates_to_head(monkeypatch):
     with tempfile.TemporaryDirectory(prefix="mintly-migration-") as directory:
         path = Path(directory) / "migration.db"

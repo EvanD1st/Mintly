@@ -56,9 +56,9 @@ async def start_pairing(user=Depends(get_current_user)):
 
 
 @router.get('/readiness')
-async def wallet_readiness(user=Depends(get_current_user), db=Depends(get_db)):
+async def wallet_readiness(user=Depends(get_current_user), db=Depends(get_db), native_currencies:bool=False):
     from app.services.wallet_readiness import readiness
-    return await readiness(db, user)
+    return await readiness(db, user, native_currencies=native_currencies)
 
 @router.get('/pairings/{pairing_id}')
 async def pairing_status(pairing_id: str, user=Depends(get_current_user), db=Depends(get_db)):

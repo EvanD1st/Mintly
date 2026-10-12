@@ -15,6 +15,7 @@ from app.services import automatic, copy_mints as copying
 from app.services.mint_plans import aware
 from app.schemas.drop import DropSchema
 from app.services.mint_progress import progress as task_progress
+from app.services.networks import symbol, require_currency
 
 router = APIRouter(prefix='/copy-mints', tags=['copy-mints'])
 
@@ -23,7 +24,7 @@ class FollowRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
     address: str = Field(min_length=42, max_length=42)
     label: str = Field(min_length=1, max_length=80)
-    chains: list[int] = Field(min_length=1, max_length=3)
+    chains: list[int] = Field(min_length=1, max_length=6)
 
 
 class RuleRequest(BaseModel):
@@ -40,12 +41,13 @@ class RuleRequest(BaseModel):
     include_presales: bool = False
     expires_at: datetime
     consent: bool
+    native_symbol: Literal['ETH','HYPE','APE'] | None = None
 
 
 class WalletRuleRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
     request_id: uuid.UUID
-    grant_ids: list[uuid.UUID] = Field(min_length=1, max_length=3)
+    grant_ids: list[uuid.UUID] = Field(min_length=1, max_length=6)
     quantity: int = Field(ge=1, le=100, strict=True)
     quantity_mode: Literal['fixed', 'max_free', 'max_available'] = 'fixed'
     price_cap_eth: str = Field(pattern=r'^[0-9]+(\.[0-9]+)?$', max_length=40)
@@ -56,6 +58,7 @@ class WalletRuleRequest(BaseModel):
     include_presales: bool = False
     expires_at: datetime
     consent: bool
+    native_symbol: Literal['ETH','HYPE','APE'] | None = None
 
 
 class PauseRequest(BaseModel):
@@ -74,6 +77,7 @@ class CheckRequest(BaseModel):
     free_only:bool=False
     paid_only:bool=Field(default=False,strict=True)
     include_presales:bool=False
+    native_symbol:Literal['ETH','HYPE','APE']='ETH'
     expires_at:datetime
 
 
@@ -89,7 +93,10 @@ async def start_checks(watch_id:str,req:CheckRequest,user=Depends(get_current_us
         raise HTTPException(422,'Maximum quantity is available only for free mints.')
     if req.expires_at.tzinfo is None or not datetime.now(timezone.utc)<aware(req.expires_at)<=datetime.now(timezone.utc)+timedelta(days=30):
         raise HTTPException(422,'Choose a check period of up to 30 days.')
-    price,fee,budget=map(automatic.wei,(req.price_cap_eth,req.fee_cap_eth,req.budget_eth))
+    price,fee=map(automatic.wei,(req.price_cap_eth,req.fee_cap_eth))
+    chains=[c for c in watch.chains if symbol(c)==req.native_symbol]
+    if not chains: raise HTTPException(422,'No followed network uses this native currency.')
+    budget=automatic.budget_wei(req.budget_eth,chains[0])
     if req.free_only and req.paid_only:
         raise HTTPException(422,'Choose free mints only or paid mints.')
     if req.paid_only and price<=0:
@@ -103,7 +110,7 @@ async def start_checks(watch_id:str,req:CheckRequest,user=Depends(get_current_us
     if old and old.version==version and old.active:
         return {'check_only':True,'version':version}
     after={}
-    for chain in watch.chains:
+    for chain in chains:
         web3=await automatic.provider_for(chain)
         try:
             after[str(chain)]=await web3.eth.block_number
@@ -166,7 +173,7 @@ def public_rule(rule):
     snapshot = dict(rule.snapshot)
     for key in ('price_cap_wei','fee_cap_wei','total_cap_wei','budget_wei'):
         snapshot[key] = str(snapshot[key])
-    return {'id': rule.id, 'watch_id': rule.watch_id, 'chain_id': rule.chain_id,
+    return {'id': rule.id, 'watch_id': rule.watch_id, 'chain_id': rule.chain_id, 'native_symbol':symbol(rule.chain_id),
         'status': 'expired' if aware(rule.expires_at) <= datetime.now(timezone.utc) else rule.status,
         'expires_at': rule.expires_at, 'snapshot': snapshot,
         'budget_wei': str(rule.budget_wei), 'spent_wei': str(rule.spent_wei), 'reserved_wei': str(rule.reserved_wei),
@@ -192,7 +199,7 @@ async def register_rule(rule_id):
 
 
 @router.get('')
-async def overview(user=Depends(get_current_user), db=Depends(get_db)):
+async def overview(user=Depends(get_current_user), db=Depends(get_db), native_currencies: bool=False):
     checks=(await db.scalars(select(CopyCheck).where(CopyCheck.user_id==user.id))).all()
     watches = (await db.execute(select(CopyWatch).where(CopyWatch.user_id == user.id,
         CopyWatch.archived_at.is_(None)).order_by(CopyWatch.created_at.desc()))).scalars().all()
@@ -202,12 +209,12 @@ async def overview(user=Depends(get_current_user), db=Depends(get_db)):
         .group_by(CopyEvent.watch_id))).all())
     rules = (await db.execute(select(CopyRule).where(CopyRule.user_id == user.id,
         CopyRule.status.in_(['active','paused','registering'])).order_by(CopyRule.created_at.desc()))).scalars().all()
-    return {'enabled': settings.ENABLE_COPY_MINTS, 'networks': copying.networks(),
-        'watches': [{'id': w.id, 'address': w.address, 'label': w.label, 'chains': w.chains,
+    return {'enabled': settings.ENABLE_COPY_MINTS, 'networks': [n for n in copying.networks() if native_currencies or n['native_symbol']=='ETH'],
+        'watches': [{'id': w.id, 'address': w.address, 'label': w.label, 'chains': [c for c in w.chains if native_currencies or symbol(c)=='ETH'],
             'preferences': w.preferences or {},
             'cursors': w.cursors, 'recent_mints': counts.get(w.id, 0),
             'check_only':any(c.watch_id==w.id and c.active and aware(c.expires_at)>datetime.now(timezone.utc) for c in checks),
-            'rules': [public_rule(r) for r in rules if r.watch_id == w.id]} for w in watches],
+            'rules': [public_rule(r) for r in rules if r.watch_id == w.id and (native_currencies or symbol(r.chain_id)=='ETH')]} for w in watches],
         'scope': 'Direct SeaDrop public mints; eligible allowlist/signed stages require explicit opt-in. No public copy after a whitelist copy.'}
 
 
@@ -291,8 +298,12 @@ async def approve_wallet(watch_id: str, req: WalletRuleRequest, user=Depends(get
     allowed = {n['chain_id'] for n in copying.networks()}
     if not {g.chain_id for g in grants} <= allowed:
         raise HTTPException(409, 'A selected network is unavailable for copying.')
-    budget = automatic.wei(req.budget_eth)
-    if not 0 < budget < 2**63:
+    currencies = {symbol(g.chain_id) for g in grants}
+    if len(currencies) != 1:
+        raise HTTPException(422, 'Approve separate copy limits for ETH, HYPE and APE. Native currencies cannot share one budget.')
+    require_currency(grants[0].chain_id,req.native_symbol)
+    budget = automatic.budget_wei(req.budget_eth,grants[0].chain_id)
+    if not 0 < budget < 10**24:
         raise HTTPException(422, 'Choose a finite total copy budget.')
     ids = [str(req.request_id) if i == 0 else str(uuid.uuid5(req.request_id, f'copy-network:{g.chain_id}'))
         for i, g in enumerate(grants)]
@@ -353,7 +364,9 @@ async def save_rule(watch_id, req, user, db, *, group=None):
     if req.expires_at.tzinfo is None or not req.consent or not datetime.now(timezone.utc) < expiry <= min(
             aware(grant.expires_at), datetime.now(timezone.utc) + timedelta(days=30)):
         raise HTTPException(422, 'Approve finite limits and an expiry within your wallet policy.')
-    price, fee, budget = map(automatic.wei, (req.price_cap_eth, req.fee_cap_eth, req.budget_eth))
+    require_currency(grant.chain_id,req.native_symbol)
+    price, fee = map(automatic.wei, (req.price_cap_eth, req.fee_cap_eth))
+    budget = automatic.budget_wei(req.budget_eth,grant.chain_id)
     if req.free_only and req.paid_only:
         raise HTTPException(422,'Choose free mints only or paid mints.')
     if req.paid_only and price<=0:
@@ -450,15 +463,21 @@ async def pause(req: PauseRequest, watch_id: str | None = None, user=Depends(get
 
 @router.get('/activity')
 async def activity(watch_id: str | None = None, offset: int = Query(0, ge=0), limit: int = Query(25, ge=1, le=100),
-                   user=Depends(get_current_user), db=Depends(get_db)):
+                   user=Depends(get_current_user), db=Depends(get_db), native_currencies: bool=False):
     conditions = [CopyEvent.user_id == user.id]
+    if not native_currencies: conditions.append(CopyEvent.observation['chain_id'].as_integer().not_in([999,33139]))
     if watch_id:
         await own_watch(db, user, watch_id, archived=True)
         conditions.append(CopyEvent.watch_id == watch_id)
     events = (await db.execute(select(CopyEvent).where(*conditions).order_by(CopyEvent.created_at.desc(), CopyEvent.id)
         .offset(offset).limit(limit))).scalars().all()
     total = await db.scalar(select(func.count()).select_from(CopyEvent).where(*conditions))
-    tasks = (await db.execute(select(MintTask).join(CopyEvent, CopyEvent.task_id == MintTask.id).where(*conditions))).scalars().all()
+    task_events = (await db.execute(select(MintTask,CopyEvent).join(CopyEvent, CopyEvent.task_id == MintTask.id).where(*conditions))).all()
+    tasks = [t for t,e in task_events]
+    spent_by_currency = {}
+    for task,event in task_events:
+        currency = symbol(event.observation['chain_id'])
+        spent_by_currency[currency] = spent_by_currency.get(currency,0) + (task.actual_total_cost_wei or 0)
     entries = []
     for event in events:
         task = await db.get(MintTask, event.task_id) if event.task_id else None
@@ -471,6 +490,7 @@ async def activity(watch_id: str | None = None, offset: int = Query(0, ge=0), li
         if funding:
             note = copying.funding_note(o['chain_id'], int(o['price_wei']) > 0)
         entries.append({'id': event.id, 'watch_id': event.watch_id, 'wallet_label': watch.label,
+            'native_symbol': symbol(o['chain_id']),
             'progress':task_progress(task) if task else None,
             'observed_at': event.created_at, 'observation': o,
             'status': 'skipped' if funding and unsigned else (task.status if task else event.status),
@@ -486,7 +506,7 @@ async def activity(watch_id: str | None = None, offset: int = Query(0, ge=0), li
             'actual_cost_wei': str(task.actual_total_cost_wei) if task and task.actual_total_cost_wei is not None else None})
     return {'events': entries, 'total': total, 'next_offset': offset + len(events) if offset + len(events) < total else None,
         'copied_mints': sum(t.status == 'confirmed' for t in tasks),
-        'spent_wei': str(sum(t.actual_total_cost_wei or 0 for t in tasks))}
+        'spent_wei': str(spent_by_currency.get('ETH',0)), 'spent_by_currency':{k:str(v) for k,v in spent_by_currency.items()}}
 
 
 async def confirm_unsigned(task_id):

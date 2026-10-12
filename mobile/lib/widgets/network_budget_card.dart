@@ -1,3 +1,4 @@
+import '../models/network_metadata.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../state/app_state.dart';
@@ -18,11 +19,15 @@ class NetworkAllowance {
   final int chainId;
   BigInt available = BigInt.zero, spent = BigInt.zero, reserved = BigInt.zero;
   NetworkAllowance(this.chainId);
+  String get symbol => nativeSymbol(chainId);
   String get name =>
       const {
         1: 'Ethereum',
         8453: 'Base',
         4663: 'Robinhood',
+        999: 'HyperEVM',
+        33139: 'ApeChain',
+        57073: 'Ink',
         42161: 'Arbitrum',
         10: 'Optimism',
         11155111: 'Sepolia',
@@ -162,6 +167,7 @@ class _NetworkBudgetCardState extends ConsumerState<NetworkBudgetCard> {
                               _networkMenuKey.currentState?.showButtonMenu(),
                           child: NativeAmountText(
                             selected.available,
+                            symbol: selected.symbol,
                             prefix: true,
                             fontSize: 23,
                             bold: true,
@@ -256,6 +262,7 @@ class _NetworkBudgetCardState extends ConsumerState<NetworkBudgetCard> {
                                       flex: 3,
                                       child: NativeAmountText(
                                         e.available,
+                                        symbol: e.symbol,
                                         prefix: true,
                                         fontSize: 12,
                                       ),
@@ -328,6 +335,7 @@ class _NetworkBudgetCardState extends ConsumerState<NetworkBudgetCard> {
                         const Text('Spent', style: TextStyle(fontSize: 10)),
                         NativeAmountText(
                           selected.spent,
+                          symbol: selected.symbol,
                           fontSize: 12,
                           bold: true,
                         ),
@@ -343,6 +351,7 @@ class _NetworkBudgetCardState extends ConsumerState<NetworkBudgetCard> {
                         const Text('Reserved', style: TextStyle(fontSize: 10)),
                         NativeAmountText(
                           selected.reserved,
+                          symbol: selected.symbol,
                           fontSize: 12,
                           bold: true,
                         ),
@@ -378,23 +387,27 @@ String compactNative(dynamic raw, {int decimals = 8}) {
 /// Compact display only. Approval and signing amounts continue to use exact wei.
 class NativeAmountText extends StatelessWidget {
   final dynamic wei;
+  final String symbol;
   final bool prefix, bold;
   final double fontSize;
   const NativeAmountText(
     this.wei, {
     super.key,
+    this.symbol = 'ETH',
     this.prefix = false,
     this.bold = false,
     this.fontSize = 14,
   });
   @override
   Widget build(BuildContext context) => Tooltip(
-    message: '${formatNative(wei)} ETH',
+    message: '${formatNative(wei)} $symbol',
     child: FittedBox(
       fit: BoxFit.scaleDown,
       alignment: Alignment.centerLeft,
       child: Text(
-        prefix ? 'ETH ${compactNative(wei)}' : '${compactNative(wei)} ETH',
+        prefix
+            ? '$symbol ${compactNative(wei)}'
+            : '${compactNative(wei)} $symbol',
         maxLines: 1,
         style: TextStyle(
           fontSize: fontSize,

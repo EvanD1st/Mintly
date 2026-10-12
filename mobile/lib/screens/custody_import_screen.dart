@@ -1,3 +1,4 @@
+import '../models/network_metadata.dart';
 import '../theme/compatible_icons.dart';
 import 'dart:math';
 import 'package:flutter/foundation.dart';
@@ -17,7 +18,12 @@ class CustodyImportScreen extends ConsumerStatefulWidget {
   final String? walletId;
   final String? address;
   final int? initialChain;
-  const CustodyImportScreen({super.key, this.walletId, this.address, this.initialChain});
+  const CustodyImportScreen({
+    super.key,
+    this.walletId,
+    this.address,
+    this.initialChain,
+  });
   @override
   ConsumerState<CustodyImportScreen> createState() =>
       _CustodyImportScreenState();
@@ -80,15 +86,21 @@ class _CustodyImportScreenState extends ConsumerState<CustodyImportScreen>
       final chain = network['chain_id'] as int;
       _networkBudgets[chain] = TextEditingController();
       _networkMaximums[chain] = TextEditingController();
-      if (widget.initialChain == null || widget.initialChain == chain) _selectedNetworks.add(chain);
+      if (widget.initialChain == null || widget.initialChain == chain) {
+        _selectedNetworks.add(chain);
+      }
     }
     return config;
   }
 
-  String _combinedBudget() {
+  String _combinedBudget([String currency = 'ETH']) {
     final scale = BigInt.from(10).pow(18);
     var total = BigInt.zero;
-    for (final entry in _networkBudgets.entries.where((entry) => _selectedNetworks.contains(entry.key))) {
+    for (final entry in _networkBudgets.entries.where(
+      (entry) =>
+          _selectedNetworks.contains(entry.key) &&
+          nativeSymbol(entry.key) == currency,
+    )) {
       final controller = entry.value;
       final value = controller.text.trim();
       if (!RegExp(r'^\d+(\.\d{1,18})?$').hasMatch(value)) continue;
@@ -183,14 +195,21 @@ class _CustodyImportScreenState extends ConsumerState<CustodyImportScreen>
             derived.fillRange(0, derived.length, 0);
             return;
           }
-          final matches = wallets.where((wallet) => '${wallet['address']}'.toLowerCase() == accountAddress.toLowerCase());
+          final matches = wallets.where(
+            (wallet) =>
+                '${wallet['address']}'.toLowerCase() ==
+                accountAddress.toLowerCase(),
+          );
           if (matches.isNotEmpty) {
             final existing = matches.first;
             if (existing['signing_capability'] == 'watch_only') {
               _targetWalletId = existing['id'] as String;
             } else {
               derived.fillRange(0, derived.length, 0);
-              setState(() => _error = 'This account is already linked. Open its wallet details to review signing access.');
+              setState(
+                () => _error =
+                    'This account is already linked. Open its wallet details to review signing access.',
+              );
               return;
             }
           }
@@ -241,13 +260,18 @@ class _CustodyImportScreenState extends ConsumerState<CustodyImportScreen>
       'collection_scope': 'reviewed_mints',
       if (_multiNetwork)
         'networks': [
-          for (final network in _networks.where((n) => _selectedNetworks.contains(n['chain_id'])))
+          for (final network in _networks.where(
+            (n) => _selectedNetworks.contains(n['chain_id']),
+          ))
             {
               'chain_id': network['chain_id'],
+              'native_symbol': nativeSymbol(network['chain_id']),
               'budget_eth': _networkBudgets[network['chain_id']]!.text.trim(),
               'max_task_eth':
                   _networkMaximums[network['chain_id']]!.text.trim().isEmpty
-                  ? _networkBudgets[network['chain_id']]!.text.trim()
+                  ? _defaultMaximum(
+                      _networkBudgets[network['chain_id']]!.text.trim(),
+                    )
                   : _networkMaximums[network['chain_id']]!.text.trim(),
             },
         ]
@@ -280,6 +304,10 @@ class _CustodyImportScreenState extends ConsumerState<CustodyImportScreen>
     }
   }
 
+  String _defaultMaximum(String value) {
+    return (double.tryParse(value) ?? 0) > 9 ? '9' : value;
+  }
+
   String? _amount(String? value) {
     final text = (value ?? '').trim();
     final number = double.tryParse(text);
@@ -287,7 +315,7 @@ class _CustodyImportScreenState extends ConsumerState<CustodyImportScreen>
             number == null ||
             !number.isFinite ||
             number <= 0
-        ? 'Enter a positive ETH amount with up to 18 decimals'
+        ? 'Enter a positive native amount with up to 18 decimals'
         : null;
   }
 
@@ -296,7 +324,9 @@ class _CustodyImportScreenState extends ConsumerState<CustodyImportScreen>
     canPop: !_busy,
     child: Scaffold(
       appBar: AppBar(
-        title: Text(_limits ? 'Approve signing limits' : 'Enable automatic signing'),
+        title: Text(
+          _limits ? 'Approve signing limits' : 'Enable automatic signing',
+        ),
       ),
       body: FutureBuilder<Map<String, dynamic>>(
         future: _config,
@@ -417,26 +447,40 @@ class _CustodyImportScreenState extends ConsumerState<CustodyImportScreen>
                     for (final network in _networks) ...[
                       CheckboxListTile(
                         key: Key('custody-select-${network['chain_id']}'),
-                        contentPadding: EdgeInsets.zero, title: Text('${network['name']}'),
+                        contentPadding: EdgeInsets.zero,
+                        title: Text('${network['name']}'),
                         value: _selectedNetworks.contains(network['chain_id']),
-                        onChanged: _busy || _attempted ? null : (selected) => setState(() {
-                          final id = network['chain_id'] as int;
-                          if (selected == true) { _selectedNetworks.add(id); } else { _selectedNetworks.remove(id); }
-                        }),
+                        onChanged: _busy || _attempted
+                            ? null
+                            : (selected) => setState(() {
+                                final id = network['chain_id'] as int;
+                                if (selected == true) {
+                                  _selectedNetworks.add(id);
+                                } else {
+                                  _selectedNetworks.remove(id);
+                                }
+                              }),
                       ),
                       if (_selectedNetworks.contains(network['chain_id'])) ...[
                         TextFormField(
                           key: Key('custody-budget-${network['chain_id']}'),
-                          controller: _networkBudgets[network['chain_id']], enabled: !_busy && !_attempted,
-                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                          decoration: InputDecoration(labelText: '${network['name']} budget (ETH)'),
-                          validator: _amount, onChanged: (_) => setState(() {}),
+                          controller: _networkBudgets[network['chain_id']],
+                          enabled: !_busy && !_attempted,
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                          ),
+                          decoration: InputDecoration(
+                            labelText:
+                                '${network['name']} budget (${nativeSymbol(network['chain_id'])})',
+                          ),
+                          validator: _amount,
+                          onChanged: (_) => setState(() {}),
                         ),
                         const SizedBox(height: 16),
                       ],
                     ],
                     Text(
-                      'Combined authorized budget: ${_combinedBudget()} ETH',
+                      'Authorized budgets: ${_selectedNetworks.map(nativeSymbol).toSet().map((c) => '${_combinedBudget(c)} $c').join(' · ')}',
                       key: const Key('custody-combined-budget'),
                     ),
                     const SizedBox(height: 16),
@@ -538,7 +582,9 @@ class _CustodyImportScreenState extends ConsumerState<CustodyImportScreen>
                       child: Column(
                         children: [
                           if (_multiNetwork)
-                            for (final network in _networks.where((n) => _selectedNetworks.contains(n['chain_id'])))
+                            for (final network in _networks.where(
+                              (n) => _selectedNetworks.contains(n['chain_id']),
+                            ))
                               TextFormField(
                                 controller:
                                     _networkMaximums[network['chain_id']],
@@ -549,7 +595,7 @@ class _CustodyImportScreenState extends ConsumerState<CustodyImportScreen>
                                     ),
                                 decoration: InputDecoration(
                                   labelText:
-                                      '${network['name']} maximum per mint (ETH, optional)',
+                                      '${network['name']} maximum per mint (${nativeSymbol(network['chain_id'])}, optional)',
                                   helperText:
                                       'Blank uses this network’s budget',
                                 ),
@@ -586,7 +632,7 @@ class _CustodyImportScreenState extends ConsumerState<CustodyImportScreen>
                             ),
                           const SizedBox(height: 12),
                           const Text(
-                            'Importing does not submit a mint. Review each automatic mint in Mintly. Disabling stops future signing; it cannot erase the key or cancel signed transactions. ETH limits are not a guaranteed USD limit.',
+                            'Importing does not submit a mint. Review each automatic mint in Mintly. Disabling stops future signing; it cannot erase the key or cancel signed transactions. Each network uses its native currency. Budgets are separate by currency. The default maximum per mint is capped at 9 native units; review it under More limits. Native limits are not a guaranteed USD limit.',
                           ),
                         ],
                       ),

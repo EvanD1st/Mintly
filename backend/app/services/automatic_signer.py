@@ -14,6 +14,7 @@ from eth_utils import to_checksum_address
 
 from app.api.deps import get_db
 from app.config import settings
+from app.services.networks import symbol
 from app.models import MintTask, MintAuthorization, AutomaticGrant, AutomaticNonce, Wallet, User, CopyRule, CopyWatch, CopyCheck
 from app.services import automatic, mint_instruction_cache
 from app.services.custody import CustodyVault, private_read
@@ -85,7 +86,7 @@ async def preflight_task(db, task_id, vault=None):
                 execution = await automatic.prepare_mint(web3, s)
             balance = await web3.eth.get_balance(to_checksum_address(s['account']), 'pending')
             if balance < s['total_cap_wei']:
-                note = 'Balance is below the approved maximum. Add ETH before mint time.'
+                note = f'Balance is below the approved maximum. Add {symbol(grant.chain_id)} before mint time.'
         except OpenSeaUnavailable as error:
             from app.services.mint_diagnostics import PREPARATION_REASONS
             note = PREPARATION_REASONS.get(error.mint_reason,'Wallet-specific instructions are not ready. Another check will run at mint time.')
@@ -150,7 +151,7 @@ async def final_receipt(web3, tx_hash, chain_id=None):
     block = await web3.eth.get_block(receipt.blockNumber)
     if block.hash != receipt.blockHash or await web3.eth.block_number - receipt.blockNumber + 1 < max(2, settings.AUTOMATIC_CONFIRMATIONS):
         return None
-    if (settings.AUTOMATIC_CHAIN_ID if chain_id is None else chain_id) in (1, 8453, 11155111, 4663):
+    if (settings.AUTOMATIC_CHAIN_ID if chain_id is None else chain_id) in (1, 8453, 11155111, 4663,999,33139,57073):
         finalized = await web3.eth.get_block('finalized')
         if finalized.number < receipt.blockNumber:
             return None
@@ -237,7 +238,7 @@ async def prepare_task(db, task_id, vault=None):
                     for member in group['members']:
                         sibling = journal.execute('SELECT snapshot FROM copy_rules WHERE id=?', (member,)).fetchone()
                         sibling = json.loads(sibling['snapshot']) if sibling else None
-                        if (not sibling or copy_mints.budget_group(sibling) != group
+                        if (not sibling or symbol(sibling['chain_id']) != symbol(r['chain_id']) or copy_mints.budget_group(sibling) != group
                                 or any(sibling[k] != r[k] for k in ('user_id','watch_id','wallet_id','account','source_address'))):
                             raise ValueError('Shared copy approval is not fully pinned')
                 quantity_matches = (r['quantity'] == s['quantity'] if mode == 'fixed' else (
@@ -280,20 +281,20 @@ async def prepare_task(db, task_id, vault=None):
             if (not advance or advance[1] != intent or time.monotonic() - advance[0] > 90
                     or time.monotonic() - _reconciled.get(grant.context_hash, -1000) > 30):
                 await reconcile_policy(journal, web3, grant)
-            charged = journal.execute('SELECT COALESCE(SUM(COALESCE(actual,liability)),0) FROM signed WHERE policy=?', (grant.id,)).fetchone()[0]
+            charged = sum(row[0] for row in journal.execute('SELECT COALESCE(actual,liability) FROM signed WHERE policy=?', (grant.id,)))
             if charged + s['total_cap_wei'] > policy['budget_wei']:
                 raise ValueError('Independent signer budget exhausted or reserved by uncertain submissions')
             if task.copy_rule_id:
                 if group is not None:
                     await reconcile_copy_group(journal, group, web3, grant.chain_id)
                     marks = ','.join('?' for _ in group['members'])
-                    charged_group = journal.execute('SELECT COALESCE(SUM(COALESCE(s.actual,s.liability)),0) '
+                    charged_group = sum(row[0] for row in journal.execute('SELECT COALESCE(s.actual,s.liability) '
                         f'FROM signed s JOIN copy_signed c ON c.task=s.task WHERE c.rule IN ({marks})',
-                        group['members']).fetchone()[0]
+                        group['members']))
                     if charged_group + s['total_cap_wei'] > group['budget_wei']:
                         raise ValueError('Independent shared copy budget exhausted or reserved')
-                charged_copy = journal.execute('SELECT COALESCE(SUM(COALESCE(s.actual,s.liability)),0) FROM signed s '
-                    'JOIN copy_signed c ON c.task=s.task WHERE c.rule=?', (task.copy_rule_id,)).fetchone()[0]
+                charged_copy = sum(row[0] for row in journal.execute('SELECT COALESCE(s.actual,s.liability) FROM signed s '
+                    'JOIN copy_signed c ON c.task=s.task WHERE c.rule=?', (task.copy_rule_id,)))
                 if charged_copy + s['total_cap_wei'] > r['budget_wei']:
                     raise ValueError('Independent copy budget exhausted or reserved')
             address = to_checksum_address(s['account'])
@@ -418,26 +419,34 @@ async def prepare(task_id: str, db=Depends(get_db)):
 
 
 @app.post('/account-limits/{user_id}/register',dependencies=[Depends(authenticate)])
-async def register_daily_limit(user_id: str, db=Depends(get_db)):
+async def register_daily_limit(user_id: str, db=Depends(get_db), currency: str='ETH'):
     from app.services import daily_budget
     await automatic.lock_execution(db)
     user = await db.get(User,user_id,populate_existing=True)
-    if not user or not user.is_active or user.deleted_at or user.daily_limit_status not in ('active','registering'):
+    if not user or not user.is_active or user.deleted_at:
+        raise HTTPException(409,'Daily limit owner is unavailable.')
+    owner=await daily_budget.limit_owner(db,user,currency)
+    if owner.daily_limit_status not in ('active','registering'):
         raise HTTPException(409,'Daily limit owner is unavailable.')
     vault = CustodyVault()
     journal = vault.journal()
     try:
-        config = daily_budget.configuration(user)
-        pin = journal.execute('SELECT * FROM daily_limits WHERE user_id=?',(user.id,)).fetchone()
+        config = daily_budget.configuration(owner)
+        pin = daily_budget.limit_pin(journal,owner)
         if pin and (pin['revision'] > config['revision'] or (
                 pin['revision'] == config['revision'] and pin['intent'] != automatic.digest(config))):
             raise ValueError('Cannot rewrite a registered limit revision')
-        if config['limit_wei'] is not None and not 0 < config['limit_wei'] < 2**63:
+        if config['limit_wei'] is not None and not 0 < config['limit_wei'] < (2**63 if currency=='ETH' else 10**24):
             raise ValueError('Invalid daily ceiling')
-        await daily_budget.backfill_private(journal,vault,user.id)
-        journal.execute('INSERT INTO daily_limits(user_id,revision,intent,configuration) VALUES(?,?,?,?) '
-            'ON CONFLICT(user_id) DO UPDATE SET revision=excluded.revision,intent=excluded.intent,configuration=excluded.configuration',
-            (user.id,config['revision'],automatic.digest(config),json.dumps(config,sort_keys=True)))
+        await daily_budget.backfill_private(journal,vault,user.id,currency=currency)
+        if currency=='ETH':
+            journal.execute('INSERT INTO daily_limits(user_id,revision,intent,configuration) VALUES(?,?,?,?) '
+                'ON CONFLICT(user_id) DO UPDATE SET revision=excluded.revision,intent=excluded.intent,configuration=excluded.configuration',
+                (user.id,config['revision'],automatic.digest(config),json.dumps(config,sort_keys=True)))
+        else:
+            journal.execute('INSERT INTO native_daily_limits(user_id,currency,revision,intent,configuration) VALUES(?,?,?,?,?) '
+                'ON CONFLICT(user_id,currency) DO UPDATE SET revision=excluded.revision,intent=excluded.intent,configuration=excluded.configuration',
+                (user.id,currency,config['revision'],automatic.digest(config),json.dumps(config,sort_keys=True)))
         journal.commit()
         await db.commit()
         return {'registered':True,'revision':config['revision']}
@@ -449,18 +458,19 @@ async def register_daily_limit(user_id: str, db=Depends(get_db)):
 
 
 @app.get('/account-limits/{user_id}/usage',dependencies=[Depends(authenticate)])
-async def daily_usage(user_id: str, db=Depends(get_db)):
+async def daily_usage(user_id: str, db=Depends(get_db), currency: str='ETH'):
     from app.services import daily_budget
     user = await db.get(User,user_id)
     if not user or not user.is_active or user.deleted_at:
         raise HTTPException(404,'Account not found.')
+    owner=await daily_budget.limit_owner(db,user,currency)
     journal = CustodyVault().journal()
     try:
-        daily_budget.private_configuration(journal,user)
-        await daily_budget.reconcile_private(journal,user.id)
-        used = daily_budget.private_usage(journal,user.id,daily_budget.day_key())
+        daily_budget.private_configuration(journal,owner)
+        await daily_budget.reconcile_private(journal,user.id,currency=currency)
+        used = daily_budget.private_usage(journal,user.id,daily_budget.day_key(),currency)
         return {**{k:str(v) for k,v in used.items()},'signed_tasks':[
-            r['task'] for r in journal.execute('SELECT task FROM daily_signed WHERE user_id=?',(user.id,)).fetchall()]}
+            r['task'] for r in journal.execute('SELECT d.task,s.chain FROM daily_signed d JOIN signed s ON s.task=d.task WHERE d.user_id=?',(user.id,)).fetchall() if symbol(r['chain'])==currency]}
     except Exception:
         raise HTTPException(503,'Registered spending information unavailable.') from None
     finally:

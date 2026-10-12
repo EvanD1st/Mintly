@@ -210,12 +210,13 @@ async def test_recovery_retries_are_finite_and_never_extend_original_consent(lab
 
 
 @pytest.fixture
-async def lab(test_db, monkeypatch, tmp_path):
-    rpc = os.environ.get('MINTLY_TEST_RPC')
+async def lab(test_db, monkeypatch, tmp_path, request):
+    chain = getattr(request,'param',31337)
+    rpc = os.environ.get('MINTLY_TEST_RPC' if chain == 31337 else f'MINTLY_TEST_RPC_{chain}')
     if not rpc:
         pytest.skip('MINTLY_TEST_RPC is required for real local execution')
     assert urlparse(rpc).hostname in ('127.0.0.1','localhost')
-    w = Web3(Web3.HTTPProvider(rpc)); assert w.eth.chain_id == 31337
+    w = Web3(Web3.HTTPProvider(rpc)); assert w.eth.chain_id == chain
     checkpoint = w.provider.make_request('evm_snapshot', [])
     assert 'result' in checkpoint, checkpoint
     artifacts = json.loads((Path(__file__).parent/'fixtures/seadrop-presale.json').read_text())['contracts']
@@ -227,7 +228,7 @@ async def lab(test_db, monkeypatch, tmp_path):
         return w.eth.contract(address=r.contractAddress, abi=spec['abi'])
     real = deploy('SeaDrop')
     def domain(address):
-        return keccak(encode(['bytes32','bytes32','bytes32','uint256','address'], [keccak(text='EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)'),keccak(text='SeaDrop'),keccak(text='1.0'),31337,address])).hex()
+        return keccak(encode(['bytes32','bytes32','bytes32','uint256','address'], [keccak(text='EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)'),keccak(text='SeaDrop'),keccak(text='1.0'),chain,address])).hex()
     code = w.eth.get_code(real.address).hex().replace(domain(real.address),domain(SEADROP_V1_ADDRESS))
     w.provider.make_request('hardhat_setCode', [SEADROP_V1_ADDRESS, '0x'+code])
     w.provider.make_request('hardhat_setStorageAt', [SEADROP_V1_ADDRESS, '0x0', '0x'+(1).to_bytes(32,'big').hex()])
@@ -248,7 +249,7 @@ async def lab(test_db, monkeypatch, tmp_path):
     w.provider.make_request('hardhat_stopImpersonatingAccount',[nft.address])
     user = (await test_db.execute(select(User).where(User.username=='member'))).scalar_one()
     wallet = Wallet(id=str(uuid.uuid4()),user_id=user.id,address=owner.address,label='Imported test wallet',signing_capability='custodial',is_demo=False)
-    drop = Drop(id=str(uuid.uuid4()),name='Real SeaDrop local test',chain='Local EVM',chain_id=31337,
+    drop = Drop(id=str(uuid.uuid4()),name='Real SeaDrop local test',chain='Local EVM',chain_id=chain,
         contract_address=nft.address,mint_page_url='https://opensea.io/collection/local-test',is_supported_integration=True,is_demo=False)
     stage = MintStage(id=str(uuid.uuid4()),drop_id=drop.id,stage_name='Exact selected stage',
         start_time_utc=datetime.fromtimestamp(start,timezone.utc),end_time_utc=datetime.fromtimestamp(end,timezone.utc),
@@ -260,17 +261,26 @@ async def lab(test_db, monkeypatch, tmp_path):
     # Cheap KDF only for fresh ephemeral test keys; production provisioning pins 262144.
     private_write(tmp_path/f'{key_id}.keystore.json', json.dumps(Account.encrypt(owner.key,password,kdf='scrypt',iterations=1024)))
     policy = dict(grant_id=grant_id,key_id=key_id,user_id=user.id,wallet_id=wallet.id,account=owner.address,
-        chain_id=31337,contracts=[nft.address],mint_kinds=['public','allowlist','signed'],budget_wei=10**16,max_task_wei=10**15,expires_at=end)
+        chain_id=chain,contracts=[nft.address],mint_kinds=['public','allowlist','signed'],budget_wei=10**16,max_task_wei=10**15,expires_at=end)
     private_write(tmp_path/f'{grant_id}.policy.json',json.dumps(policy))
-    grant = AutomaticGrant(id=grant_id,user_id=user.id,wallet_id=wallet.id,chain_id=31337,account=owner.address,
+    grant = AutomaticGrant(id=grant_id,user_id=user.id,wallet_id=wallet.id,chain_id=chain,account=owner.address,
         context_hash=automatic.digest(policy),scope={k:policy[k] for k in ('contracts','mint_kinds','max_task_wei')},
         budget_wei=policy['budget_wei'],expires_at=datetime.fromtimestamp(end,timezone.utc),status='enabled')
     test_db.add_all([wallet,drop]); await test_db.flush()
     test_db.add_all([stage,grant]); await test_db.commit()
-    for name,value in dict(ENABLE_CUSTODIAL_AUTOMATIC=True,AUTOMATIC_CHAIN_ID=31337,AUTOMATIC_RPC=rpc,
+    for name,value in dict(ENABLE_CUSTODIAL_AUTOMATIC=True,AUTOMATIC_CHAIN_ID=chain,AUTOMATIC_RPC=rpc,
         CUSTODY_VAULT_DIR=str(tmp_path),CUSTODY_PASSWORD_FILE=str(tmp_path/'password'),CUSTODY_JOURNAL_FILE=str(tmp_path/'journal.sqlite'),
         AUTOMATIC_SIGNER_TOKEN_FILE=str(tmp_path/'token'),AUTOMATIC_CONFIRMATIONS=2).items():
         monkeypatch.setattr(settings,name,value)
+    if chain != 31337:
+        from app.services.networks import NETWORKS
+        monkeypatch.setattr(settings, NETWORKS[chain].opt_in, True)
+        # Disposable loopback EVM only; production enabled() still requires HTTPS.
+        real_enabled = automatic.enabled
+        def local_enabled(chain_id=None):
+            if (settings.AUTOMATIC_CHAIN_ID if chain_id is None else chain_id) == chain: return
+            return real_enabled(chain_id)
+        monkeypatch.setattr(automatic,'enabled',local_enabled)
     factory=async_sessionmaker(test_db.bind,expire_on_commit=False)
     async def dependency():
         async with factory() as db:
@@ -303,16 +313,19 @@ async def lab(test_db, monkeypatch, tmp_path):
             data='0x'+ALLOW_SELECTOR+encode(['address','address','address','uint256',PARAM_TYPE,'bytes32[]'],[nft.address,fee,address,quantity,mint_params,[]]).hex()
         else:
             mint=dict(contract=nft.address,wallet=address,fee=fee,params=mint_params,salt=17)
-            sig=Account.sign_message(encode_typed_data(full_message=signed_mint_typed_data(mint,31337)),presale_signer.key).signature
+            sig=Account.sign_message(encode_typed_data(full_message=signed_mint_typed_data(mint,chain)),presale_signer.key).signature
             data='0x'+SIGNED_SELECTOR+encode(['address','address','address','uint256',PARAM_TYPE,'uint256','bytes'],[nft.address,fee,address,quantity,mint_params,17,sig]).hex()
         return 200,dict(to=SEADROP_V1_ADDRESS,data=data,value=str(quantity*mint_params[0]),chain='local-test')
     monkeypatch.setattr('app.services.opensea.OpenSeaClient.build_mint',build_mint)
-    monkeypatch.setitem(automatic.CHAINS,'local-test',(31337,'Local EVM'))
+    monkeypatch.setitem(automatic.CHAINS,'local-test',(chain,'Local EVM'))
     state=SimpleNamespace(w=w,sea=sea,nft=nft,owner=owner,user=user,grant=grant,stage=stage,drop=drop,wallet=wallet,
         factory=factory,client=client,sign=sign,signer_client=signer_client,due=due,tick=tick,start=start,end=end,kind='public',tmp=tmp_path)
     state.request=dict(wallet_id=wallet.id,drop_id=drop.id,stage_id=stage.id,quantity=2,fee_cap_eth='0.0005',
         grant_id=grant.id,price_cap_eth='0.00000000000000001',total_cap_eth='0.00050000000000002',
         user_consent_confirmed=True,idempotency_key='test-intent-0001',mint_kind='public')
+    if chain != 31337:
+        from app.services.networks import symbol
+        state.request['native_symbol'] = symbol(chain)
     yield state
     await client.aclose();await signer_client.aclose()
     app.dependency_overrides.pop(get_db,None);signer_app.dependency_overrides.pop(get_db,None)

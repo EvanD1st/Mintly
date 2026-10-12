@@ -3,6 +3,7 @@ from datetime import datetime
 from sqlalchemy import String, ForeignKey, BigInteger, JSON, DateTime, Text, Boolean, Integer
 from sqlalchemy.orm import Mapped, mapped_column
 from app.database import Base
+from app.models.native_units import BudgetWei
 
 
 class DailyDebit(Base):
@@ -12,6 +13,20 @@ class DailyDebit(Base):
     day: Mapped[str] = mapped_column(String(10), index=True)
     maximum_wei: Mapped[int] = mapped_column(BigInteger)
     actual_wei: Mapped[int | None] = mapped_column(BigInteger)
+    currency: Mapped[str] = mapped_column(String(8), default='ETH', server_default='ETH')
+
+
+class NativeDailyLimit(Base):
+    __tablename__ = 'native_daily_limits'
+    user_id: Mapped[str] = mapped_column(ForeignKey('users.id'), primary_key=True)
+    currency: Mapped[str] = mapped_column(String(8), primary_key=True)
+    daily_limit_wei: Mapped[int | None] = mapped_column(BudgetWei())
+    daily_limit_revision: Mapped[int] = mapped_column(Integer, default=0, server_default='0')
+    daily_limit_status: Mapped[str] = mapped_column(String(24), default='active', server_default='active')
+
+    @property
+    def id(self):
+        return self.user_id
 
 
 class CopyCheck(Base):

@@ -46,6 +46,10 @@ class Settings(BaseSettings):
     # RPC Configuration
     RPC_ETHEREUM: str = "https://ethereum-rpc.publicnode.com"
     RPC_BASE: str = "https://mainnet.base.org"
+    # Archive-capable HyperEVM RPC: copy verification requires historical calls.
+    RPC_HYPEREVM: str = "https://rpc.hypurrscan.io"
+    RPC_APECHAIN: str = "https://rpc.apechain.com/http"
+    RPC_INK: str = "https://rpc-gel.inkonchain.com"
     RPC_ROBINHOOD: str = "https://rpc.mainnet.chain.robinhood.com"
     RPC_ARBITRUM: str = "https://arb1.arbitrum.io/rpc"
     RPC_OPTIMISM: str = "https://mainnet.optimism.io"
@@ -67,6 +71,9 @@ class Settings(BaseSettings):
     ENABLE_ROBINHOOD_AUTOMATIC: bool = False  # separate explicit mainnet opt-in
     ENABLE_ETHEREUM_AUTOMATIC: bool = False
     ENABLE_BASE_AUTOMATIC: bool = False
+    ENABLE_HYPEREVM_AUTOMATIC: bool = False
+    ENABLE_APECHAIN_AUTOMATIC: bool = False
+    ENABLE_INK_AUTOMATIC: bool = False
     ENABLE_COPY_MINTS: bool = False
     AUTOMATIC_RPC: str = 'http://127.0.0.1:18545'
     AUTOMATIC_SIGNER_URL: str = 'http://127.0.0.1:18766'

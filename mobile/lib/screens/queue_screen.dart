@@ -355,7 +355,7 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
                   ? 'Unverified'
                   : double.tryParse(plan.priceEth!) == 0
                   ? 'Free'
-                  : '${plan.priceEth} ETH each',
+                  : '${plan.priceEth} ${plan.nativeCurrency} each',
               'wallet',
             ),
           ]),
@@ -427,10 +427,14 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
               'Mint price',
               double.tryParse(task.unitPriceEth) == 0
                   ? 'Free'
-                  : '${task.unitPriceEth} ETH each',
+                  : '${task.unitPriceEth} ${task.nativeCurrency} each',
               'wallet',
             ),
-            CompactFact('Gas cap', '${task.feeCapEth} ETH', 'gas'),
+            CompactFact(
+              'Gas cap',
+              '${task.feeCapEth} ${task.nativeCurrency}',
+              'gas',
+            ),
           ]),
           const SizedBox(height: 7),
           if (task.status == 'armed')
@@ -469,7 +473,7 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
                       const SizedBox(height: 12),
                       DetailRow(
                         'Approved total cap',
-                        '${task.totalCapEth} ETH',
+                        '${task.totalCapEth} ${task.nativeCurrency}',
                       ),
                       if (task.progress != null)
                         MintProgress(progress: task.progress!)
@@ -663,20 +667,20 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
                 'Mint · ${plan.quantity} NFT${plan.quantity == 1 ? '' : 's'}',
                 plan.mintValueEth == null
                     ? 'Unverified'
-                    : '${plan.mintValueEth} ETH',
+                    : '${plan.mintValueEth} ${plan.nativeCurrency}',
               ),
               DetailRow(
                 'Network fee',
                 plan.estimatedNetworkFeeEth == null
                     ? 'Unavailable'
-                    : '${plan.estimatedNetworkFeeEth} ETH',
+                    : '${plan.estimatedNetworkFeeEth} ${plan.nativeCurrency}',
               ),
               const Divider(height: 15),
               DetailRow(
                 'Estimated total',
                 plan.estimatedTotalEth == null
                     ? 'Unavailable'
-                    : '${plan.estimatedTotalEth} ETH',
+                    : '${plan.estimatedTotalEth} ${plan.nativeCurrency}',
                 emphasis: true,
               ),
               const Text(

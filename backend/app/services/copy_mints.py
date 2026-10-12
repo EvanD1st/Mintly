@@ -17,14 +17,15 @@ from app.services.signer.base import SEADROP_V1_ADDRESS, MINT_PUBLIC_SELECTOR
 from app.services.parser import format_wei_to_eth
 from app.services.automatic_fees import quote_gas, maximum_fee
 
-CHAINS = {1: 'Ethereum', 8453: 'Base', 4663: 'Robinhood', 31337: 'Local test', 11155111: 'Sepolia'}
+from app.services.networks import NETWORKS, metadata, symbol, name
+CHAINS = {n.chain_id: n.name for n in NETWORKS.values()}
 TRANSFER = '0x' + keccak(text='Transfer(address,address,uint256)').hex()
 SEADROP_MINT = '0x' + keccak(text='SeaDropMint(address,address,address,address,uint256,uint256,uint256,uint256)').hex()
 ZERO_TOPIC = '0x' + '0' * 64
 
 
 def funding_note(chain, paid=False):
-    return f'Not enough ETH on {CHAINS.get(chain, "this network")} for {"mint + gas" if paid else "gas"}.'
+    return f'Not enough {symbol(chain)} on {CHAINS.get(chain, "this network")} for {"mint + gas" if paid else "gas"}.'
 
 
 def is_funding_note(note, chain):
@@ -36,7 +37,7 @@ def budget_group(snapshot):
     if group is None:
         return None
     if (set(group) != {'id', 'budget_wei', 'members'} or str(uuid.UUID(group['id'])) != group['id']
-            or not 0 < group['budget_wei'] < 2**63 or not 1 <= len(group['members']) <= 3
+            or not 0 < group['budget_wei'] < (2**63 if symbol(snapshot['chain_id'])=='ETH' else 10**24) or not 1 <= len(group['members']) <= 6
             or len(set(group['members'])) != len(group['members'])
             or any(str(uuid.UUID(member)) != member for member in group['members'])):
         raise ValueError('Invalid shared copy budget')
@@ -50,7 +51,7 @@ async def group_remaining(db, rule):
     members = (await db.scalars(select(CopyRule).where(CopyRule.id.in_(group['members'])))).all()
     if len(members) != len(group['members']) or any(
             m.user_id != rule.user_id or m.watch_id != rule.watch_id
-            or m.snapshot['wallet_id'] != rule.snapshot['wallet_id'] or budget_group(m.snapshot) != group for m in members):
+            or symbol(m.chain_id) != symbol(rule.chain_id) or m.snapshot['wallet_id'] != rule.snapshot['wallet_id'] or budget_group(m.snapshot) != group for m in members):
         raise ValueError('Shared copy approval differs')
     return group['budget_wei'] - sum(m.spent_wei + m.reserved_wei for m in members)
 
@@ -173,7 +174,7 @@ def networks():
             continue
         try:
             automatic.enabled(chain)
-            result.append({'chain_id': chain, 'name': name})
+            result.append(metadata(chain))
         except HTTPException:
             pass
     return result
@@ -329,7 +330,7 @@ async def drop_for(db, web3, observation, *, presale=None, slug=None):
     key = automatic.digest(parts)
     drop = await db.get(Drop, key)
     if not drop:
-        chain_slug = {1:'ethereum',8453:'base',4663:'robinhood',11155111:'sepolia',31337:'local'}[observation['chain_id']]
+        chain_slug = NETWORKS[observation['chain_id']].slug
         drop = Drop(id=key, name=observation['name'], chain=observation['chain'], chain_id=observation['chain_id'],
             contract_address=observation['contract'], mint_page_url=f'https://opensea.io/collection/{slug}' if slug else f'https://opensea.io/assets/{chain_slug}/{observation["contract"]}',
             site_label='Public SeaDrop', icon_name='gem', status_label='Public stage verified', status_kind='unknown',
@@ -414,14 +415,15 @@ async def arm_event(db, event, rule, web3):
         return
     if quantity_mode(r)=='max_available':
         from app.models import AutomaticGrant,User
-        from app.services.daily_budget import usage
+        from app.services.daily_budget import usage, limit_owner
         grant=await db.get(AutomaticGrant,rule.grant_id)
         user=await db.get(User,rule.user_id)
         ceiling=min(r['total_cap_wei'],rule.budget_wei-rule.spent_wei-rule.reserved_wei,
             await group_remaining(db,rule),grant.budget_wei-grant.spent_wei-grant.reserved_wei)
-        if user.daily_limit_wei is not None:
-            daily=await usage(db,user.id)
-            ceiling=min(ceiling,user.daily_limit_wei-sum(daily.values()))
+        owner=await limit_owner(db,user,symbol(rule.chain_id))
+        if owner.daily_limit_wei is not None:
+            daily=await usage(db,user.id,currency=symbol(rule.chain_id))
+            ceiling=min(ceiling,owner.daily_limit_wei-sum(daily.values()))
         r={**r,'total_cap_wei':ceiling}
     await no_mixed_stage_copy(db, {'chain_id':o['chain_id'], 'account':r['account'], 'contract':o['contract'], 'mint_kind':kind})
     if kind=='public' and not accepts_price(r,o['price_wei']):
@@ -459,7 +461,7 @@ async def arm_event(db, event, rule, web3):
             return
     if await web3.eth.get_balance(r['account'], 'pending') <= price * quantity:
         raise HTTPException(409, funding_note(o['chain_id'], price > 0))
-    req = SimpleNamespace(plan_id=None, grant_id=rule.grant_id, wallet_id=r['wallet_id'], drop_id=drop.id,
+    req = SimpleNamespace(native_symbol=symbol(rule.chain_id),plan_id=None, grant_id=rule.grant_id, wallet_id=r['wallet_id'], drop_id=drop.id,
         stage_id=stage.id, quantity=quantity, price_cap_eth=format_wei_to_eth(r['price_cap_wei']),
         fee_cap_eth=format_wei_to_eth(r['fee_cap_wei']), total_cap_eth=format_wei_to_eth(r['total_cap_wei']),
         expires_at=min(aware(rule.expires_at), aware(stage.end_time_utc)), mint_kind=kind,
@@ -504,7 +506,7 @@ async def discover_watch(watch, chain):
         last = previous.get('block', max(0, head - 2000))
         if previous.get('hash') and hex_value((await web3.eth.get_block(last)).hash) != previous['hash']:
             last = max(0, last - 24)
-        end = min(head, last + 300)
+        end = min(head, last + min(300, NETWORKS[chain].log_span))
         if end > last:
             logs = await web3.eth.get_logs({'address': SEADROP_V1_ADDRESS, 'fromBlock': last + 1, 'toBlock': end,
                 'topics': [SEADROP_MINT, None, '0x' + watch.address[2:].rjust(64, '0')]})

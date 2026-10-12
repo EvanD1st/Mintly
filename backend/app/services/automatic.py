@@ -18,6 +18,7 @@ from sqlalchemy import select, update
 from web3 import AsyncWeb3
 
 from app.config import settings
+from app.services.networks import symbol
 from app.models import AutomaticGrant, AutomaticLock, Drop, MintStage, Wallet, MintTask, MintAuthorization, MintPlan
 from app.services.mint_plans import aware
 from app.services.opensea import OpenSeaClient, OpenSeaUnavailable, collection_slug, CHAINS, stage_schedule
@@ -35,16 +36,17 @@ def digest(value):
 def rpc_for(chain_id):
     if chain_id == settings.AUTOMATIC_CHAIN_ID:
         return settings.AUTOMATIC_RPC
-    return {1: settings.RPC_ETHEREUM, 8453: settings.RPC_BASE, 4663: settings.RPC_ROBINHOOD,
-            11155111: settings.RPC_SEPOLIA}.get(chain_id, '')
+    from app.services.networks import NETWORKS
+    network = NETWORKS.get(chain_id)
+    return getattr(settings, network.rpc_setting) if network else ''
 
 
 def enabled(chain_id=None):
     chain_id = settings.AUTOMATIC_CHAIN_ID if chain_id is None else chain_id
     if not settings.ENABLE_CUSTODIAL_AUTOMATIC:
         raise HTTPException(409, 'Automatic custody is not enabled. A linked MetaMask address alone cannot sign automatically.')
-    permitted = {4663: settings.ENABLE_ROBINHOOD_AUTOMATIC, 1: settings.ENABLE_ETHEREUM_AUTOMATIC,
-                 8453: settings.ENABLE_BASE_AUTOMATIC}
+    from app.services.networks import NETWORKS
+    permitted = {n.chain_id: getattr(settings, n.opt_in) for n in NETWORKS.values() if n.opt_in}
     if chain_id not in (31337, 11155111) and not permitted.get(chain_id, False):
         raise HTTPException(409, 'Automatic execution is disabled for this network.')
     parsed = urlparse(rpc_for(chain_id))
@@ -106,6 +108,23 @@ def wei(value):
     return int(amount)
 
 
+def budget_wei(value, chain_id):
+    """Wider lifetime budgets for HYPE/APE; individual transaction caps stay bounded."""
+    from app.services.networks import symbol
+    if symbol(chain_id) == 'ETH':
+        return wei(value)
+    import re
+    from decimal import localcontext
+    if not isinstance(value, str) or not re.fullmatch(r'[0-9]+(?:\.[0-9]{1,18})?', value):
+        raise HTTPException(422, 'Enter an exact native amount with at most 18 decimals.')
+    with localcontext() as context:
+        context.prec = 50
+        amount = Decimal(value) * 10**18
+    if amount != amount.to_integral_value() or not 0 <= amount < 10**24:
+        raise HTTPException(422, 'Native lifetime budgets must be below one million tokens.')
+    return int(amount)
+
+
 async def grant_for(db, grant_id, user_id):
     await require_running(db, user_id)
     grant = (await db.execute(select(AutomaticGrant).where(
@@ -149,6 +168,8 @@ async def make_snapshot(db, req, user_id, *, presale_mint=None):
         raise HTTPException(404, 'Wallet, drop or selected stage not found.')
     if grant.wallet_id != wallet.id or grant.account.lower() != wallet.address.lower():
         raise HTTPException(409, 'Signer policy does not belong to this wallet.')
+    from app.services.networks import require_currency
+    require_currency(grant.chain_id,getattr(req,'native_symbol',None))
     if drop.chain_id != grant.chain_id or not drop.is_supported_integration or not drop.contract_address or drop.is_demo:
         raise HTTPException(409, 'Drop chain or contract integration is unsupported for this signer.')
     if not allows_collection(grant.scope, drop.contract_address) or req.mint_kind not in grant.scope['mint_kinds']:
@@ -338,7 +359,7 @@ async def release_reservation(db, task, actual=0):
             raise ValueError('Copy budget reservation invariant violated')
         if rule.spent_wei > rule.budget_wei or actual > auth.total_spend_cap_wei:
             rule.status = 'paused'
-    if grant.chain_id == 8453 and (grant.spent_wei > grant.budget_wei or actual > auth.total_spend_cap_wei):
+    if grant.chain_id in (8453,57073) and (grant.spent_wei > grant.budget_wei or actual > auth.total_spend_cap_wei):
         # Inclusion-time parent fees can change after a bounded submission.
         # Preserve the real charge and stop future signing rather than lose a receipt.
         grant.status = 'disabled'
@@ -354,7 +375,7 @@ async def release_reservation(db, task, actual=0):
 def public_grant(grant):
     expired = aware(grant.expires_at) <= datetime.now(timezone.utc)
     return {'id': grant.id, 'wallet_id': grant.wallet_id, 'account': grant.account,
-        'chain_id': grant.chain_id, 'mode': grant.adapter,
+        'chain_id': grant.chain_id, 'native_symbol':symbol(grant.chain_id), 'mode': grant.adapter,
         'status': 'expired' if expired else grant.status, 'expires_at': grant.expires_at,
         'budget_wei': str(grant.budget_wei), 'reserved_wei': str(grant.reserved_wei),
         'spent_wei': str(grant.spent_wei), 'remaining_wei': str(max(0, grant.budget_wei - grant.reserved_wei - grant.spent_wei)),
