@@ -307,7 +307,15 @@ void main() {
         final container = ProviderContainer(
           overrides: [apiServiceProvider.overrideWith((ref) => api)],
         );
-        addTearDown(container.dispose);
+        var disposed = false;
+        void disposeContainer() {
+          if (!disposed) {
+            disposed = true;
+            container.dispose();
+          }
+        }
+
+        addTearDown(disposeContainer);
         await container.read(mintlyProvider.notifier).loadInitialData();
         final captureKey = GlobalKey();
         await tester.pumpWidget(
@@ -472,6 +480,8 @@ void main() {
           });
         }
         await tester.pumpWidget(const SizedBox());
+        disposeContainer();
+        await tester.pump();
       },
     );
   }
