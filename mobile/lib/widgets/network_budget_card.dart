@@ -178,6 +178,11 @@ class _NetworkBudgetCardState extends ConsumerState<NetworkBudgetCard> {
                         key: _networkMenuKey,
                         tooltip: 'Available budget by network',
                         padding: EdgeInsets.zero,
+                        style: IconButton.styleFrom(
+                          minimumSize: const Size(30, 30),
+                          padding: EdgeInsets.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
                         position: PopupMenuPosition.under,
                         color: const Color(0xFF15251B),
                         surfaceTintColor: Colors.transparent,
