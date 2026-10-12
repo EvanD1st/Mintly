@@ -265,7 +265,8 @@ class _CustodyImportScreenState extends ConsumerState<CustodyImportScreen>
           ))
             {
               'chain_id': network['chain_id'],
-              'native_symbol': nativeSymbol(network['chain_id']),
+              if (nativeSymbol(network['chain_id']) != 'ETH')
+                'native_symbol': nativeSymbol(network['chain_id']),
               'budget_eth': _networkBudgets[network['chain_id']]!.text.trim(),
               'max_task_eth':
                   _networkMaximums[network['chain_id']]!.text.trim().isEmpty
