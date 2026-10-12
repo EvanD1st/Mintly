@@ -6,7 +6,7 @@ Pushes now use the existing audited builder. It preserves the native sources for
 
 `MINTLY_SHOREBIRD_PATCH_RELEASE_VERSIONS` selects the supported installed versions for automatic patches. The current set is `1.1.2+5,1.1.1+4,1.1.0+3,1.0.1+2,1.0.0+1`. Manual patch inputs can select an exact version instead.
 
-The budget refresh symbol is drawn in Dart, and the Copy tab uses its existing drawn symbol without referencing an unused new font glyph. The `1.1.2+5` build uses `MINTLY_RELEASE_5_ICONS=true` to choose equivalent installed symbols for account activity and links. All screen actions, authentication, mint approvals, copying and spending rules are retained.
+The budget refresh and expanding-section arrows are drawn in Dart, and the Copy tab uses its existing drawn symbol without referencing an unused new font glyph. The `1.1.2+5` build uses `MINTLY_RELEASE_5_ICONS=true` to choose equivalent installed symbols for account activity and links. Expanding sections retain their controls and keyboard/expanded semantics. All screen actions, authentication, mint approvals, copying and spending rules are retained.
 
 The workflow tests normal, earliest-installer and release-5 icon modes. The audited builder dry-runs each exact installed release before publication and saves an asset audit for it. This update adds no native code, plugin, bundled image, dependency or database migration. It does not require a backend redeployment.
 

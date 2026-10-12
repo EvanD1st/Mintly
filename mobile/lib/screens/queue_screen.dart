@@ -138,7 +138,7 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
               ),
             ),
           if (state.mintPermissions.isNotEmpty)
-            ExpansionTile(
+            DisclosureSection(
               title: const Text('Wallet permissions'),
               subtitle: const Text('Manage approvals and revocations'),
               children: [
@@ -663,7 +663,7 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
               style: TextStyle(fontSize: 12),
             ),
             const SizedBox(height: 14),
-            ExpansionTile(
+            DisclosureSection(
               tilePadding: EdgeInsets.zero,
               title: const Text('Collection & validation details'),
               children: [

@@ -1,5 +1,84 @@
 import 'package:flutter/material.dart';
 
+/// Keeps disclosure controls independent of an installer's icon-font subset.
+class DisclosureSection extends StatefulWidget {
+  final Widget title;
+  final Widget? subtitle;
+  final EdgeInsetsGeometry? tilePadding;
+  final List<Widget> children;
+  const DisclosureSection({
+    super.key,
+    required this.title,
+    this.subtitle,
+    this.tilePadding,
+    required this.children,
+  });
+  @override
+  State<DisclosureSection> createState() => _DisclosureSectionState();
+}
+
+class _DisclosureSectionState extends State<DisclosureSection> {
+  bool _expanded = false;
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      Semantics(
+        button: true,
+        expanded: _expanded,
+        child: ListTile(
+          contentPadding: widget.tilePadding,
+          title: widget.title,
+          subtitle: widget.subtitle,
+          onTap: () => setState(() => _expanded = !_expanded),
+          trailing: CustomPaint(
+            size: const Size.square(24),
+            painter: _DisclosurePainter(
+              _expanded,
+              Theme.of(context).colorScheme.primary,
+            ),
+          ),
+        ),
+      ),
+      AnimatedSize(
+        duration: const Duration(milliseconds: 180),
+        alignment: Alignment.topCenter,
+        child: _expanded
+            ? Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: widget.children,
+              )
+            : const SizedBox.shrink(),
+      ),
+    ],
+  );
+}
+
+class _DisclosurePainter extends CustomPainter {
+  final bool expanded;
+  final Color color;
+  _DisclosurePainter(this.expanded, this.color);
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2
+      ..strokeCap = StrokeCap.round;
+    canvas.drawPath(
+      Path()
+        ..moveTo(6, expanded ? 14 : 8)
+        ..lineTo(12, expanded ? 8 : 14)
+        ..lineTo(18, expanded ? 14 : 8),
+      paint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_DisclosurePainter old) =>
+      old.expanded != expanded || old.color != color;
+}
+
 String shortAddress(String value) => value.length > 16
     ? '${value.substring(0, 6)}…${value.substring(value.length - 4)}'
     : value;

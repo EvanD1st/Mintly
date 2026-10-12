@@ -314,7 +314,7 @@ class _HistoryState extends ConsumerState<HistoryScreen> {
               ),
             ),
           ),
-        ExpansionTile(
+        DisclosureSection(
           title: const Text('Approval & recovery history'),
           children: [_recordAudit(record)],
         ),
