@@ -440,10 +440,10 @@ void main() {
       child:MaterialApp(theme:MintlyTheme.light(),home:const CopyMintsScreen())));
     await tester.pumpAndSettle();
     expect(find.text('Set up copy'),findsNothing);
-    expect(find.text('Copying active · Manage'),findsOneWidget);
-    await tester.ensureVisible(find.text('Copying active · Manage'));
+    expect(find.text('Manage'),findsOneWidget);
+    await tester.ensureVisible(find.text('Manage'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Copying active · Manage'));
+    await tester.tap(find.text('Manage'));
     await tester.pumpAndSettle();
     expect(find.text('Copy settings'),findsOneWidget);
     expect(tester.takeException(),isNull);

@@ -1,4 +1,6 @@
 import '../widgets/network_budget_card.dart';
+import '../models/network_metadata.dart';
+import '../widgets/screen_components.dart';
 import '../widgets/mintly_notice.dart';
 import '../widgets/wallet_readiness_panel.dart';
 import '../services/wat_time.dart';
@@ -28,14 +30,20 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
     super.initState();
     _wallets = ref.read(apiServiceProvider).fetchWallets();
     _policies = ref.read(apiServiceProvider).fetchAutomaticPolicies();
-    _readiness = ref.read(apiServiceProvider).fetchWalletReadiness().catchError((_) => <String, dynamic>{'unavailable': true});
+    _readiness = ref
+        .read(apiServiceProvider)
+        .fetchWalletReadiness()
+        .catchError((_) => <String, dynamic>{'unavailable': true});
   }
 
   void _refresh() => setState(() {
     ref.invalidate(networkBudgetsProvider);
     _wallets = ref.read(apiServiceProvider).fetchWallets();
     _policies = ref.read(apiServiceProvider).fetchAutomaticPolicies();
-    _readiness = ref.read(apiServiceProvider).fetchWalletReadiness().catchError((_) => <String, dynamic>{'unavailable': true});
+    _readiness = ref
+        .read(apiServiceProvider)
+        .fetchWalletReadiness()
+        .catchError((_) => <String, dynamic>{'unavailable': true});
   });
 
   final Set<String> _unlinking = {};
@@ -106,18 +114,21 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
     final imported = await Navigator.push<bool>(
       context,
       MaterialPageRoute(
-        builder: (_) => wallet == null ? const WalletSetupScreen() : CustodyImportScreen(
-          walletId: wallet['id'] as String?,
-          address: wallet['address'] as String?,
-        ),
+        builder: (_) => wallet == null
+            ? const WalletSetupScreen()
+            : CustodyImportScreen(
+                walletId: wallet['id'] as String?,
+                address: wallet['address'] as String?,
+              ),
       ),
     );
     if (imported == true && mounted) {
       _refresh();
-      MintlyNotice.show(context,
+      MintlyNotice.show(
+        context,
         const SnackBar(
           content: Text(
-              'Wallet saved. Signing access depends on the setup you chose.',
+            'Wallet saved. Signing access depends on the setup you chose.',
           ),
         ),
       );
@@ -148,7 +159,16 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
                 const Text(
                   'Address linked. Import this wallet to prepare automatic minting.',
                 ),
-              OutlinedButton(onPressed:()=>Navigator.push(pageContext,MaterialPageRoute(builder:(_)=>OpenSeaAccessScreen(walletId:wallet['id'] as String))),child:const Text('OpenSea eligibility access')),
+              OutlinedButton(
+                onPressed: () => Navigator.push(
+                  pageContext,
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        OpenSeaAccessScreen(walletId: wallet['id'] as String),
+                  ),
+                ),
+                child: const Text('OpenSea eligibility access'),
+              ),
               for (final policy in policies)
                 Card(
                   child: Padding(
@@ -158,14 +178,14 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
                       children: [
                         Text('Automatic minting: ${policy['status']}'),
                         Text(
-                          'Network: ${{1: 'Ethereum', 8453: 'Base', 4663: 'Robinhood'}[policy['chain_id']] ?? 'Chain ${policy['chain_id']}'}',
+                          'Network: ${networkNames[policy['chain_id']] ?? 'Chain ${policy['chain_id']}'}',
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          'Remaining budget: ${_eth(policy['remaining_wei'])} ETH',
+                          'Remaining budget: ${_eth(policy['remaining_wei'])} ${nativeSymbol(policy['chain_id'])}',
                         ),
                         Text(
-                          'Pending mints: ${_eth(policy['reserved_wei'])} ETH reserved',
+                          'Pending mints: ${_eth(policy['reserved_wei'])} ${nativeSymbol(policy['chain_id'])} reserved',
                         ),
                         Text(
                           'Expires: ${DateTime.tryParse('${policy['expires_at']}') == null ? policy['expires_at'] : WatTime.label(DateTime.parse('${policy['expires_at']}'))}',
@@ -239,31 +259,20 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
   Widget build(BuildContext context) => ListView(
     padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
     children: [
-      Row(
-        children: [
-          Expanded(
-            child: Text(
-              'Wallet',
-              style: Theme.of(
-                context,
-              ).textTheme.headlineLarge?.copyWith(fontWeight: FontWeight.bold),
-            ),
-          ),
-          TextButton(
-            onPressed: () async {
-              await Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const AccountSettingsScreen()),
-              );
-              if (mounted) _refresh();
-            },
-            child: const Text('Settings'),
-          ),
-        ],
+      ScreenHeading(
+        'Wallet',
+        'Your wallets and spending permissions.',
+        action: TextButton(
+          onPressed: () async {
+            await Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const AccountSettingsScreen()),
+            );
+            if (mounted) _refresh();
+          },
+          child: const Text('Settings'),
+        ),
       ),
-      const SizedBox(height: 6),
-      const Text('Your wallets and spending permissions.'),
-      const SizedBox(height: 20),
       const NetworkBudgetCard(),
       FutureBuilder<List<Map<String, dynamic>>>(
         future: _wallets,
@@ -287,45 +296,53 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
                 for (final wallet in wallets.data!)
                   Card(
                     key: ValueKey('wallet-${wallet['id']}'),
-                    child: Column(children: [ListTile(
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 10,
-                      ),
-                      leading: const Icon(
-                        Icons.account_balance_wallet_outlined,
-                      ),
-                      title: Text(
-                        wallet['label'] as String? ?? 'Wallet',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      subtitle: Text(_short(wallet['address'] as String)),
-                      onTap: () => _details(
-                        wallet,
-                        (policies.data ?? [])
-                            .where((p) => p['wallet_id'] == wallet['id'])
-                            .toList(),
-                      ),
-                      trailing: TextButton(
-                        key: ValueKey('unlink-${wallet['id']}'),
-                        onPressed: _unlinking.contains(wallet['id'])
-                            ? null
-                            : () => _unlink(wallet),
-                        child: Text(
-                          _unlinking.contains(wallet['id'])
-                              ? 'Unlinking…'
-                              : 'Unlink',
+                    child: Column(
+                      children: [
+                        ListTile(
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 4,
+                          ),
+                          leading: const Icon(
+                            Icons.account_balance_wallet_outlined,
+                          ),
+                          title: Text(
+                            wallet['label'] as String? ?? 'Wallet',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          subtitle: Text(_short(wallet['address'] as String)),
+                          onTap: () => _details(
+                            wallet,
+                            (policies.data ?? [])
+                                .where((p) => p['wallet_id'] == wallet['id'])
+                                .toList(),
+                          ),
+                          trailing: TextButton(
+                            key: ValueKey('unlink-${wallet['id']}'),
+                            onPressed: _unlinking.contains(wallet['id'])
+                                ? null
+                                : () => _unlink(wallet),
+                            child: Text(
+                              _unlinking.contains(wallet['id'])
+                                  ? 'Unlinking…'
+                                  : 'Unlink',
+                            ),
+                          ),
                         ),
-                      ),
-                    ), WalletReadinessPanel(walletId: wallet['id'] as String, readiness: _readiness)]),
+                        WalletReadinessPanel(
+                          walletId: wallet['id'] as String,
+                          readiness: _readiness,
+                        ),
+                      ],
+                    ),
                   ),
               ],
             ),
           );
         },
       ),
-      const SizedBox(height: 20),
+      const SizedBox(height: 12),
       FilledButton.icon(
         onPressed: () => _import(),
         icon: const Icon(MintlyIcons.addLink),

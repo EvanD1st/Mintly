@@ -1,4 +1,7 @@
+import 'network_metadata.dart';
+
 class MintPlanModel {
+  String get nativeCurrency => nativeSymbol(chain);
   final String id;
   final String collectionName;
   final String openSeaUrl;
@@ -20,14 +23,28 @@ class MintPlanModel {
   final String? estimatedTotalUsdt;
   final DateTime? rateCheckedAt;
 
-  const MintPlanModel({required this.id, required this.collectionName,
-    required this.openSeaUrl, required this.chain, required this.contractAddress,
+  const MintPlanModel({
+    required this.id,
+    required this.collectionName,
+    required this.openSeaUrl,
+    required this.chain,
+    required this.contractAddress,
     required this.walletAddress,
-    required this.stageName, required this.startsAt, required this.endsAt,
-    required this.priceEth, required this.mintValueEth,
-    required this.estimatedNetworkFeeEth, required this.status,
-    required this.statusNote, this.stageType, this.quantity = 1, this.walletId, this.estimatedTotalEth,
-    this.estimatedTotalUsdt, this.rateCheckedAt});
+    required this.stageName,
+    required this.startsAt,
+    required this.endsAt,
+    required this.priceEth,
+    required this.mintValueEth,
+    required this.estimatedNetworkFeeEth,
+    required this.status,
+    required this.statusNote,
+    this.stageType,
+    this.quantity = 1,
+    this.walletId,
+    this.estimatedTotalEth,
+    this.estimatedTotalUsdt,
+    this.rateCheckedAt,
+  });
 
   factory MintPlanModel.fromJson(Map<String, dynamic> json) => MintPlanModel(
     id: json['id'] as String,

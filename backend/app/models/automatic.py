@@ -2,6 +2,7 @@
 import uuid
 from datetime import datetime
 from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
+from app.models.native_units import BudgetWei
 from sqlalchemy.orm import Mapped, mapped_column
 from app.database import Base
 
@@ -19,9 +20,9 @@ class AutomaticGrant(Base):
     scope: Mapped[dict] = mapped_column(JSON)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     status: Mapped[str] = mapped_column(String(24), default='enabled')
-    budget_wei: Mapped[int] = mapped_column(BigInteger)
-    reserved_wei: Mapped[int] = mapped_column(BigInteger, default=0)
-    spent_wei: Mapped[int] = mapped_column(BigInteger, default=0)
+    budget_wei: Mapped[int] = mapped_column(BudgetWei())
+    reserved_wei: Mapped[int] = mapped_column(BudgetWei(), default=0)
+    spent_wei: Mapped[int] = mapped_column(BudgetWei(), default=0)
 
 
 class AutomaticNonce(Base):

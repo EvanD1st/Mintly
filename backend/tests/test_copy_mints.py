@@ -15,6 +15,7 @@ from test_automatic_evm import lab
 
 @pytest.fixture
 async def copying(lab, monkeypatch):
+    chain=lab.w.eth.chain_id
     monkeypatch.setattr(settings, 'ENABLE_COPY_MINTS', True)
     async def register(rule_id):
         response = await lab.signer_client.post(f'/copy-rules/{rule_id}/register')
@@ -23,12 +24,14 @@ async def copying(lab, monkeypatch):
     source = Account.create()
     lab.w.provider.make_request('hardhat_setBalance', [source.address, hex(10**18)])
     follow = await lab.client.post('/api/copy-mints/watches', json={'address': source.address,
-        'label': 'Source wallet', 'chains': [31337]})
+        'label': 'Source wallet', 'chains': [chain]})
     assert follow.status_code == 200, follow.text
     watch_id = follow.json()['id']
     request = dict(request_id=str(uuid.uuid4()), grant_id=lab.grant.id, quantity=1,
         price_cap_eth='0.00000000000000001', fee_cap_eth='0.0005', budget_eth='0.001',
         free_only=False, expires_at=datetime.fromtimestamp(lab.end, timezone.utc).isoformat(), consent=True)
+    from app.services.networks import symbol
+    if symbol(chain) != 'ETH': request['native_symbol']=symbol(chain)
     async def approve():
         result = await lab.client.post(f'/api/copy-mints/watches/{watch_id}/rules', json=request)
         assert result.status_code == 200, result.text
@@ -40,7 +43,7 @@ async def copying(lab, monkeypatch):
         tx = lab.sea.functions.mintPublic(lab.nft.address, fee, watched.address, quantity).build_transaction({
             'from': watched.address, 'nonce': lab.w.eth.get_transaction_count(watched.address),
             'gas': 400000, 'gasPrice': lab.w.eth.gas_price,
-            'value': lab.sea.functions.getPublicDrop(lab.nft.address).call()[0] * quantity, 'chainId': 31337})
+            'value': lab.sea.functions.getPublicDrop(lab.nft.address).call()[0] * quantity, 'chainId': chain})
         result = lab.w.eth.send_raw_transaction(watched.sign_transaction(tx).raw_transaction)
         receipt = lab.w.eth.wait_for_transaction_receipt(result)
         assert receipt.status == 1
@@ -49,7 +52,7 @@ async def copying(lab, monkeypatch):
     async def scan():
         async with lab.factory() as db:
             watch = await db.get(CopyWatch, watch_id)
-            await copy_mints.scan_watch(db, watch, 31337)
+            await copy_mints.scan_watch(db, watch, chain)
             await db.commit()
     return dict(lab=lab, source=source, watch_id=watch_id, request=request, approve=approve, mint=mint, scan=scan)
 

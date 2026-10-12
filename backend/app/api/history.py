@@ -2,12 +2,12 @@
 from typing import Literal
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select
+from sqlalchemy import select,or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user, get_db
 from app.api.tasks import task_response
 from app.services.parser import format_wei_to_eth
-from app.models import ActivityEvent, MintPlanRecord, MintTask, Wallet, User, MintPermission, MintRecovery, CopyRule, CopyWatch
+from app.models import ActivityEvent, MintPlanRecord, MintTask, Wallet, User, MintPermission, MintRecovery, CopyRule, CopyWatch,Drop
 
 router = APIRouter(prefix='/history', tags=['history'])
 
@@ -15,7 +15,7 @@ router = APIRouter(prefix='/history', tags=['history'])
 @router.get('')
 async def history(section: Literal['plans', 'mints', 'activity', 'permissions', 'copies'] = 'mints',
                   offset: int = Query(0, ge=0), limit: int = Query(30, ge=1, le=100),
-                  user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+                  user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db), native_currencies:bool=False):
     if section == 'copies':
         stmt = select(CopyRule).where(CopyRule.user_id == user.id).order_by(CopyRule.created_at.desc(), CopyRule.id.desc())
     elif section == 'plans':
@@ -30,6 +30,9 @@ async def history(section: Literal['plans', 'mints', 'activity', 'permissions', 
     else:
         stmt = select(ActivityEvent).where(ActivityEvent.user_id == user.id,
             ActivityEvent.is_demo.is_(False)).order_by(ActivityEvent.event_time.desc(), ActivityEvent.id.desc())
+    if not native_currencies:
+        if section=='mints': stmt=stmt.outerjoin(Drop,Drop.id==MintTask.drop_id).where(or_(Drop.chain_id.not_in([999,33139]),Drop.chain_id.is_(None)))
+        elif section=='copies': stmt=stmt.where(CopyRule.chain_id.not_in([999,33139]))
     rows = (await db.execute(stmt.offset(offset).limit(limit + 1))).scalars().all()
     records = []
     for row in rows[:limit]:
@@ -68,7 +71,7 @@ async def history(section: Literal['plans', 'mints', 'activity', 'permissions', 
                     'authorization_reference': r.authorization_reference,
                     'authorization': {k: v for k, v in r.snapshot.items() if k != 'execution'}} for r in recoveries]
             else:
-                from app.models import MintAuthorization, Drop, MintStage
+                from app.models import MintAuthorization, MintStage
                 auth = await db.get(MintAuthorization, row.authorization_id)
                 drop = await db.get(Drop, row.drop_id)
                 stage = await db.get(MintStage, row.stage_id)

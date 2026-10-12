@@ -15,6 +15,7 @@ from app.schemas.drop import DropSchema
 from app.services import automatic
 from app.services.mint_plans import aware, refresh_mint_plan, verified_stage_schedule
 from app.services.opensea import CHAINS, OpenSeaClient, OpenSeaUnavailable, collection_slug, stage_schedule
+from app.services.networks import symbol
 
 router = APIRouter(prefix="/mint-plans", tags=["mint-plans"])
 
@@ -37,13 +38,14 @@ def response(plan: MintPlan, wallet: Wallet) -> dict:
     if mint_value is None and plan.price_wei is not None:
         mint_value = plan.price_wei * plan.quantity
     total = mint_value + plan.estimated_network_fee_wei if mint_value is not None and plan.estimated_network_fee_wei is not None else None
-    rate_fresh = plan.rate_checked_at and aware(plan.rate_checked_at) > datetime.now(timezone.utc) - timedelta(minutes=5)
+    rate_fresh = symbol(plan.chain_id)=='ETH' and plan.rate_checked_at and aware(plan.rate_checked_at) > datetime.now(timezone.utc) - timedelta(minutes=5)
     total_usdt = format(Decimal(eth_amount(total)) * Decimal(plan.eth_usdt_rate), '.4f') if total is not None and plan.eth_usdt_rate and rate_fresh else None
     return {
         "created_at": plan.created_at, "archived_at": plan.archived_at,
         "quantity": plan.quantity, "estimated_total_eth": eth_amount(total),
         "estimated_total_usdt": total_usdt, "eth_usdt_rate": plan.eth_usdt_rate if rate_fresh else None,
-        "rate_checked_at": plan.rate_checked_at, "rate_source": "Coinbase ETH-USDT",
+        "rate_checked_at": plan.rate_checked_at, "rate_source": "Coinbase ETH-USDT" if symbol(plan.chain_id)=='ETH' else None,
+        'chain_id':plan.chain_id,'native_symbol':symbol(plan.chain_id),
         "id": plan.id, "wallet_id": plan.wallet_id,
         "wallet_address": wallet.address,
         "collection_name": plan.collection_name,
@@ -119,11 +121,11 @@ async def import_open_sea_plan(req: ImportMintPlanRequest,
 
 @router.get("")
 async def list_mint_plans(user: User = Depends(get_current_user),
-                          db: AsyncSession = Depends(get_db)):
+                          db: AsyncSession = Depends(get_db), native_currencies:bool=False):
     plans = (await db.execute(select(MintPlan, Wallet).join(Wallet, Wallet.id == MintPlan.wallet_id).where(
         MintPlan.user_id == user.id, Wallet.user_id == user.id, MintPlan.archived_at.is_(None),
     ).order_by(MintPlan.created_at.desc()))).all()
-    return [response(plan, wallet) for plan, wallet in plans]
+    return [response(plan, wallet) for plan, wallet in plans if native_currencies or symbol(plan.chain_id)=='ETH']
 
 
 @router.post("/{plan_id}/refresh")

@@ -14,6 +14,7 @@ from app.models import MintPlan, User, Wallet
 from app.services.opensea import CHAINS, OpenSeaClient, OpenSeaUnavailable, chain_rpc, collection_slug, stage_schedule, transaction_value_wei
 from app.services.signer.base import SEADROP_V1_ADDRESS
 from app.services.mint_plans import verified_stage_schedule
+from app.services.networks import symbol
 
 @pytest.fixture(autouse=True)
 def mock_display_quote(monkeypatch):
@@ -130,8 +131,16 @@ async def test_member_import_checks_wallet_and_never_creates_mint_task(test_db, 
             fake.build_mint.assert_awaited_once_with("example", wallet.address, quantity)
             assert imported.json()["estimated_network_fee_eth"] == "0.00001"
             assert imported.json()["estimated_total_eth"] == ("0.00101" if quantity == 1 else "0.00201")
-            assert imported.json()["estimated_total_usdt"] == ("2.5250" if quantity == 1 else "5.0250")
-            assert len((await client.get("/api/mint-plans")).json()) == 1
+            currency=symbol(CHAINS[chain][0])
+            assert imported.json()['native_symbol']==currency
+            if currency=='ETH':
+                assert imported.json()["estimated_total_usdt"] == ("2.5250" if quantity == 1 else "5.0250")
+                assert len((await client.get("/api/mint-plans")).json()) == 1
+            else:
+                assert imported.json()['estimated_total_usdt'] is None
+                assert imported.json()['eth_usdt_rate'] is None and imported.json()['rate_source'] is None
+                assert (await client.get('/api/mint-plans')).json()==[]
+            assert len((await client.get('/api/mint-plans?native_currencies=true')).json())==1
             assert (await client.get("/api/tasks/queue")).json()["tasks"] == []
             stored_plan = (await test_db.execute(select(MintPlan))).scalar_one()
             assert stored_plan.wallet_id == wallet.id

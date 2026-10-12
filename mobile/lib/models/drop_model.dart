@@ -1,3 +1,5 @@
+import 'network_metadata.dart';
+
 class MintStageModel {
   final String id;
   final String dropId;
@@ -52,6 +54,7 @@ class MintStageModel {
 }
 
 class DropModel {
+  String get nativeCurrency => nativeSymbol(chainId);
   final String id;
   final String name;
   final String chain;
@@ -100,7 +103,9 @@ class DropModel {
       isSupportedIntegration: json['is_supported_integration'] ?? false,
       manualNotice: json['manual_notice'],
       isDemo: json['is_demo'] ?? false,
-      stages: rawStages.map((s) => MintStageModel.fromJson(s as Map<String, dynamic>)).toList(),
+      stages: rawStages
+          .map((s) => MintStageModel.fromJson(s as Map<String, dynamic>))
+          .toList(),
     );
   }
 }

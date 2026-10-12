@@ -99,6 +99,7 @@ class CustodyVault:
         conn.execute('CREATE TABLE IF NOT EXISTS copy_collections (task TEXT PRIMARY KEY, address TEXT NOT NULL, chain INTEGER NOT NULL, contract TEXT NOT NULL, kind TEXT NOT NULL)')
         conn.execute('CREATE INDEX IF NOT EXISTS copy_collections_wallet ON copy_collections(address,chain,contract)')
         conn.execute('CREATE TABLE IF NOT EXISTS daily_limits (user_id TEXT PRIMARY KEY, revision INTEGER NOT NULL, intent TEXT NOT NULL, configuration TEXT NOT NULL)')
+        conn.execute('CREATE TABLE IF NOT EXISTS native_daily_limits (user_id TEXT NOT NULL, currency TEXT NOT NULL, revision INTEGER NOT NULL, intent TEXT NOT NULL, configuration TEXT NOT NULL, PRIMARY KEY(user_id,currency))')
         conn.execute('CREATE TABLE IF NOT EXISTS daily_signed (task TEXT PRIMARY KEY, user_id TEXT NOT NULL, day TEXT NOT NULL)')
         conn.commit()
         return conn

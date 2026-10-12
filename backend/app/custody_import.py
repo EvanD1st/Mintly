@@ -25,6 +25,7 @@ from app.services import automatic
 from app.services.auth import verify_password
 from app.services.custody import CustodyVault, private_read, private_write
 from app.services.custody_accounts import inspect_account
+from app.services.networks import advertised, require_currency, name
 
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 app.add_middleware(CORSMiddleware, allow_origins=settings.CORS_ORIGINS,
@@ -37,6 +38,7 @@ class NetworkApproval(BaseModel):
     chain_id: int
     budget_eth: str = Field(max_length=40)
     max_task_eth: str = Field(max_length=40)
+    native_symbol: Literal['ETH','HYPE','APE'] | None = None
 
 
 class ImportRequest(BaseModel):
@@ -52,7 +54,7 @@ class ImportRequest(BaseModel):
     collection_scope: Literal['reviewed_mints'] | None = None
     budget_eth: str | None = Field(default=None, max_length=40)
     max_task_eth: str | None = Field(default=None, max_length=40)
-    networks: list[NetworkApproval] | None = Field(default=None, min_length=1, max_length=4)
+    networks: list[NetworkApproval] | None = Field(default=None, min_length=1, max_length=6)
     expires_at: datetime
     consent: bool
 
@@ -93,7 +95,7 @@ async def private_response(request, call_next):
 
 
 @app.get('/api/automatic/import/config')
-async def config(user=Depends(get_current_user)):
+async def config(user=Depends(get_current_user), native_currencies: bool=False):
     available()
     web3 = await automatic.provider()
     await web3.provider.disconnect()
@@ -101,11 +103,9 @@ async def config(user=Depends(get_current_user)):
         'phrase_wallet_setup': True,
         'multi_network_import': True,
         'automatic_collection_selection': True,
-        'networks': [{'chain_id': c, 'name': n} for c, n, flag in (
-            (1, 'Ethereum', settings.ENABLE_ETHEREUM_AUTOMATIC),
-            (8453, 'Base', settings.ENABLE_BASE_AUTOMATIC),
-            (4663, 'Robinhood', settings.ENABLE_ROBINHOOD_AUTOMATIC),
-            (settings.AUTOMATIC_CHAIN_ID, 'Test network', settings.AUTOMATIC_CHAIN_ID in (31337,11155111))) if flag]}
+        'networks': advertised(native_currencies=native_currencies)
+            + ([{'chain_id':settings.AUTOMATIC_CHAIN_ID,'name':'Test network','native_symbol':'ETH','native_decimals':18}]
+                if settings.AUTOMATIC_CHAIN_ID in (31337,11155111) else [])}
 
 
 @app.post('/api/automatic/import')
@@ -155,8 +155,9 @@ async def store_import(req, user, db):
     limits = {}
     for approval in approvals:
         automatic.enabled(approval.chain_id)
-        budget, maximum = automatic.wei(approval.budget_eth), automatic.wei(approval.max_task_eth)
-        if not 0 < maximum <= budget < 2**63:
+        require_currency(approval.chain_id,approval.native_symbol)
+        budget, maximum = automatic.budget_wei(approval.budget_eth,approval.chain_id), automatic.wei(approval.max_task_eth)
+        if not 0 < maximum <= budget < 10**24:
             raise ValueError('Invalid finite network budget')
         limits[approval.chain_id] = (budget, maximum)
     await automatic.lock_execution(db)
@@ -230,7 +231,7 @@ async def store_import(req, user, db):
                 raise HTTPException(409, 'Unlink a wallet before adding more than 20.')
             wallet = Wallet(id=str(uuid.uuid5(uuid.NAMESPACE_URL, f'mintly-wallet:{user.id}:{account.address.lower()}')),
                 user_id=user.id, label=req.wallet_label.strip() or 'Wallet',
-                address=account.address, signing_capability='custodial', supported_chains=['Ethereum','Base','Robinhood Chain'],
+                address=account.address, signing_capability='custodial', supported_chains=[name(a.chain_id) for a in approvals],
                 is_default=active_count == 0, is_demo=False)
             db.add(wallet)
             await db.flush()
@@ -290,7 +291,7 @@ async def store_import(req, user, db):
         wallet.is_default = active == 0
     wallet.archived_at = None
     wallet.signing_capability = 'custodial'
-    wallet.supported_chains = sorted(set(wallet.supported_chains or []) | {'Ethereum','Base','Robinhood Chain'})
+    wallet.supported_chains = sorted(set(wallet.supported_chains or []) | {name(a.chain_id) for a in approvals})
     if req.wallet_id is None:
         wallet.label = req.wallet_label.strip() or 'Wallet'
     await db.commit()

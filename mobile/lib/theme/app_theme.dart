@@ -140,13 +140,14 @@ class MintlyTheme {
       ),
       appBarTheme: const AppBarTheme(
         backgroundColor: MintlyColors.bgDark,
+        toolbarHeight: 48,
         elevation: 0,
         scrolledUnderElevation: 0,
         centerTitle: false,
         titleTextStyle: TextStyle(
           color: MintlyColors.inkDark,
           fontFamily: 'Roboto',
-          fontSize: 24,
+          fontSize: 20,
           fontWeight: FontWeight.w700,
           letterSpacing: -0.8,
         ),

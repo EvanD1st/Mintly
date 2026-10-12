@@ -16,11 +16,13 @@ from app.services import automatic
 from app.services.opensea import OpenSeaUnavailable
 from app.services.mint_plans import aware
 from pydantic import BaseModel,Field
+from app.services.networks import symbol
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
 
 class GuidedRequest(BaseModel):
+    native_symbol: str | None = None
     wallet_id:str
     grant_id:str
     drop_id:str
@@ -166,7 +168,7 @@ async def task_response(db, task):
         expires_at_utc=recovery.expires_at if recovery and recovery.activated_at else task.expires_at_utc,
         quantity=auth.quantity, unit_price_eth=format_wei_to_eth(s['price_wei']),
         fee_cap_eth=format_wei_to_eth(auth.max_fee_wei), total_cap_eth=format_wei_to_eth(auth.total_spend_cap_wei),
-        drop_name=s['drop_name'], chain=s['chain'], stage_name=s['stage_name'], icon_name='gem',
+        drop_name=s['drop_name'], chain=s['chain'], chain_id=s['chain_id'], native_symbol=symbol(s['chain_id']), stage_name=s['stage_name'], icon_name='gem',
         time_wat_label=aware(task.scheduled_for_utc).astimezone(ZoneInfo('Africa/Lagos')).strftime('%d %b · %H:%M WAT'),
         transaction_hash=task.transaction_hash, explorer_url=task.explorer_url, failure_reason=task.failure_reason,
         submitted_at=task.submitted_at, confirmed_at=task.confirmed_at, actual_total_cost_wei=task.actual_total_cost_wei,
@@ -200,14 +202,15 @@ async def disarm_task(task_id: str, db: AsyncSession = Depends(get_db),
 
 
 @router.get("/queue", response_model=QueueResponse)
-async def list_mint_queue(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+async def list_mint_queue(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user), native_currencies:bool=False):
     tasks = (await db.execute(select(MintTask).join(Wallet, Wallet.id == MintTask.wallet_id).where(
         Wallet.user_id == user.id, MintTask.is_demo.is_(False), MintTask.archived_at.is_(None),
     ).order_by(MintTask.scheduled_for_utc.asc()))).scalars().all()
     formatted = []
     for task in tasks:
         if task.execution_mode == automatic.MODE:
-            formatted.append(await task_response(db, task))
+            record=await task_response(db, task)
+            if native_currencies or record.native_symbol=='ETH': formatted.append(record)
             continue
         drop = (await db.execute(select(Drop).where(Drop.id == task.drop_id))).scalar_one_or_none()
         stage = (await db.execute(select(MintStage).where(MintStage.id == task.stage_id))).scalar_one_or_none()

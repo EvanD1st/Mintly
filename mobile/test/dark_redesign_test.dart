@@ -11,8 +11,10 @@ import 'package:http/testing.dart';
 import 'package:mintly/services/api_service.dart';
 import 'package:mintly/state/app_state.dart';
 import 'package:mintly/screens/main_shell.dart';
+import 'package:mintly/screens/queue_screen.dart';
 import 'package:mintly/theme/app_theme.dart';
 import 'package:mintly/widgets/network_budget_card.dart';
+import 'package:mintly/widgets/screen_components.dart';
 
 Map<String, dynamic> grant(
   String id,
@@ -33,6 +35,15 @@ Map<String, dynamic> grant(
 };
 
 void main() {
+  test(
+    'compact amounts retain exact wei separately, including very small amounts',
+    () {
+      expect(compactNative('52542281534000'), '0.00005254…');
+      expect(formatNative('52542281534000'), '0.000052542281534');
+      expect(compactNative('1'), '<0.00000001');
+      expect(compactNative('0'), '0');
+    },
+  );
   test(
     'network allowance counts grants once, excludes disabled and expired grants, preserves wei',
     () {
@@ -99,18 +110,44 @@ void main() {
         tester.view.devicePixelRatio = 1;
         addTearDown(tester.view.resetPhysicalSize);
         addTearDown(tester.view.resetDevicePixelRatio);
-        final font = File('C:/Windows/Fonts/arial.ttf');
+        final fontRoot =
+            '${Platform.environment['FLUTTER_ROOT'] ?? 'C:/Users/USER/develop/flutter'}/bin/cache/artifacts/material_fonts';
+        File bundledFont(String name) {
+          final roots = [
+            fontRoot,
+            '${File(Platform.resolvedExecutable).parent.parent.parent.path}/material_fonts',
+          ];
+          for (final root in roots) {
+            final folder = Directory(root);
+            if (!folder.existsSync()) continue;
+            for (final entry in folder.listSync().whereType<File>()) {
+              if (entry.uri.pathSegments.last.toLowerCase() ==
+                  name.toLowerCase()) {
+                return entry;
+              }
+            }
+          }
+          return File('$fontRoot/$name');
+        }
+
+        final font = bundledFont('Roboto-Regular.ttf');
         const defaultTestFont = bool.fromEnvironment(
           'MINTLY_TEST_DEFAULT_FONT',
         );
+        if (!defaultTestFont &&
+            Platform.environment['GITHUB_ACTIONS'] == 'true') {
+          expect(
+            font.existsSync(),
+            isTrue,
+            reason: 'CI previews require the bundled Roboto font.',
+          );
+        }
         if (!defaultTestFont && font.existsSync()) {
           await (FontLoader('Roboto')..addFont(
                 Future.value(ByteData.sublistView(font.readAsBytesSync())),
               ))
               .load();
-          final icons = File(
-            '${Platform.environment['FLUTTER_ROOT'] ?? 'C:/Users/USER/develop/flutter'}/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
-          );
+          final icons = bundledFont('MaterialIcons-Regular.otf');
           if (icons.existsSync()) {
             await (FontLoader('MaterialIcons')..addFont(
                   Future.value(ByteData.sublistView(icons.readAsBytesSync())),
@@ -134,6 +171,7 @@ void main() {
               data = [
                 grant('eth', 1),
                 grant('base', 8453, remaining: '6000000000000000'),
+                grant('robinhood', 4663, remaining: '217371571384'),
               ];
             } else if (path.endsWith('/artwork')) {
               data = {'image_url': null};
@@ -146,7 +184,23 @@ void main() {
                   {'chain_id': 1, 'name': 'Ethereum'},
                   {'chain_id': 8453, 'name': 'Base'},
                 ],
-                'watches': [],
+                'watches': [
+                  {
+                    'id': 'watch',
+                    'label': 'Joe',
+                    'address': '0x71A8000000000000000000000000000000004f29',
+                    'chains': [1, 8453],
+                    'recent_mints': 8,
+                    'cursors': {},
+                    'rules': [
+                      {
+                        'id': 'rule',
+                        'status': 'active',
+                        'snapshot': {'free_only': true},
+                      },
+                    ],
+                  },
+                ],
               };
             } else if (path.endsWith('/copy-mints/activity')) {
               data = {
@@ -178,6 +232,13 @@ void main() {
                     'created_at': '2026-10-11T11:42:00Z',
                     'actual_total_cost_wei': '30000000000000',
                     'transaction_hash': '0xconfirmed',
+                    'wallet_address':
+                        '0x71A8000000000000000000000000000000004f29',
+                    'authorized_at': '2026-10-11T11:40:00Z',
+                    'submitted_at': '2026-10-11T11:41:00Z',
+                    'confirmed_at': '2026-10-11T11:42:00Z',
+                    'actual_gas_used': '30000',
+                    'actual_effective_gas_price': '1000000000',
                   },
                 ],
                 'next_offset': null,
@@ -197,25 +258,39 @@ void main() {
                   'status': 'scheduled',
                   'status_note': 'The whitelist phase opens soon.',
                   'starts_at': '2026-10-11T15:00:00Z',
+                  'mint_value_eth': '0.002',
+                  'estimated_network_fee_eth': '0.00004',
+                  'estimated_total_eth': '0.00204',
                 },
               ];
             } else if (path.endsWith('/tasks/queue')) {
               data = {
-                'tasks': armed
-                    ? [
-                        {
-                          'id': 'task',
-                          'plan_id': 'plan',
-                          'drop_id': 'drop',
-                          'drop_name': 'Paper Worlds',
-                          'status': 'armed',
-                          'chain': 'Base',
-                          'stage_name': 'Whitelist',
-                          'quantity': 2,
-                          'time_wat_label': '11 Oct · 16:00 WAT',
-                        },
-                      ]
-                    : [],
+                'tasks': [
+                  {
+                    'id': 'orbit',
+                    'drop_id': 'orbit',
+                    'drop_name': 'Orbit Garden',
+                    'status': 'armed',
+                    'chain': 'Ethereum',
+                    'stage_name': 'Public',
+                    'quantity': 1,
+                    'unit_price_eth': '0',
+                    'fee_cap_eth': '0.00004',
+                    'time_wat_label': '12 Oct · 14:30 WAT',
+                  },
+                  if (armed)
+                    {
+                      'id': 'task',
+                      'plan_id': 'plan',
+                      'drop_id': 'drop',
+                      'drop_name': 'Paper Worlds',
+                      'status': 'armed',
+                      'chain': 'Base',
+                      'stage_name': 'Whitelist',
+                      'quantity': 2,
+                      'time_wat_label': '11 Oct · 16:00 WAT',
+                    },
+                ],
               };
             } else if (path.endsWith('/drops')) {
               data = {'drops': []};
@@ -278,14 +353,20 @@ void main() {
         await tester.tap(find.text('Mint plans').last);
         await tester.pumpAndSettle();
         await capture('mint-plans');
-        await tester.ensureVisible(find.text('Review mint'));
+        await tester.scrollUntilVisible(
+          find.text('Review mint'),
+          180,
+          scrollable: find
+              .descendant(
+                of: find.byType(QueueScreen),
+                matching: find.byType(Scrollable),
+              )
+              .first,
+        );
         await tester.pumpAndSettle();
         await tester.tap(find.text('Review mint'));
         await tester.pumpAndSettle();
-        expect(
-          find.text('0x123'),
-          findsOneWidget,
-        ); // Short addresses never crash the details page.
+        expect(find.textContaining('0x123'), findsOneWidget);
         await capture('plan-details');
         await tester.pageBack();
         await tester.pumpAndSettle();
@@ -294,14 +375,33 @@ void main() {
         await tester.pumpAndSettle();
         expect(find.text('Review mint'), findsNothing);
         expect(find.text('Paper Worlds'), findsOneWidget);
-        expect(find.text('Armed'), findsOneWidget);
+        expect(
+          container.read(mintlyProvider).queue.map((t) => t.id),
+          containsAll(['orbit', 'task']),
+        );
+        expect(
+          find.byWidgetPredicate(
+            (w) => w is StatusBadge && w.status == 'armed',
+          ),
+          findsAtLeastNWidgets(1),
+        );
         armed = false;
         await tester.tap(find.text('Copy').last);
         await tester.pumpAndSettle();
         await capture('copy');
+        final budget = tester.getSize(find.byType(NetworkBudgetCard).first);
+        if (!defaultTestFont && font.existsSync()) {
+          expect(budget.height, lessThan(scale == 1.0 ? 205 : 285));
+        }
         await tester.tap(find.byTooltip('Available budget by network'));
         await tester.pumpAndSettle();
         await capture('network-budgets');
+        await tester.tap(find.text('Robinhood').last);
+        await tester.pumpAndSettle();
+        expect(find.text('ETH 0.00000021…'), findsOneWidget);
+        expect(find.byTooltip('0.000000217371571384 ETH'), findsOneWidget);
+        await tester.tap(find.byTooltip('Available budget by network'));
+        await tester.pumpAndSettle();
         await tester.tap(find.text('Base').last);
         await tester.pumpAndSettle();
         expect(find.text('ETH 0.006'), findsOneWidget);
@@ -315,20 +415,25 @@ void main() {
         await capture('activity');
         expect(find.text('Total spent'), findsOneWidget);
         expect(find.textContaining('0xconfirmed'), findsNothing);
-        await tester.ensureVisible(find.text('View details'));
+        await tester.ensureVisible(find.text('View details').first);
         await tester.pumpAndSettle();
-        await tester.tap(find.text('View details'));
+        await tester.tap(find.text('View details').first);
         await tester.pumpAndSettle();
-        await tester.ensureVisible(find.text('Approval & recovery history'));
+        await capture('mint-details');
+        await tester.scrollUntilVisible(
+          find.text('Approval & recovery history'),
+          180,
+          scrollable: find.byType(Scrollable).last,
+        );
         await tester.pumpAndSettle();
         await tester.tap(find.text('Approval & recovery history'));
         await tester.pumpAndSettle();
         expect(find.text('Transaction: 0xconfirmed'), findsOneWidget);
-        await capture('mint-details');
-        await tester.pageBack();
+        await tester.tap(find.text('Activity').last);
         await tester.pumpAndSettle();
         await tester.scrollUntilVisible(
-          find.text('Copies'), -300,
+          find.text('Copies'),
+          -300,
           scrollable: find.byType(Scrollable).first,
         );
         await tester.pumpAndSettle();

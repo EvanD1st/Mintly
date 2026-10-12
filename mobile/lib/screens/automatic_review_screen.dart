@@ -42,7 +42,10 @@ class _AutomaticReviewState extends ConsumerState<AutomaticReviewScreen> {
   @override
   void initState() {
     super.initState();
-    _stage = widget.drop.stages.firstWhere((stage) => stage.endTimeUtc?.isAfter(DateTime.now().toUtc()) == true, orElse: () => widget.drop.stages.first);
+    _stage = widget.drop.stages.firstWhere(
+      (stage) => stage.endTimeUtc?.isAfter(DateTime.now().toUtc()) == true,
+      orElse: () => widget.drop.stages.first,
+    );
     _quantity.text = '${widget.plan?.quantity ?? 1}';
     _setStage();
     if (widget.plan?.estimatedNetworkFeeEth != null) {
@@ -88,23 +91,29 @@ class _AutomaticReviewState extends ConsumerState<AutomaticReviewScreen> {
     _mintAt = _defaultMintTime();
   }
 
-  bool get _scheduledWhitelist => widget.plan != null &&
+  bool get _scheduledWhitelist =>
+      widget.plan != null &&
       (widget.initialMintKind != 'public' ||
-          (widget.plan!.stageType != null && widget.plan!.stageType != 'public_sale'));
+          (widget.plan!.stageType != null &&
+              widget.plan!.stageType != 'public_sale'));
 
   DateTime _defaultMintTime() {
     final now = DateTime.now().toUtc();
     if (_scheduledWhitelist && _stage.startTimeUtc.toUtc().isAfter(now)) {
-      return _stage.startTimeUtc.toUtc().add(const Duration(seconds:15));
+      return _stage.startTimeUtc.toUtc().add(const Duration(seconds: 15));
     }
-    return WatTime.defaultForStage(_stage.startTimeUtc,now);
+    return WatTime.defaultForStage(_stage.startTimeUtc, now);
   }
 
   Future<void> _pickMintTime() async {
     if (_busy) return;
     final now = DateTime.now().toUtc();
-    DateTime? end = DateTime.tryParse(_expiry.text)?.toUtc() ?? _stage.endTimeUtc?.toUtc();
-    for (final limit in [_stage.endTimeUtc?.toUtc(), DateTime.tryParse('${_policy?['expires_at']}')?.toUtc()]) {
+    DateTime? end =
+        DateTime.tryParse(_expiry.text)?.toUtc() ?? _stage.endTimeUtc?.toUtc();
+    for (final limit in [
+      _stage.endTimeUtc?.toUtc(),
+      DateTime.tryParse('${_policy?['expires_at']}')?.toUtc(),
+    ]) {
       if (limit != null && (end == null || limit.isBefore(end))) end = limit;
     }
     if (end == null || !end.isAfter(now)) {
@@ -112,36 +121,79 @@ class _AutomaticReviewState extends ConsumerState<AutomaticReviewScreen> {
       return;
     }
     final deadline = end;
-    final selected = WatTime.wall(_mintAt.isBefore(now) ? now : (_mintAt.isAfter(end) ? end : _mintAt));
-    final label = WatTime.label(selected.subtract(const Duration(hours:1))).split(' ');
-    final date = TextEditingController(text:label[0]);
-    final time = TextEditingController(text:label[1]);
+    final selected = WatTime.wall(
+      _mintAt.isBefore(now) ? now : (_mintAt.isAfter(end) ? end : _mintAt),
+    );
+    final label = WatTime.label(
+      selected.subtract(const Duration(hours: 1)),
+    ).split(' ');
+    final date = TextEditingController(text: label[0]);
+    final time = TextEditingController(text: label[1]);
     final form = GlobalKey<FormState>();
-    final picked = await showDialog<DateTime>(context:context,builder:(context) => AlertDialog(
-      title:const Text('Mint time (WAT)'),
-      content:Form(key:form,child:Column(mainAxisSize:MainAxisSize.min,children:[
-        TextFormField(key:const Key('mint-date-input'),controller:date,keyboardType:TextInputType.datetime,
-          decoration:const InputDecoration(labelText:'Date (DD/MM/YYYY)'),
-          validator:(_) => WatTime.parseWall(date.text,time.text) == null ? 'Enter a valid date and time' : null),
-        const SizedBox(height:12),
-        TextFormField(key:const Key('mint-time-input'),controller:time,keyboardType:TextInputType.datetime,
-          decoration:const InputDecoration(labelText:'Time (24-hour HH:MM)',helperText:'WAT · UTC+1; seconds are optional'),
-          validator:(_) {
-            final value = WatTime.parseWall(date.text,time.text);
-            if (value == null) return 'Use HH:MM, for example 12:05';
-            if (!value.isAfter(DateTime.now().toUtc())) return 'Choose a future WAT time';
-            if (value.isBefore(_stage.startTimeUtc.toUtc())) return 'Stage opens ${WatTime.label(_stage.startTimeUtc)}';
-            if (!value.isBefore(deadline)) return 'Choose a time before ${WatTime.label(deadline)}';
-            return null;
-          }),
-      ])),
-      actions:[TextButton(onPressed:() => Navigator.pop(context),child:const Text('Cancel')),
-        FilledButton(onPressed:() {
-          if (form.currentState!.validate()) Navigator.pop(context,WatTime.parseWall(date.text,time.text));
-        },child:const Text('Save time'))],
-    ));
+    final picked = await showDialog<DateTime>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Mint time (WAT)'),
+        content: Form(
+          key: form,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextFormField(
+                key: const Key('mint-date-input'),
+                controller: date,
+                keyboardType: TextInputType.datetime,
+                decoration: InputDecoration(labelText: 'Date (DD/MM/YYYY)'),
+                validator: (_) =>
+                    WatTime.parseWall(date.text, time.text) == null
+                    ? 'Enter a valid date and time'
+                    : null,
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                key: const Key('mint-time-input'),
+                controller: time,
+                keyboardType: TextInputType.datetime,
+                decoration: InputDecoration(
+                  labelText: 'Time (24-hour HH:MM)',
+                  helperText: 'WAT · UTC+1; seconds are optional',
+                ),
+                validator: (_) {
+                  final value = WatTime.parseWall(date.text, time.text);
+                  if (value == null) return 'Use HH:MM, for example 12:05';
+                  if (!value.isAfter(DateTime.now().toUtc())) {
+                    return 'Choose a future WAT time';
+                  }
+                  if (value.isBefore(_stage.startTimeUtc.toUtc())) {
+                    return 'Stage opens ${WatTime.label(_stage.startTimeUtc)}';
+                  }
+                  if (!value.isBefore(deadline)) {
+                    return 'Choose a time before ${WatTime.label(deadline)}';
+                  }
+                  return null;
+                },
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              if (form.currentState!.validate()) {
+                Navigator.pop(context, WatTime.parseWall(date.text, time.text));
+              }
+            },
+            child: const Text('Save time'),
+          ),
+        ],
+      ),
+    );
     // Allow the dialog's closing animation to finish before disposing its input controllers.
-    await Future<void>.delayed(const Duration(milliseconds:250));
+    await Future<void>.delayed(const Duration(milliseconds: 250));
     date.dispose();
     time.dispose();
     if (picked == null || !mounted) return;
@@ -174,24 +226,41 @@ class _AutomaticReviewState extends ConsumerState<AutomaticReviewScreen> {
       _error = null;
     });
     try {
-      if (!_mintAt.isAfter(DateTime.now().toUtc())) throw const FormatException('Choose a future mint time in WAT.');
+      if (!_mintAt.isAfter(DateTime.now().toUtc())) {
+        throw const FormatException('Choose a future mint time in WAT.');
+      }
       final quantity = int.tryParse(_quantity.text.trim());
-      if (quantity == null || quantity < 1 || quantity > 100) throw const FormatException('Choose 1 to 100 NFTs.');
-      if (!RegExp(r'^\d+(\.\d{1,18})?$').hasMatch(_total.text.trim())) throw const FormatException('Enter your maximum total spend, including gas.');
+      if (quantity == null || quantity < 1 || quantity > 100) {
+        throw const FormatException('Choose 1 to 100 NFTs.');
+      }
+      if (!RegExp(r'^\d+(\.\d{1,18})?$').hasMatch(_total.text.trim())) {
+        throw const FormatException(
+          'Enter your maximum total spend, including gas.',
+        );
+      }
       final request = <String, dynamic>{
         if (widget.plan != null) 'plan_id': widget.plan!.id,
         if (widget.copyEventId != null) 'copy_event_id': widget.copyEventId,
-        'wallet_id': _policy!['wallet_id'], 'grant_id': _policy!['id'],
-        'drop_id': widget.drop.id, 'stage_id': _stage.id, 'quantity': quantity,
-        'maximum_total_eth': _total.text.trim(), 'scheduled_for_utc': _mintAt.toIso8601String(),
-        if (_advanced && _gas.text.trim().isNotEmpty) 'gas_limit_eth': _gas.text.trim(),
+        'wallet_id': _policy!['wallet_id'],
+        'grant_id': _policy!['id'],
+        if (widget.drop.nativeCurrency != 'ETH')
+          'native_symbol': widget.drop.nativeCurrency,
+        'drop_id': widget.drop.id,
+        'stage_id': _stage.id,
+        'quantity': quantity,
+        'maximum_total_eth': _total.text.trim(),
+        'scheduled_for_utc': _mintAt.toIso8601String(),
+        if (_advanced && _gas.text.trim().isNotEmpty)
+          'gas_limit_eth': _gas.text.trim(),
       };
-      final review = await ref.read(apiServiceProvider).previewGuidedMint(request);
+      final review = await ref
+          .read(apiServiceProvider)
+          .previewGuidedMint(request);
       if (mounted) {
         setState(() {
           _review = review;
           _request = {
-            ...(review['request'] as Map<String,dynamic>),
+            ...(review['request'] as Map<String, dynamic>),
             'review_hash': review['review_hash'],
             'onchain_stage_index':
                 (review['snapshot']
@@ -202,7 +271,11 @@ class _AutomaticReviewState extends ConsumerState<AutomaticReviewScreen> {
         });
       }
     } catch (error) {
-      if (mounted) setState(() => _error = error is FormatException ? error.message : '$error');
+      if (mounted) {
+        setState(
+          () => _error = error is FormatException ? error.message : '$error',
+        );
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -221,7 +294,8 @@ class _AutomaticReviewState extends ConsumerState<AutomaticReviewScreen> {
           .armAutomaticTask(_request!);
       await ref.read(mintlyProvider.notifier).loadInitialData();
       if (!mounted) return;
-      MintlyNotice.show(context,
+      MintlyNotice.show(
+        context,
         SnackBar(
           content: Text(
             task.status == 'armed'
@@ -239,10 +313,22 @@ class _AutomaticReviewState extends ConsumerState<AutomaticReviewScreen> {
   }
 
   Future<void> _setupWallet() async {
-    await Navigator.push<bool>(context, MaterialPageRoute(builder: (_) => WalletSetupScreen(
-      initialChain: widget.drop.chainId, walletId: widget.plan?.walletId, address: widget.plan?.walletAddress)));
+    await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => WalletSetupScreen(
+          initialChain: widget.drop.chainId,
+          walletId: widget.plan?.walletId,
+          address: widget.plan?.walletAddress,
+        ),
+      ),
+    );
     if (!mounted) return;
-    setState(() { _policy = null; _policies = _loadPolicies(); _error = null; });
+    setState(() {
+      _policy = null;
+      _policies = _loadPolicies();
+      _error = null;
+    });
   }
 
   String _eth(dynamic wei) {
@@ -281,10 +367,18 @@ class _AutomaticReviewState extends ConsumerState<AutomaticReviewScreen> {
                     )
                     .toList();
                 if (policies.isEmpty) {
-                  return Column(crossAxisAlignment:CrossAxisAlignment.stretch,children:[
-                    const Text('This network needs an automatic signing approval for your wallet.'),
-                    OutlinedButton(onPressed:_busy ? null : _setupWallet,child:const Text('Set up wallet')),
-                  ]);
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const Text(
+                        'This network needs an automatic signing approval for your wallet.',
+                      ),
+                      OutlinedButton(
+                        onPressed: _busy ? null : _setupWallet,
+                        child: const Text('Set up wallet'),
+                      ),
+                    ],
+                  );
                 }
                 return DropdownButtonFormField<String>(
                   icon: const RotatedBox(
@@ -317,50 +411,109 @@ class _AutomaticReviewState extends ConsumerState<AutomaticReviewScreen> {
                 );
               },
             ),
-            Text(_stage.stageName,style:Theme.of(context).textTheme.bodySmall),
-            Card(child:ListTile(
-              title:const Text('Mint time (WAT)'),
-              subtitle:Text(WatTime.label(_mintAt),key:const Key('automatic-mint-time')),
-              trailing:TextButton(onPressed:_busy ? null : _pickMintTime,child:const Text('Change time')),
-            )),
-            if (_stage.startTimeUtc.toUtc().isAfter(DateTime.now().toUtc()))
-              TextButton(onPressed:_busy ? null : () => setState(() {
-                _mintAt = _defaultMintTime();
-                _consent = false;
-              }),child:Text(_scheduledWhitelist ? 'Use opening time + 15 seconds' : 'Use stage opening time')),
-            const Text('Time is always WAT. Confirmation can be later than the selected time.',style:TextStyle(fontSize:12)),
-            TextField(controller:_quantity,enabled:!_busy,keyboardType:TextInputType.number,
-              decoration:const InputDecoration(labelText:'NFT quantity')),
-            TextField(controller:_total,enabled:!_busy,keyboardType:const TextInputType.numberWithOptions(decimal:true),
-              decoration:const InputDecoration(labelText:'Maximum total spend (ETH)',helperText:'Includes NFT price and all network fees')),
-            TextButton(onPressed:_busy ? null : () => setState(() => _advanced = !_advanced),child:Text(_advanced ? 'Hide Advanced' : 'Advanced')),
-            if (_advanced) ...[
-            DropdownButtonFormField<String>(
-              icon: const RotatedBox(
-                quarterTurns: 1,
-                child: Icon(MintlyIcons.chevronRight),
-              ),
-              initialValue: _stage.id,
-              decoration: const InputDecoration(labelText: 'Exact stage'),
-              items: widget.drop.stages
-                  .map(
-                    (s) =>
-                        DropdownMenuItem(value: s.id, child: Text(s.stageName)),
-                  )
-                  .toList(),
-              onChanged: _busy
-                  ? null
-                  : (id) => setState(() {
-                      _stage = widget.drop.stages.firstWhere((s) => s.id == id);
-                      _setStage();
-                    }),
+            Text(
+              _stage.stageName,
+              style: Theme.of(context).textTheme.bodySmall,
             ),
-              TextField(controller:_gas,enabled:!_busy,keyboardType:const TextInputType.numberWithOptions(decimal:true),
-                decoration:const InputDecoration(labelText:'Gas spending limit (ETH, optional)',helperText:'Blank uses the total remaining after NFT cost')),
+            Card(
+              child: ListTile(
+                title: const Text('Mint time (WAT)'),
+                subtitle: Text(
+                  WatTime.label(_mintAt),
+                  key: const Key('automatic-mint-time'),
+                ),
+                trailing: TextButton(
+                  onPressed: _busy ? null : _pickMintTime,
+                  child: const Text('Change time'),
+                ),
+              ),
+            ),
+            if (_stage.startTimeUtc.toUtc().isAfter(DateTime.now().toUtc()))
+              TextButton(
+                onPressed: _busy
+                    ? null
+                    : () => setState(() {
+                        _mintAt = _defaultMintTime();
+                        _consent = false;
+                      }),
+                child: Text(
+                  _scheduledWhitelist
+                      ? 'Use opening time + 15 seconds'
+                      : 'Use stage opening time',
+                ),
+              ),
+            const Text(
+              'Time is always WAT. Confirmation can be later than the selected time.',
+              style: TextStyle(fontSize: 12),
+            ),
+            TextField(
+              controller: _quantity,
+              enabled: !_busy,
+              keyboardType: TextInputType.number,
+              decoration: InputDecoration(labelText: 'NFT quantity'),
+            ),
+            TextField(
+              controller: _total,
+              enabled: !_busy,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
+              decoration: InputDecoration(
+                labelText:
+                    'Maximum total spend (${widget.drop.nativeCurrency})',
+                helperText: 'Includes NFT price and all network fees',
+              ),
+            ),
+            TextButton(
+              onPressed: _busy
+                  ? null
+                  : () => setState(() => _advanced = !_advanced),
+              child: Text(_advanced ? 'Hide Advanced' : 'Advanced'),
+            ),
+            if (_advanced) ...[
+              DropdownButtonFormField<String>(
+                icon: const RotatedBox(
+                  quarterTurns: 1,
+                  child: Icon(MintlyIcons.chevronRight),
+                ),
+                initialValue: _stage.id,
+                decoration: const InputDecoration(labelText: 'Exact stage'),
+                items: widget.drop.stages
+                    .map(
+                      (s) => DropdownMenuItem(
+                        value: s.id,
+                        child: Text(s.stageName),
+                      ),
+                    )
+                    .toList(),
+                onChanged: _busy
+                    ? null
+                    : (id) => setState(() {
+                        _stage = widget.drop.stages.firstWhere(
+                          (s) => s.id == id,
+                        );
+                        _setStage();
+                      }),
+              ),
+              TextField(
+                controller: _gas,
+                enabled: !_busy,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                decoration: InputDecoration(
+                  labelText:
+                      'Gas spending limit (${widget.drop.nativeCurrency}, optional)',
+                  helperText: 'Blank uses the total remaining after NFT cost',
+                ),
+              ),
             ],
-            if (_policy == null) const Text('Choose an approved wallet to continue.'),
-            FilledButton(onPressed:_busy || _policy == null ? null : _preview,
-              child:Text(_busy ? 'Checking mint details…' : 'Review limits')),
+            if (_policy == null)
+              const Text('Choose an approved wallet to continue.'),
+            FilledButton(
+              onPressed: _busy || _policy == null ? null : _preview,
+              child: Text(_busy ? 'Checking mint details…' : 'Review limits'),
+            ),
           ] else ...[
             Card(
               child: Padding(
@@ -383,24 +536,34 @@ class _AutomaticReviewState extends ConsumerState<AutomaticReviewScreen> {
                         'Verified stage index: ${snapshot['onchain_stage_index']}',
                       ),
                     Text('Quantity: ${snapshot['quantity']}'),
-                    Text('NFT cost: ${_eth(BigInt.parse('${snapshot['price_wei']}') * BigInt.from(snapshot['quantity'] as int))} ETH'),
-                    Text('Mint time: ${WatTime.label(snapshot['execute_at'] == null ? _mintAt
-                        : DateTime.fromMillisecondsSinceEpoch((snapshot['execute_at'] as int)*1000,isUtc:true))}'),
                     Text(
-                      'Price ceiling: ${_eth(snapshot['price_cap_wei'])} ETH',
+                      'NFT cost: ${_eth(BigInt.parse('${snapshot['price_wei']}') * BigInt.from(snapshot['quantity'] as int))} ${widget.drop.nativeCurrency}',
                     ),
-                    Text('Gas budget: ${_eth(snapshot['fee_cap_wei'])} ETH'),
                     Text(
-                      'Total ceiling: ${_eth(snapshot['total_cap_wei'])} ETH',
+                      'Mint time: ${WatTime.label(snapshot['execute_at'] == null ? _mintAt : DateTime.fromMillisecondsSinceEpoch((snapshot['execute_at'] as int) * 1000, isUtc: true))}',
+                    ),
+                    Text(
+                      'Price ceiling: ${_eth(snapshot['price_cap_wei'])} ${widget.drop.nativeCurrency}',
+                    ),
+                    Text(
+                      'Gas budget: ${_eth(snapshot['fee_cap_wei'])} ${widget.drop.nativeCurrency}',
+                    ),
+                    Text(
+                      'Total ceiling: ${_eth(snapshot['total_cap_wei'])} ${widget.drop.nativeCurrency}',
                     ),
                     Text(
                       'Approval ends: ${WatTime.label(DateTime.fromMillisecondsSinceEpoch((snapshot['expiry'] as int) * 1000, isUtc: true))}',
                     ),
-                    Text(_review!['eligibility'] == 'verified_waiting_for_instructions'
-                        ? 'Eligibility verified. Mint instructions will be checked when the stage opens.'
-                        : 'Eligibility: ${_review!['eligibility']}'),
+                    Text(
+                      _review!['eligibility'] ==
+                              'verified_waiting_for_instructions'
+                          ? 'Eligibility verified. Mint instructions will be checked when the stage opens.'
+                          : 'Eligibility: ${_review!['eligibility']}',
+                    ),
                     if (_review!['execution_ready'] == false)
-                      const Text('The server will attempt this selected phase at the approved time, even with the app closed. If instructions arrive late, it retries within your approval window. No public fallback.'),
+                      const Text(
+                        'The server will attempt this selected phase at the approved time, even with the app closed. If instructions arrive late, it retries within your approval window. No public fallback.',
+                      ),
                   ],
                 ),
               ),

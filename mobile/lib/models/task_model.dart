@@ -1,4 +1,7 @@
+import 'network_metadata.dart';
+
 class MintTaskModel {
+  String get nativeCurrency => nativeSymbol(chain);
   final String id;
   final String? planId;
   final String walletId;
@@ -54,7 +57,8 @@ class MintTaskModel {
       stageId: json['stage_id'] ?? '',
       status: json['status'] ?? 'armed',
       isDemo: json['is_demo'] ?? false,
-      scheduledForUtc: DateTime.tryParse(json['scheduled_for_utc'] ?? '') ?? DateTime.now(),
+      scheduledForUtc:
+          DateTime.tryParse(json['scheduled_for_utc'] ?? '') ?? DateTime.now(),
       quantity: json['quantity'] ?? 1,
       unitPriceEth: json['unit_price_eth'] ?? '0',
       feeCapEth: json['fee_cap_eth'] ?? '0',
@@ -67,7 +71,9 @@ class MintTaskModel {
       transactionHash: json['transaction_hash'],
       explorerUrl: json['explorer_url'],
       failureReason: json['failure_reason'],
-      progress: json['progress'] is Map<String, dynamic> ? json['progress'] as Map<String, dynamic> : null,
+      progress: json['progress'] is Map<String, dynamic>
+          ? json['progress'] as Map<String, dynamic>
+          : null,
     );
   }
 }

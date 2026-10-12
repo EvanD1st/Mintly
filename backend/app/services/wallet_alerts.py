@@ -9,7 +9,8 @@ from app.services import automatic
 from app.services.mint_plans import aware
 from app.services.notifier import NotificationService
 
-NETWORKS={1:'Ethereum',8453:'Base',4663:'Robinhood',31337:'Local test',11155111:'Sepolia'}
+from app.services.networks import NETWORKS as REGISTRY,symbol
+NETWORKS={chain:n.name for chain,n in REGISTRY.items()}
 
 
 async def read_balance(address,chain):
@@ -58,8 +59,8 @@ async def poll(session_factory=AsyncSessionLocal,balance=read_balance,*,now=None
                 async with slots:
                     amount=await asyncio.wait_for(balance(address,chain),timeout=8)
                 low=amount<required if required else amount==0
-                conditions['low_funds']=(low,'low_funds',f'Check ETH on {network}',
-                    f'Balance is below your upcoming mint maximum on {network}. Check Wallets.' if required else f'Add ETH on {network} for copy mint gas.')
+                conditions['low_funds']=(low,'low_funds',f'Check {symbol(chain)} on {network}',
+                    f'Balance is below your upcoming mint maximum on {network}. Check Wallets.' if required else f'Add {symbol(chain)} on {network} for copy mint gas.')
             except Exception:
                 pass  # RPC outage never becomes a false low-balance transition.
         else:

@@ -52,7 +52,7 @@ async def evaluate(web3,observation,snapshot,*,now=None):
 
 async def process(db,watch,chain):
     check=await db.get(CopyCheck,watch.id)
-    if not check or not check.active or aware(check.expires_at)<=datetime.now(timezone.utc):
+    if not check or not check.active or aware(check.expires_at)<=datetime.now(timezone.utc) or str(chain) not in check.snapshot['after_blocks']:
         return
     wallet=await db.get(Wallet,check.wallet_id)
     if not wallet or wallet.archived_at or wallet.user_id!=watch.user_id:
@@ -74,10 +74,12 @@ async def process(db,watch,chain):
             try:
                 result=await evaluate(web3,observation,snapshot)
                 if result['status']=='would_copy':
-                    from app.services.daily_budget import usage
+                    from app.services.daily_budget import usage, limit_owner
+                    from app.services.networks import symbol
                     user=await db.get(User,watch.user_id,populate_existing=True)
-                    used=await usage(db,user.id)
-                    if user.daily_limit_wei is not None and sum(used.values())+result['maximum_wei']>user.daily_limit_wei:
+                    owner=await limit_owner(db,user,symbol(chain))
+                    used=await usage(db,user.id,currency=symbol(chain))
+                    if owner.daily_limit_wei is not None and sum(used.values())+result['maximum_wei']>owner.daily_limit_wei:
                         result={'status':'would_skip','note':'Daily spending limit has no room for this mint.'}
             except HTTPException as error:
                 result={'status':'would_skip','note':str(error.detail)}

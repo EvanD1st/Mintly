@@ -99,7 +99,7 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
           Text('OpenSea checks this quantity against your wallet’s stage limit and remaining supply.', style: TextStyle(color: muted, fontSize: 11)),
 
           Text(
-            'Supports native-ETH SeaDrop V1 drops on Ethereum, Base, Robinhood Chain, Arbitrum One and Optimism. Mintly checks stage timing and wallet readiness. Gas is estimated. Importing saves a plan without signing a mint. Next, choose a wallet and explicitly approve automatic signing limits.',
+            'Supports SeaDrop V1 plans on Ethereum, Base, Robinhood, HyperEVM, ApeChain and Ink. Limits use each network’s native currency. Mintly checks stage timing and wallet readiness. Gas is estimated. Importing saves a plan without signing a mint. Next, choose a wallet and explicitly approve automatic signing limits.',
             style: TextStyle(fontSize: 11, color: muted, height: 1.4),
           ),
           const SizedBox(height: 24),

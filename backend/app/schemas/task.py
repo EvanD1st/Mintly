@@ -1,12 +1,13 @@
 """Pydantic schemas for Tasks and Authorizations."""
 
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Literal
 from pydantic import BaseModel, ConfigDict, Field
 from app.schemas.drop import DropSchema, MintStageSchema
 
 
 class DraftTaskRequest(BaseModel):
+    native_symbol: Literal['ETH','HYPE','APE'] | None = None
     guided: bool = False
     plan_id: str | None = None
     copy_event_id: str | None = Field(default=None, min_length=64, max_length=64)
@@ -66,6 +67,8 @@ class TaskSchema(BaseModel):
     
     drop_name: str
     chain: str
+    chain_id: int | None = None
+    native_symbol: str = 'ETH'
     stage_name: str
     time_wat_label: str
     icon_name: str

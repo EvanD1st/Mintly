@@ -1,3 +1,4 @@
+import '../models/network_metadata.dart';
 import '../widgets/network_budget_card.dart';
 import '../widgets/collection_thumbnail.dart';
 import '../widgets/screen_components.dart';
@@ -26,7 +27,10 @@ class CopyGlyph extends StatelessWidget {
     label: kind,
     child: CustomPaint(
       size: Size.square(size),
-      painter: _GlyphPainter(kind, color ?? Theme.of(context).colorScheme.primary),
+      painter: _GlyphPainter(
+        kind,
+        color ?? Theme.of(context).colorScheme.primary,
+      ),
     ),
   );
 }
@@ -133,6 +137,9 @@ String _network(dynamic id) =>
       1: 'Ethereum',
       8453: 'Base',
       4663: 'Robinhood',
+      999: 'HyperEVM',
+      33139: 'ApeChain',
+      57073: 'Ink',
       31337: 'Local test',
       11155111: 'Sepolia',
     }[id] ??
@@ -151,13 +158,13 @@ class _Panel extends StatelessWidget {
   Widget build(BuildContext context) {
     final dark = Theme.of(context).brightness == Brightness.dark;
     return Container(
-      margin: const EdgeInsets.only(bottom: 14),
-      padding: const EdgeInsets.all(16),
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: highlighted
             ? MintlyColors.getSoft(dark)
             : MintlyColors.getPanel(dark),
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(15),
         border: Border.all(color: MintlyColors.getLine(dark)),
       ),
       child: Material(type: MaterialType.transparency, child: child),
@@ -172,8 +179,8 @@ class _Avatar extends StatelessWidget {
   Widget build(BuildContext context) {
     final dark = Theme.of(context).brightness == Brightness.dark;
     return Container(
-      width: 54,
-      height: 54,
+      width: 44,
+      height: 44,
       alignment: Alignment.center,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
@@ -334,7 +341,10 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
       try {
         final checks = await api.fetchCopyCheckResults();
         if (mounted && generation == _generation) {
-          setState(() => _checks = (checks['results'] as List? ?? []).cast<Map<String, dynamic>>());
+          setState(
+            () => _checks = (checks['results'] as List? ?? [])
+                .cast<Map<String, dynamic>>(),
+          );
         }
       } catch (_) {
         // Keep the existing activity when check-only results cannot refresh.
@@ -570,141 +580,198 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
             .where((s) => s.isNotEmpty)
             .toList()
           ..sort();
+    final manageLabel = watch['check_only'] == true
+        ? 'Manage checks'
+        : rules.any((r) => ['active', 'paused'].contains(r['status']))
+        ? 'Manage'
+        : 'Set up copy';
     return _Panel(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               _Avatar('${watch['label']}'),
-              const SizedBox(width: 12),
+              const SizedBox(width: 10),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      '${watch['label']}',
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    InkWell(
-                      onTap: () => Clipboard.setData(
-                        ClipboardData(text: '${watch['address']}'),
-                      ),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 5),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(_short('${watch['address']}')),
-                            const SizedBox(width: 8),
-                            const CopyGlyph('copy', size: 15),
-                          ],
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            '${watch['label']}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
                         ),
-                      ),
+                        StatusBadge(
+                          watch['check_only'] == true
+                              ? 'check_only'
+                              : active
+                              ? 'active'
+                              : rules.any((r) => r['status'] == 'paused')
+                              ? 'paused'
+                              : 'watching',
+                          compact: true,
+                        ),
+                      ],
+                    ),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: InkWell(
+                            onTap: () => Clipboard.setData(
+                              ClipboardData(text: '${watch['address']}'),
+                            ),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 6),
+                              child: Row(
+                                children: [
+                                  Flexible(
+                                    child: Text(
+                                      _short('${watch['address']}'),
+                                      style: const TextStyle(fontSize: 11),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 5),
+                                  const CopyGlyph('copy', size: 13),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                        TextButton(
+                          style: TextButton.styleFrom(
+                            minimumSize: const Size(0, 30),
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            padding: const EdgeInsets.symmetric(horizontal: 4),
+                          ),
+                          onPressed: _busy ? null : () => _setup(watch),
+                          child: Text(
+                            manageLabel,
+                            style: const TextStyle(fontSize: 11),
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
               ),
-              PopupMenuButton<String>(
-                tooltip: 'Wallet options',
-                icon: const CopyGlyph('more'),
-                onSelected: (value) {
-                  if (value == 'stop-checks') {
-                    _act(() => ref.read(apiServiceProvider).stopCopyChecks('${watch['id']}'));
-                  }
-                  if (value == 'edit') _follow(watch);
-                  if (value == 'remove') _remove(watch);
-                  if (value == 'pause') {
-                    _act(
-                      () => ref
-                          .read(apiServiceProvider)
-                          .pauseCopying(active, watchId: '${watch['id']}'),
-                    );
-                  }
-                },
-                itemBuilder: (_) => [
-                  if (watch['check_only'] == true)
-                    const PopupMenuItem(value: 'stop-checks', child: Text('Stop check-only')) ,
-                  const PopupMenuItem(
-                    value: 'edit',
-                    child: Text('Edit name / networks'),
-                  ),
-                  if (rules.any(
-                    (r) => ['active', 'paused'].contains(r['status']),
-                  ))
-                    PopupMenuItem(
-                      value: 'pause',
-                      child: Text(active ? 'Pause copying' : 'Resume copying'),
+              SizedBox(
+                width: 28,
+                child: PopupMenuButton<String>(
+                  tooltip: 'Wallet options',
+                  icon: const CopyGlyph('more'),
+                  onSelected: (value) {
+                    if (value == 'stop-checks') {
+                      _act(
+                        () => ref
+                            .read(apiServiceProvider)
+                            .stopCopyChecks('${watch['id']}'),
+                      );
+                    }
+                    if (value == 'edit') _follow(watch);
+                    if (value == 'remove') _remove(watch);
+                    if (value == 'pause') {
+                      _act(
+                        () => ref
+                            .read(apiServiceProvider)
+                            .pauseCopying(active, watchId: '${watch['id']}'),
+                      );
+                    }
+                  },
+                  itemBuilder: (_) => [
+                    if (watch['check_only'] == true)
+                      const PopupMenuItem(
+                        value: 'stop-checks',
+                        child: Text('Stop check-only'),
+                      ),
+                    const PopupMenuItem(
+                      value: 'edit',
+                      child: Text('Edit name / networks'),
                     ),
-                  const PopupMenuItem(
-                    value: 'remove',
-                    child: Text('Remove wallet'),
-                  ),
-                ],
+                    if (rules.any(
+                      (r) => ['active', 'paused'].contains(r['status']),
+                    ))
+                      PopupMenuItem(
+                        value: 'pause',
+                        child: Text(
+                          active ? 'Pause copying' : 'Resume copying',
+                        ),
+                      ),
+                    const PopupMenuItem(
+                      value: 'remove',
+                      child: Text('Remove wallet'),
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
-          const SizedBox(height: 10),
           Wrap(
-            spacing: 7,
-            runSpacing: 7,
+            spacing: 5,
+            runSpacing: 5,
             children: [
+              for (final rule in rules.take(1))
+                if (rule['snapshot'] is Map)
+                  _Chip(
+                    (rule['snapshot'] as Map)['free_only'] == true
+                        ? 'Free mints only'
+                        : (rule['snapshot'] as Map)['paid_only'] == true
+                        ? 'Paid mints'
+                        : 'Free & paid mints',
+                  ),
               for (final chain in watch['chains'] as List)
                 _Chip(_network(chain)),
-              _Chip(watch['check_only'] == true ? 'Check-only · no spending' : active ? 'Copying on' : 'Watching only'),
-              for (final rule in rules.take(1))
-                if (rule['snapshot'] is Map) _Chip((rule['snapshot'] as Map)['free_only'] == true ? 'Free mints only' : (rule['snapshot'] as Map)['paid_only'] == true ? 'Paid mints' : 'Free & paid mints'),
+              if (watch['check_only'] == true)
+                const _Chip('Check-only · no spending'),
+              if (watch['check_only'] != true && !active)
+                const _Chip('Watching only'),
             ],
           ),
-          const SizedBox(height: 18),
+          const SizedBox(height: 5),
           Row(
             children: [
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Recent public mints',
-                      style: TextStyle(fontSize: 12),
-                    ),
-                    Text(
-                      '${watch['recent_mints']}',
-                      style: const TextStyle(
-                        fontSize: 28,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ],
+                child: Text(
+                  '${watch['recent_mints']} recent public mints',
+                  style: const TextStyle(fontSize: 10),
                 ),
               ),
-              Expanded(flex: 2, child: FilledButton(
-                onPressed: _busy ? null : () => _setup(watch),
-                child: Text(watch['check_only'] == true ? 'Manage checks' : active ? 'Copying active · Manage' : rules.any((r) => r['status'] == 'paused') ? 'Copying paused · Manage' : 'Set up copy', textAlign: TextAlign.center),
-              )),
+              TextButton(
+                style: TextButton.styleFrom(
+                  minimumSize: const Size(0, 30),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                ),
+                onPressed: () {
+                  setState(() {
+                    _tab = 1;
+                    _filter = '${watch['id']}';
+                  });
+                  _load();
+                },
+                child: const Text(
+                  'View activity',
+                  style: TextStyle(fontSize: 11),
+                ),
+              ),
             ],
           ),
-          const SizedBox(height: 8),
           Text(
             unavailable
                 ? 'Network check delayed. Last saved activity is preserved.'
                 : checked.isEmpty
                 ? 'Scanning recent blocks…'
                 : 'Checked ${_date(checked.first)} · last 7 days, scanned blocks',
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-          TextButton(
-            onPressed: () {
-              setState(() {
-                _tab = 1;
-                _filter = '${watch['id']}';
-              });
-              _load();
-            },
-            child: const Text('View activity'),
+            style: const TextStyle(fontSize: 10, height: 1.2),
           ),
         ],
       ),
@@ -724,19 +791,29 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
         ScreenHeading(
           'Copy',
           'Follow wallets. Mint on your terms.',
-          action: IconButton(
-            tooltip: 'Follow another wallet',
-            icon: const CopyGlyph('add'),
-            onPressed: _busy || _data == null ? null : () => _follow(),
+          action: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                tooltip: 'Follow another wallet',
+                icon: const CopyGlyph('add', size: 20),
+                constraints: const BoxConstraints.tightFor(
+                  width: 32,
+                  height: 32,
+                ),
+                padding: EdgeInsets.zero,
+                onPressed: _busy || _data == null ? null : () => _follow(),
+              ),
+              const AutomationControl(toolbar: true),
+            ],
           ),
         ),
-        const AutomationControl(compact: true),
         const NetworkBudgetCard(),
         _Panel(
           highlighted: true,
           child: Row(
             children: [
-              const CopyGlyph('wallets', size: 32),
+              const CopyGlyph('wallets', size: 27),
               const SizedBox(width: 15),
               Expanded(
                 child: Column(
@@ -746,13 +823,14 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
                       '${_watches.length} wallet${_watches.length == 1 ? '' : 's'} followed',
                       style: const TextStyle(
                         fontWeight: FontWeight.w700,
-                        fontSize: 16,
+                        fontSize: 14,
                       ),
                     ),
                     Text(
                       _active
                           ? 'Automatic copying active'
                           : 'Auto-copy paused / not enabled',
+                      style: const TextStyle(fontSize: 12),
                     ),
                   ],
                 ),
@@ -785,16 +863,19 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
             ),
           ),
         ),
-        const SizedBox(height: 22),
+        const SizedBox(height: 12),
         Row(
           children: [
             const Expanded(
               child: Text(
                 'Followed wallets',
-                style: TextStyle(fontSize: 19, fontWeight: FontWeight.w700),
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
               ),
             ),
-            Text('${watches.length} wallets'),
+            Text(
+              '${watches.length} wallet${watches.length == 1 ? '' : 's'}',
+              style: const TextStyle(fontSize: 11),
+            ),
           ],
         ),
         const SizedBox(height: 14),
@@ -837,7 +918,7 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
         ),
         const SizedBox(height: 18),
         const Text(
-          'Public mints and opted-in whitelist mints on Ethereum, Base and Robinhood. Unsupported mint methods, transfers and airdrops are skipped.',
+          'Public mints and opted-in whitelist mints on Ethereum, Base, Robinhood, HyperEVM, ApeChain and Ink. Unsupported mint methods, transfers and airdrops are skipped.',
           style: TextStyle(fontSize: 12),
         ),
       ],
@@ -884,7 +965,10 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              CollectionThumbnail(name: '${o['name']}', reference: 'copy:${event['id']}'),
+              CollectionThumbnail(
+                name: '${o['name']}',
+                reference: 'copy:${event['id']}',
+              ),
               const SizedBox(width: 13),
               Expanded(
                 child: Column(
@@ -901,8 +985,16 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
                     Wrap(
                       spacing: 7,
                       runSpacing: 7,
-                      children: [_Chip(label), _Chip('${o['chain']}'),
-                        _Chip(o['mint_kind'] == 'allowlist' || o['mint_kind'] == 'signed' ? 'Whitelist' : 'Public')],
+                      children: [
+                        _Chip(label),
+                        _Chip('${o['chain']}'),
+                        _Chip(
+                          o['mint_kind'] == 'allowlist' ||
+                                  o['mint_kind'] == 'signed'
+                              ? 'Whitelist'
+                              : 'Public',
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 9),
                     Text('Followed ${event['wallet_label']}'),
@@ -913,8 +1005,8 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
                     ),
                     Text(
                       event['actual_cost_wei'] == null
-                          ? 'Source price ${copyEth(o['price_wei'])} ETH / NFT'
-                          : '${copyEth(event['actual_cost_wei'])} ETH spent',
+                          ? 'Source price ${copyEth(o['price_wei'])} ${nativeSymbol(o['chain_id'])} / NFT'
+                          : '${copyEth(event['actual_cost_wei'])} ${nativeSymbol(o['chain_id'])} spent',
                     ),
                   ],
                 ),
@@ -942,13 +1034,24 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
           _CopyDetails(key: ValueKey(event['id']), event: event),
           if (event['retryable'] == true)
             OutlinedButton(
-              onPressed: _busy ? null : () => _act(() => ref.read(apiServiceProvider).retryCopyMint('${event['id']}')),
+              onPressed: _busy
+                  ? null
+                  : () => _act(
+                      () => ref
+                          .read(apiServiceProvider)
+                          .retryCopyMint('${event['id']}'),
+                    ),
               child: const Text('Retry'),
             )
-          else if (event['task_id'] == null && (o['mint_kind'] == 'allowlist' || o['mint_kind'] == 'signed'))
+          else if (event['task_id'] == null &&
+              (o['mint_kind'] == 'allowlist' || o['mint_kind'] == 'signed'))
             OutlinedButton(
-              onPressed: _busy || !_watches.any((w) => w['id'] == event['watch_id'])
-                  ? null : () => _setup(_watches.firstWhere((w) => w['id'] == event['watch_id'])),
+              onPressed:
+                  _busy || !_watches.any((w) => w['id'] == event['watch_id'])
+                  ? null
+                  : () => _setup(
+                      _watches.firstWhere((w) => w['id'] == event['watch_id']),
+                    ),
               child: const Text('Whitelist settings'),
             )
           else if (event['task_id'] == null)
@@ -969,13 +1072,14 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
       children: [
         Text(
           'Copy activity',
-          style: Theme.of(
-            context,
-          ).textTheme.headlineLarge?.copyWith(fontWeight: FontWeight.w700),
+          style: Theme.of(context).textTheme.headlineLarge?.copyWith(
+            fontSize: 26,
+            fontWeight: FontWeight.w700,
+          ),
         ),
         const SizedBox(height: 7),
         const Text('Public mints and updates for your copied wallets.'),
-        const SizedBox(height: 22),
+        const SizedBox(height: 12),
         Row(
           children: [
             Expanded(
@@ -990,7 +1094,7 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
                         fontSize: 25,
                       ),
                     ),
-                    const Text('copied mints'),
+                    const Text('copied mints', style: TextStyle(fontSize: 11)),
                   ],
                 ),
               ),
@@ -1001,16 +1105,20 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      copyEth(_activity?['spent_wei'] ?? '0'),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w700,
+                    for (final entry
+                        in ((_activity?['spent_by_currency'] as Map?) ??
+                                {'ETH': _activity?['spent_wei'] ?? '0'})
+                            .entries)
+                      NativeAmountText(
+                        entry.value,
+                        symbol: '${entry.key}',
                         fontSize: 20,
+                        bold: true,
                       ),
+                    const Text(
+                      'Spent · all fees',
+                      style: TextStyle(fontSize: 11),
                     ),
-                    const Text('ETH spent · all fees'),
                   ],
                 ),
               ),
@@ -1051,20 +1159,41 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
             child: Padding(
               padding: EdgeInsets.symmetric(vertical: 18),
               child: Text(
-                  'No supported mints detected yet. New activity appears after network confirmation.',
+                'No supported mints detected yet. New activity appears after network confirmation.',
               ),
             ),
           ),
-        if (_checks.any((c) => _filter == null || c['watch_id'] == _filter)) ...[
-          const Text('Check-only results', style: TextStyle(fontWeight: FontWeight.w700)),
+        if (_checks.any(
+          (c) => _filter == null || c['watch_id'] == _filter,
+        )) ...[
+          const Text(
+            'Check-only results',
+            style: TextStyle(fontWeight: FontWeight.w700),
+          ),
           const SizedBox(height: 10),
-          for (final check in _checks.where((c) => _filter == null || c['watch_id'] == _filter))
-            _Panel(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('${(check['observation'] as Map)['name']}', style: const TextStyle(fontWeight: FontWeight.w700)),
-              Text(check['status'] == 'would_copy' ? 'Would copy' : check['status'] == 'would_skip' ? 'Would skip' : 'Not verified'),
-              Text('${check['note']}'),
-              const Text('No transaction sent.'),
-            ])),
+          for (final check in _checks.where(
+            (c) => _filter == null || c['watch_id'] == _filter,
+          ))
+            _Panel(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '${(check['observation'] as Map)['name']}',
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  Text(
+                    check['status'] == 'would_copy'
+                        ? 'Would copy'
+                        : check['status'] == 'would_skip'
+                        ? 'Would skip'
+                        : 'Not verified',
+                  ),
+                  Text('${check['note']}'),
+                  const Text('No transaction sent.'),
+                ],
+              ),
+            ),
         ],
         ...events.map(_event),
         if (_activity?['next_offset'] != null)
@@ -1158,10 +1287,7 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
         ),
         child: Row(
           children: [
-            for (final (index, name) in [
-              (0, 'Following'),
-              (1, 'Activity'),
-            ])
+            for (final (index, name) in [(0, 'Following'), (1, 'Activity')])
               Expanded(
                 child: TextButton(
                   onPressed: () {
@@ -1173,19 +1299,23 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
                   },
                   child: Container(
                     width: double.infinity,
-                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    padding: const EdgeInsets.symmetric(vertical: 7),
                     decoration: BoxDecoration(
-                      color: _tab == index ? Theme.of(context).colorScheme.primary.withValues(alpha: .12) : Colors.transparent,
+                      color: _tab == index
+                          ? Theme.of(
+                              context,
+                            ).colorScheme.primary.withValues(alpha: .12)
+                          : Colors.transparent,
                       borderRadius: BorderRadius.circular(18),
                     ),
                     child: Text(
-                          name,
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            fontWeight: _tab == index
-                                ? FontWeight.w700
-                                : FontWeight.w400,
-                          ),
+                      name,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontWeight: _tab == index
+                            ? FontWeight.w700
+                            : FontWeight.w400,
+                      ),
                     ),
                   ),
                 ),
@@ -1217,12 +1347,37 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
   bool _includePresales = true, _checkOnly = false;
   String _quantityChoice = 'one';
   int _days = 7;
+  String _currency = 'ETH';
+  List<Map<String, dynamic>> _currencyPolicies(Map<String, dynamic> wallet) =>
+      (wallet['all_policies'] as List<Map<String, dynamic>>? ??
+              wallet['policies'] as List<Map<String, dynamic>>)
+          .where(
+            (p) =>
+                nativeSymbol(p['chain_id']) == _currency &&
+                (widget.watch['chains'] as List).contains(p['chain_id']),
+          )
+          .toList();
+  void _chooseWallet(Map<String, dynamic> wallet) {
+    _policy = {
+      ...wallet,
+      'all_policies': wallet['all_policies'] ?? wallet['policies'],
+      'policies': _currencyPolicies(wallet),
+    };
+    _consent = false;
+    _pending = null;
+    _setExpiry();
+  }
+
   String? _error;
 
   @override
   void initState() {
     super.initState();
     _checkOnly = widget.watch['check_only'] == true;
+    final currencies = (widget.watch['chains'] as List)
+        .map(nativeSymbol)
+        .toSet();
+    _currency = currencies.contains('ETH') ? 'ETH' : currencies.first;
     _policies = _loadPolicies();
   }
 
@@ -1231,9 +1386,12 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
     final wallets = <String, Map<String, dynamic>>{};
     try {
       for (final wallet in await ref.read(apiServiceProvider).fetchWallets()) {
-        if ('${wallet['address']}'.toLowerCase() != '${widget.watch['address']}'.toLowerCase()) {
+        if ('${wallet['address']}'.toLowerCase() !=
+            '${widget.watch['address']}'.toLowerCase()) {
           wallets['${wallet['id']}'] = {
-            'id': wallet['id'], 'account': wallet['address'], 'label': wallet['label'] ?? 'Wallet',
+            'id': wallet['id'],
+            'account': wallet['address'],
+            'label': wallet['label'] ?? 'Wallet',
             'policies': <Map<String, dynamic>>[],
           };
         }
@@ -1242,19 +1400,32 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
       // Owner-scoped policy metadata still identifies approved receiving wallets.
     }
     for (final policy in all) {
-      if (policy['status'] != 'enabled' || '${policy['account']}'.toLowerCase() == '${widget.watch['address']}'.toLowerCase()
-          || !((policy['scope'] as Map)['mint_kinds'] as List).contains('public')) {
+      if (policy['status'] != 'enabled' ||
+          '${policy['account']}'.toLowerCase() ==
+              '${widget.watch['address']}'.toLowerCase() ||
+          !((policy['scope'] as Map)['mint_kinds'] as List).contains(
+            'public',
+          )) {
         continue;
       }
-      final wallet = wallets.putIfAbsent('${policy['wallet_id']}', () => {
-        'id': policy['wallet_id'], 'account': policy['account'], 'label': 'Wallet',
-        'policies': <Map<String, dynamic>>[],
-      });
+      final wallet = wallets.putIfAbsent(
+        '${policy['wallet_id']}',
+        () => {
+          'id': policy['wallet_id'],
+          'account': policy['account'],
+          'label': 'Wallet',
+          'policies': <Map<String, dynamic>>[],
+        },
+      );
       final policies = wallet['policies'] as List<Map<String, dynamic>>;
-      final index = policies.indexWhere((p) => p['chain_id'] == policy['chain_id']);
+      final index = policies.indexWhere(
+        (p) => p['chain_id'] == policy['chain_id'],
+      );
       if (index < 0) {
         policies.add(policy);
-      } else if (DateTime.parse('${policy['expires_at']}').isAfter(DateTime.parse('${policies[index]['expires_at']}'))) {
+      } else if (DateTime.parse(
+        '${policy['expires_at']}',
+      ).isAfter(DateTime.parse('${policies[index]['expires_at']}'))) {
         policies[index] = policy;
       }
     }
@@ -1269,18 +1440,45 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
     super.dispose();
   }
 
-  bool get _needsSigningApproval => !_checkOnly && (_policy == null || (_policy!['policies'] as List).isEmpty || (_policy!['policies'] as List).any((p) => !{'public','allowlist','signed'}.every((kind) => ((p['scope'] as Map)['mint_kinds'] as List).contains(kind))));
+  bool get _needsSigningApproval =>
+      !_checkOnly &&
+      (_policy == null ||
+          (_policy!['policies'] as List).isEmpty ||
+          (_policy!['policies'] as List).any(
+            (p) => !{'public', 'allowlist', 'signed'}.every(
+              (kind) =>
+                  ((p['scope'] as Map)['mint_kinds'] as List).contains(kind),
+            ),
+          ));
 
   Future<void> _setupWallet() async {
     final selected = _policy;
-    await Navigator.push(context,MaterialPageRoute(builder: (_) => WalletSetupScreen(walletId:selected?['id'] as String?,address:selected?['account'] as String?)));
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => WalletSetupScreen(
+          walletId: selected?['id'] as String?,
+          address: selected?['account'] as String?,
+        ),
+      ),
+    );
     if (!mounted) return;
     final future = _loadPolicies();
-    setState(() { _policies = future; _policy = null; _consent = false; });
+    setState(() {
+      _policies = future;
+      _policy = null;
+      _consent = false;
+    });
     final wallets = await future;
     if (!mounted || selected == null) return;
-    final match = wallets.where((wallet) => wallet['id'] == selected['id']).firstOrNull;
-    if (match != null) setState(() { _policy = match; _setExpiry(); });
+    final match = wallets
+        .where((wallet) => wallet['id'] == selected['id'])
+        .firstOrNull;
+    if (match != null) {
+      setState(() {
+        _chooseWallet(match);
+      });
+    }
   }
 
   void _setExpiry() {
@@ -1289,7 +1487,8 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
       _expiry = DateTime.now().toUtc().add(Duration(days: _days));
       return;
     }
-    final policyExpiry = policies.map((p) => DateTime.parse('${p['expires_at']}').toUtc())
+    final policyExpiry = policies
+        .map((p) => DateTime.parse('${p['expires_at']}').toUtc())
         .reduce((a, b) => a.isBefore(b) ? a : b);
     final expiry = DateTime.now().toUtc().add(Duration(days: _days));
     _expiry = expiry.isBefore(policyExpiry) ? expiry : policyExpiry;
@@ -1297,7 +1496,7 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
 
   String? _amount(String? text) =>
       text == null || !RegExp(r'^\d+(\.\d{1,18})?$').hasMatch(text.trim())
-      ? 'Enter an exact ETH amount (up to 18 decimals).'
+      ? 'Enter an exact $_currency amount (up to 18 decimals).'
       : null;
   String _uuid() {
     final random = Random.secure();
@@ -1322,9 +1521,20 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
     _pending ??= {
       'request_id': _uuid(),
       if (_checkOnly) 'wallet_id': _policy!['id'],
-      if (!_checkOnly) 'grant_ids': [for (final p in _policy!['policies'] as List<Map<String, dynamic>>) p['id']],
-      'quantity': _free || _quantityChoice == 'max' ? 100 : int.parse(_quantity.text.trim()),
-      'quantity_mode': _free ? 'max_free' : _quantityChoice == 'max' ? 'max_available' : 'fixed',
+      if (!_checkOnly)
+        'grant_ids': [
+          for (final p in _policy!['policies'] as List<Map<String, dynamic>>)
+            p['id'],
+        ],
+      'quantity': _free || _quantityChoice == 'max'
+          ? 100
+          : int.parse(_quantity.text.trim()),
+      'quantity_mode': _free
+          ? 'max_free'
+          : _quantityChoice == 'max'
+          ? 'max_available'
+          : 'fixed',
+      if (_currency != 'ETH') 'native_symbol': _currency,
       'price_cap_eth': _price.text.trim(),
       'fee_cap_eth': _gas.text.trim(),
       'budget_eth': _budget.text.trim(),
@@ -1336,7 +1546,9 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
     };
     try {
       if (_checkOnly) {
-        await ref.read(apiServiceProvider).startCopyChecks('${widget.watch['id']}', _pending!);
+        await ref
+            .read(apiServiceProvider)
+            .startCopyChecks('${widget.watch['id']}', _pending!);
         if (mounted) Navigator.pop(context);
         return;
       }
@@ -1418,7 +1630,9 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
                   ),
                 ),
                 Text(
-                  _checkOnly ? 'Choose check-only limits' : 'Choose your limits',
+                  _checkOnly
+                      ? 'Choose check-only limits'
+                      : 'Choose your limits',
                   style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                     fontWeight: FontWeight.w700,
                   ),
@@ -1426,14 +1640,32 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
                 const SizedBox(height: 7),
                 const SizedBox(height: 18),
                 SwitchListTile(
-                  contentPadding: EdgeInsets.zero, title: const Text('Check-only mode'),
-                  subtitle: const Text('Preview new mints without signing or spending.'), value: _checkOnly,
-                  onChanged: locked ? null : (value) => setState(() {
-                    _checkOnly = value; _policy = null; _consent = false;
-                  }),
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Check-only mode'),
+                  subtitle: const Text(
+                    'Preview new mints without signing or spending.',
+                  ),
+                  value: _checkOnly,
+                  onChanged: locked
+                      ? null
+                      : (value) => setState(() {
+                          _checkOnly = value;
+                          _policy = null;
+                          _consent = false;
+                        }),
                 ),
                 if (policies.isEmpty)
-                  Column(children:[const _Panel(child:Text('Add a receiving wallet to continue.')),OutlinedButton(onPressed:locked ? null : _setupWallet,child:const Text('Set up wallet'))]),
+                  Column(
+                    children: [
+                      const _Panel(
+                        child: Text('Add a receiving wallet to continue.'),
+                      ),
+                      OutlinedButton(
+                        onPressed: locked ? null : _setupWallet,
+                        child: const Text('Set up wallet'),
+                      ),
+                    ],
+                  ),
                 if (policies.isNotEmpty) ...[
                   DropdownButtonFormField<String>(
                     icon: const CopyGlyph('down'),
@@ -1456,7 +1688,9 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
                     onChanged: locked
                         ? null
                         : (id) => setState(() {
-                            _policy = policies.firstWhere((p) => p['id'] == id);
+                            _chooseWallet(
+                              policies.firstWhere((p) => p['id'] == id),
+                            );
                             _includePresales = true;
                             _consent = false;
                             _setExpiry();
@@ -1464,48 +1698,177 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
                     validator: (_) =>
                         _policy == null ? 'Choose a receiving wallet.' : null,
                   ),
+                  if ((widget.watch['chains'] as List)
+                          .map(nativeSymbol)
+                          .toSet()
+                          .length >
+                      1)
+                    DropdownButtonFormField<String>(
+                      key: ValueKey('copy-currency-$_currency'),
+                      initialValue: _currency,
+                      icon: const CopyGlyph('down'),
+                      decoration: const InputDecoration(
+                        labelText: 'Copy budget currency',
+                      ),
+                      items: [
+                        for (final c
+                            in (widget.watch['chains'] as List)
+                                .map(nativeSymbol)
+                                .toSet())
+                          DropdownMenuItem(value: c, child: Text(c)),
+                      ],
+                      onChanged: locked
+                          ? null
+                          : (value) => setState(() {
+                              _currency = value!;
+                              _price.clear();
+                              if (_free) _price.text = '0';
+                              _gas.clear();
+                              _budget.clear();
+                              _consent = false;
+                              _pending = null;
+                              if (_policy != null) _chooseWallet(_policy!);
+                            }),
+                    ),
                   if (_policy != null) ...[
                     const SizedBox(height: 12),
-                    Wrap(spacing: 6, runSpacing: 6, children: [
-                      for (final chain in [1, 4663, 8453])
-                        _Chip(((_policy!['policies'] as List).any((p) => p['chain_id'] == chain))
-                            ? _network(chain) : '${_network(chain)} · ${_checkOnly ? 'Check only' : 'Not approved'}'),
-                    ]),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: [
+                        for (final chain
+                            in (widget.watch['chains'] as List).where(
+                              (c) => nativeSymbol(c) == _currency,
+                            ))
+                          _Chip(
+                            ((_policy!['policies'] as List).any(
+                                  (p) => p['chain_id'] == chain,
+                                ))
+                                ? _network(chain)
+                                : '${_network(chain)} · ${_checkOnly ? 'Check only' : 'Not approved'}',
+                          ),
+                      ],
+                    ),
                     const SizedBox(height: 8),
                     if (_needsSigningApproval) ...[
-                      const Text('This wallet needs approval for public and eligible whitelist signing.'),
-                      OutlinedButton(onPressed:locked ? null : _setupWallet,child:const Text('Set up wallet')),
+                      const Text(
+                        'This wallet needs approval for public and eligible whitelist signing.',
+                      ),
+                      OutlinedButton(
+                        onPressed: locked ? null : _setupWallet,
+                        child: const Text('Set up wallet'),
+                      ),
                     ],
-                    Text(_checkOnly ? 'Results are checks only. No transaction will be sent.' : 'Copies on the mint’s network. Add ETH there for gas.',
-                        style: TextStyle(fontSize: 12)),
+                    Text(
+                      _checkOnly
+                          ? 'Results are checks only. No transaction will be sent.'
+                          : 'Copies on approved $_currency networks. Add $_currency there for gas. Other currencies need separate approvals.',
+                      style: TextStyle(fontSize: 12),
+                    ),
                   ],
                   const SizedBox(height: 18),
-                  const Text('Which mints should Mintly copy?',style:TextStyle(fontWeight:FontWeight.w700)),
-                  const SizedBox(height:8),
-                  Wrap(spacing:8,runSpacing:8,children:[
-                    for (final choice in [(true,'Free mints only'),(false,'Paid mints')])
-                      OutlinedButton(onPressed:locked ? null : () => setState(() {
-                        _free = choice.$1; _consent = false;
-                        if (_free) _price.text = '0';
-                      }),style:OutlinedButton.styleFrom(backgroundColor:_free == choice.$1 ? Theme.of(context).colorScheme.primary.withValues(alpha:.12) : null),child:Text(choice.$2)),
-                  ]),
-                  Text(_free ? 'Copies free public and whitelist stages you qualify for. Gas fees may apply.' : 'Copies paid public and whitelist stages you qualify for, within your limits. Gas fees may apply.',style:const TextStyle(fontSize:12)),
-                  const SizedBox(height:14),
-                  if (_free) const _Panel(child:Text('Free mints use the maximum available for your wallet, within your limits (up to 100 NFTs).'))
-                  else _Panel(child:Column(crossAxisAlignment:CrossAxisAlignment.stretch,children:[
-                    const Text('NFT quantity'),
-                    Wrap(spacing:8,runSpacing:8,children:[
-                      for (final choice in [('one','1 NFT'),('max','Max mint'),('custom','Custom')])
-                        OutlinedButton(onPressed:locked ? null : () => setState(() {
-                          _quantityChoice = choice.$1; _consent = false;
-                          if (_quantityChoice == 'one') _quantity.text = '1';
-                        }),style:OutlinedButton.styleFrom(backgroundColor:_quantityChoice == choice.$1 ? Theme.of(context).colorScheme.primary.withValues(alpha:.12) : null),child:Text(choice.$2)),
-                    ]),
-                    if (_quantityChoice == 'custom') TextFormField(controller:_quantity,enabled:!locked,
-                      keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Custom NFT quantity'),
-                      validator:(value) => (int.tryParse(value ?? '') ?? 0) < 1 || (int.tryParse(value ?? '') ?? 101) > 100 ? 'Choose 1 to 100 NFTs' : null),
-                    if (_quantityChoice == 'max') const Text('Remaining wallet allowance and collection supply, within your spending limits. Up to 100 NFTs.'),
-                  ])),
+                  const Text(
+                    'Which mints should Mintly copy?',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      for (final choice in [
+                        (true, 'Free mints only'),
+                        (false, 'Paid mints'),
+                      ])
+                        OutlinedButton(
+                          onPressed: locked
+                              ? null
+                              : () => setState(() {
+                                  _free = choice.$1;
+                                  _consent = false;
+                                  if (_free) _price.text = '0';
+                                }),
+                          style: OutlinedButton.styleFrom(
+                            backgroundColor: _free == choice.$1
+                                ? Theme.of(
+                                    context,
+                                  ).colorScheme.primary.withValues(alpha: .12)
+                                : null,
+                          ),
+                          child: Text(choice.$2),
+                        ),
+                    ],
+                  ),
+                  Text(
+                    _free
+                        ? 'Copies free public and whitelist stages you qualify for. Gas fees may apply.'
+                        : 'Copies paid public and whitelist stages you qualify for, within your limits. Gas fees may apply.',
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                  const SizedBox(height: 14),
+                  if (_free)
+                    const _Panel(
+                      child: Text(
+                        'Free mints use the maximum available for your wallet, within your limits (up to 100 NFTs).',
+                      ),
+                    )
+                  else
+                    _Panel(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          const Text('NFT quantity'),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              for (final choice in [
+                                ('one', '1 NFT'),
+                                ('max', 'Max mint'),
+                                ('custom', 'Custom'),
+                              ])
+                                OutlinedButton(
+                                  onPressed: locked
+                                      ? null
+                                      : () => setState(() {
+                                          _quantityChoice = choice.$1;
+                                          _consent = false;
+                                          if (_quantityChoice == 'one') {
+                                            _quantity.text = '1';
+                                          }
+                                        }),
+                                  style: OutlinedButton.styleFrom(
+                                    backgroundColor:
+                                        _quantityChoice == choice.$1
+                                        ? Theme.of(context).colorScheme.primary
+                                              .withValues(alpha: .12)
+                                        : null,
+                                  ),
+                                  child: Text(choice.$2),
+                                ),
+                            ],
+                          ),
+                          if (_quantityChoice == 'custom')
+                            TextFormField(
+                              controller: _quantity,
+                              enabled: !locked,
+                              keyboardType: TextInputType.number,
+                              decoration: const InputDecoration(
+                                labelText: 'Custom NFT quantity',
+                              ),
+                              validator: (value) =>
+                                  (int.tryParse(value ?? '') ?? 0) < 1 ||
+                                      (int.tryParse(value ?? '') ?? 101) > 100
+                                  ? 'Choose 1 to 100 NFTs'
+                                  : null,
+                            ),
+                          if (_quantityChoice == 'max')
+                            const Text(
+                              'Remaining wallet allowance and collection supply, within your spending limits. Up to 100 NFTs.',
+                            ),
+                        ],
+                      ),
+                    ),
                   _Panel(
                     child: Column(
                       children: [
@@ -1515,10 +1878,14 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
                           keyboardType: const TextInputType.numberWithOptions(
                             decimal: true,
                           ),
-                          validator: (value) => _amount(value) ?? (!_free && !RegExp(r'[1-9]').hasMatch(value ?? '') ? 'Enter a positive maximum price for paid mints.' : null),
-                          decoration: const InputDecoration(
+                          validator: (value) =>
+                              _amount(value) ??
+                              (!_free && !RegExp(r'[1-9]').hasMatch(value ?? '')
+                                  ? 'Enter a positive maximum price for paid mints.'
+                                  : null),
+                          decoration: InputDecoration(
                             labelText: 'Max mint price per NFT',
-                            suffixText: 'ETH',
+                            suffixText: _currency,
                           ),
                         ),
                         const SizedBox(height: 15),
@@ -1529,9 +1896,9 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
                             decimal: true,
                           ),
                           validator: _amount,
-                          decoration: const InputDecoration(
+                          decoration: InputDecoration(
                             labelText: 'Gas spending limit',
-                            suffixText: 'ETH',
+                            suffixText: _currency,
                             helperText: 'Maximum fee for one copied mint',
                           ),
                         ),
@@ -1543,10 +1910,11 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
                             decimal: true,
                           ),
                           validator: _amount,
-                          decoration: const InputDecoration(
+                          decoration: InputDecoration(
                             labelText: 'Total copy budget',
-                            suffixText: 'ETH',
-                            helperText: 'Shared across networks · includes mint prices and gas',
+                            suffixText: _currency,
+                            helperText:
+                                'Shared across approved $_currency networks · includes mint prices and gas',
                           ),
                         ),
                         DropdownButtonFormField<int>(
@@ -1582,8 +1950,10 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
                   _Panel(
                     highlighted: true,
                     child: Text(
-                      _checkOnly ? 'Check-only sends no new transactions. Already signed transactions from earlier copying may still finish.' : 'Network fees apply. Mints outside your limits are skipped. Already signed transactions may still finish after pausing or unlinking.'
-                      '${(_policy?['policies'] as List? ?? []).any((p) => p['chain_id'] == 8453) ? ' Base fees can change until inclusion.' : ''}',
+                      _checkOnly
+                          ? 'Check-only sends no new transactions. Already signed transactions from earlier copying may still finish.'
+                          : 'Network fees apply. Mints outside your limits are skipped. Already signed transactions may still finish after pausing or unlinking.'
+                                '${(_policy?['policies'] as List? ?? []).any((p) => [8453, 57073].contains(p['chain_id'])) ? ' Parent network fees can change until inclusion.' : ''}',
                     ),
                   ),
                   CheckboxListTile(
@@ -1611,15 +1981,23 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
                       ),
                     ),
                   FilledButton(
-                    onPressed: _busy || !_consent || _policy == null || _needsSigningApproval
+                    onPressed:
+                        _busy ||
+                            !_consent ||
+                            _policy == null ||
+                            _needsSigningApproval
                         ? null
                         : _enable,
                     child: Text(
                       _busy
-                          ? (_checkOnly ? 'Starting checks…' : 'Confirming copy permission…')
+                          ? (_checkOnly
+                                ? 'Starting checks…'
+                                : 'Confirming copy permission…')
                           : _pending != null
                           ? 'Retry saved approval'
-                          : _checkOnly ? 'Start check-only' : 'Enable copy minting',
+                          : _checkOnly
+                          ? 'Start check-only'
+                          : 'Enable copy minting',
                     ),
                   ),
                 ],

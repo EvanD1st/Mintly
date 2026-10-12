@@ -7,10 +7,11 @@ from app.models import Wallet, AutomaticGrant, MintTask, MintAuthorization
 from app.services import automatic
 from app.services.mint_plans import aware
 
-NETWORKS = {1:'Ethereum', 4663:'Robinhood', 8453:'Base'}
+from app.services.networks import NETWORKS as REGISTRY, symbol
+NETWORKS = {chain: REGISTRY[chain].name for chain in (1,4663,8453,999,33139,57073)}
 
 
-async def readiness(db, user):
+async def readiness(db, user, native_currencies=False):
     wallets = (await db.scalars(select(Wallet).where(Wallet.user_id == user.id,
         Wallet.archived_at.is_(None)).order_by(Wallet.created_at))).all()
     grants = (await db.scalars(select(AutomaticGrant).where(AutomaticGrant.user_id == user.id))).all()
@@ -24,13 +25,15 @@ async def readiness(db, user):
     for wallet in wallets:
         networks = []
         for chain, name in NETWORKS.items():
+            if chain in (999,33139,57073) and (not native_currencies or not getattr(automatic.settings,REGISTRY[chain].opt_in)):
+                continue
             own = [g for g in grants if g.wallet_id == wallet.id and g.chain_id == chain]
             active = [g for g in own if g.status == 'enabled' and aware(g.expires_at) > now]
             required = sum(auth.total_spend_cap_wei for task, auth in tasks
                 if task.wallet_id == wallet.id and auth.snapshot['chain_id'] == chain)
             upcoming = [task for task, auth in tasks if task.wallet_id == wallet.id and auth.snapshot['chain_id'] == chain]
             next_task = min(upcoming, key=lambda task: aware(task.scheduled_for_utc)) if upcoming else None
-            card = {'chain_id':chain, 'network':name, 'balance_wei':None,
+            card = {'chain_id':chain, 'network':name, 'native_symbol':symbol(chain), 'balance_wei':None,
                 'balance_status':'unavailable', 'approval_status':'active' if active else
                     ('expired' if any(g.status == 'enabled' for g in own) else 'disabled' if own else 'needed'),
                 'approved_remaining_wei':str(sum(max(0,g.budget_wei-g.spent_wei-g.reserved_wei) for g in active)),
@@ -49,7 +52,7 @@ async def readiness(db, user):
                 web3 = await asyncio.wait_for(automatic.provider_for(card['chain_id']), 3)
                 amount = await asyncio.wait_for(web3.eth.get_balance(to_checksum_address(address), 'pending'), 3)
             card.update(balance_wei=str(amount), balance_status='available')
-            card['gas_status'] = ('Add ETH for gas' if amount == 0 else
+            card['gas_status'] = (f'Add {symbol(card["chain_id"])} for gas' if amount == 0 else
                 ('Below pending mint maximum' if amount < required else 'Within pending mint maximum') if required else
                 'Gas checked when a mint is prepared')
         except Exception:

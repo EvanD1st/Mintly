@@ -172,13 +172,14 @@ async def step(session_factory=AsyncSessionLocal, sign=request_signature, *, now
                 raw = bytes.fromhex(task.signed_tx_raw.removeprefix('0x'))
                 if '0x' + keccak(raw).hex() != task.transaction_hash:
                     raise ValueError('Signed transaction integrity mismatch')
-                if chain_id == 8453:
+                if chain_id in (8453,57073):
                     from eth_account._utils.legacy_transactions import Transaction
                     decoded = Transaction.from_bytes(raw)
                     fee = decoded.gas * decoded.gasPrice + await additional_fee(web3, chain_id, decoded.gas, len(raw))
                     if fee > auth.max_fee_wei or decoded.value + fee > auth.total_spend_cap_wei:
                         task.status = 'uncertain'
-                        task.failure_reason = 'Base parent or operator fees exceed the approved cap; saved transaction held without broadcasting.'
+                        from app.services.networks import name
+                        task.failure_reason = f'{name(chain_id)} parent or operator fees exceed the approved cap; saved transaction held without broadcasting.'
                         task.next_attempt_at = now + timedelta(seconds=15)
                         await db.commit()
                         return True
@@ -297,9 +298,9 @@ async def step(session_factory=AsyncSessionLocal, sign=request_signature, *, now
 
 
 def explorer_url(tx_hash, chain_id=None):
-    base = {11155111: 'https://sepolia.etherscan.io/tx/',
-            4663: 'https://robinhoodchain.blockscout.com/tx/', 1: 'https://etherscan.io/tx/',
-            8453: 'https://basescan.org/tx/'}.get(settings.AUTOMATIC_CHAIN_ID if chain_id is None else chain_id)
+    from app.services.networks import NETWORKS
+    network = NETWORKS.get(settings.AUTOMATIC_CHAIN_ID if chain_id is None else chain_id)
+    base = network.explorer if network else None
     return base + tx_hash if base else None
 
 

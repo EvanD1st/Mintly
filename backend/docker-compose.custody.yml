@@ -24,6 +24,12 @@ x-custody: &custody
     ENABLE_ROBINHOOD_AUTOMATIC: ${ENABLE_ROBINHOOD_AUTOMATIC:-false}
     ENABLE_ETHEREUM_AUTOMATIC: ${ENABLE_ETHEREUM_AUTOMATIC:-false}
     ENABLE_BASE_AUTOMATIC: ${ENABLE_BASE_AUTOMATIC:-false}
+    ENABLE_HYPEREVM_AUTOMATIC: ${ENABLE_HYPEREVM_AUTOMATIC:-false}
+    ENABLE_APECHAIN_AUTOMATIC: ${ENABLE_APECHAIN_AUTOMATIC:-false}
+    ENABLE_INK_AUTOMATIC: ${ENABLE_INK_AUTOMATIC:-false}
+    RPC_HYPEREVM: ${RPC_HYPEREVM:-https://rpc.hypurrscan.io}
+    RPC_APECHAIN: ${RPC_APECHAIN:-https://rpc.apechain.com/http}
+    RPC_INK: ${RPC_INK:-https://rpc-gel.inkonchain.com}
     ENABLE_COPY_MINTS: ${ENABLE_COPY_MINTS:-false}
     RPC_ETHEREUM: ${RPC_ETHEREUM:-https://ethereum-rpc.publicnode.com}
     RPC_BASE: ${RPC_BASE:-https://mainnet.base.org}
@@ -48,6 +54,12 @@ services:
       ENABLE_ROBINHOOD_AUTOMATIC: ${ENABLE_ROBINHOOD_AUTOMATIC:-false}
       ENABLE_ETHEREUM_AUTOMATIC: ${ENABLE_ETHEREUM_AUTOMATIC:-false}
       ENABLE_BASE_AUTOMATIC: ${ENABLE_BASE_AUTOMATIC:-false}
+      ENABLE_HYPEREVM_AUTOMATIC: ${ENABLE_HYPEREVM_AUTOMATIC:-false}
+      ENABLE_APECHAIN_AUTOMATIC: ${ENABLE_APECHAIN_AUTOMATIC:-false}
+      ENABLE_INK_AUTOMATIC: ${ENABLE_INK_AUTOMATIC:-false}
+      RPC_HYPEREVM: ${RPC_HYPEREVM:-https://rpc.hypurrscan.io}
+      RPC_APECHAIN: ${RPC_APECHAIN:-https://rpc.apechain.com/http}
+      RPC_INK: ${RPC_INK:-https://rpc-gel.inkonchain.com}
       ENABLE_COPY_MINTS: ${ENABLE_COPY_MINTS:-false}
       RPC_ETHEREUM: ${RPC_ETHEREUM:-https://ethereum-rpc.publicnode.com}
       RPC_BASE: ${RPC_BASE:-https://mainnet.base.org}

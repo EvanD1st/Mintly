@@ -1,17 +1,18 @@
 """Bounded gas quotes. Nitro's total gas already includes parent data fees."""
 from eth_abi import encode, decode
 from eth_utils import keccak, to_checksum_address
+from app.services.networks import fee_model
 
 BASE_ORACLE = to_checksum_address('0x420000000000000000000000000000000000000F')
 
 
 async def additional_fee(web3, chain_id, gas, transaction_size, block='pending'):
-    """Base's parent data and operator fees are outside the L2 gas limit.
+    """Base and Ink parent data and operator fees are outside the L2 gas limit.
 
     Query the versioned oracle rather than hard-code a fork's fee formula.
     The upper bound includes signature bytes and pessimistic compression.
     """
-    if chain_id != 8453:
+    if fee_model(chain_id) != 'op_stack':
         return 0
     total = 0
     for method, value in [('getL1FeeUpperBound(uint256)', transaction_size),
@@ -34,9 +35,10 @@ def number(value):
 
 async def receipt_cost(web3, receipt, chain_id, value=0):
     cost = receipt.gasUsed * receipt.effectiveGasPrice + (value if receipt.status == 1 else 0)
-    if chain_id == 8453:
+    if fee_model(chain_id) == 'op_stack':
         if 'l1Fee' not in receipt:
-            raise ValueError('Base receipt lacks parent fee accounting')
+            from app.services.networks import name
+            raise ValueError(f'{name(chain_id)} receipt lacks parent fee accounting')
         cost += number(receipt['l1Fee'])
         if 'operatorFee' in receipt:
             cost += number(receipt['operatorFee'])
@@ -51,7 +53,7 @@ async def quote_gas(web3, tx, chain_id):
     import asyncio
     price, standard = await asyncio.gather(web3.eth.gas_price, web3.eth.estimate_gas(tx))
     total = standard
-    if chain_id == 4663:
+    if fee_model(chain_id) == 'nitro':
         data = tx['data']
         data = bytes.fromhex(data.removeprefix('0x')) if isinstance(data, str) else bytes(data)
         raw = await web3.eth.call({
