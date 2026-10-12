@@ -628,9 +628,10 @@ async def process_copy_events(db,watch_id,chain):
                 except OpenSeaUnavailable as error:
                     await db.refresh(event);await db.refresh(rule)
                     checked=datetime.now(timezone.utc)
-                    delay=max(30,error.retry_after_seconds or 0,*[e.get('retry_after_seconds') or 0 for e in events])
+                    delay=max(error.retry_after_seconds or 0,*[e.get('retry_after_seconds') or 0 for e in events])
                     if error.mint_reason=='precondition_unknown':delay=max(delay,min(900,60*2**min(attempts-1,4)))
-                    event.next_attempt_at=min(checked+timedelta(seconds=delay),end,aware(rule.expires_at))
+                    from app.services.copy_retry import next_copy_retry
+                    event.next_attempt_at=next_copy_retry(checked,min(end,aware(rule.expires_at)),attempts,event.id,delay)
                     category=error.mint_reason or mint_diagnostics.category(mint_diagnostics.clean_events(events),503,error)
                     event.note=('Waiting: OpenSea rejected a mint precondition; its specific reason is unknown. ' if error.mint_reason=='precondition_unknown' else
                         'OpenSea rate limit is delaying mint instructions. ' if category=='upstream_rate_limited' else
@@ -646,7 +647,8 @@ async def process_copy_events(db,watch_id,chain):
                     if error.status_code==429 and error.detail==LIMIT_NOTE:
                         event.status='skipped';event.note=LIMIT_NOTE;event.next_attempt_at=None;event.last_error_category='daily_limit'
                     elif error.status_code>=500 or error.status_code==429:
-                        event.next_attempt_at=min(datetime.now(timezone.utc)+timedelta(seconds=60),end,aware(rule.expires_at))
+                        from app.services.copy_retry import next_copy_retry
+                        event.next_attempt_at=next_copy_retry(datetime.now(timezone.utc),min(end,aware(rule.expires_at)),attempts,event.id)
                         event.note='Copy checks temporarily unavailable. Mintly will retry within this phase.'
                         event.last_error_category='temporary_checks_unavailable'
                     else:
@@ -657,7 +659,8 @@ async def process_copy_events(db,watch_id,chain):
                     event.next_attempt_at=None;event.last_error_category='validation_rejected'
                 except Exception:
                     await db.refresh(event);await db.refresh(rule)
-                    event.next_attempt_at=min(datetime.now(timezone.utc)+timedelta(seconds=60),end,aware(rule.expires_at))
+                    from app.services.copy_retry import next_copy_retry
+                    event.next_attempt_at=next_copy_retry(datetime.now(timezone.utc),min(end,aware(rule.expires_at)),attempts,event.id)
                     event.note='Copy preparation temporarily unavailable. Mintly will retry within this phase.'
                     event.last_error_category='temporary_preparation_error'
                 event.last_checked_at=datetime.now(timezone.utc)
