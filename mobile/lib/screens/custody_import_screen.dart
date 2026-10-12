@@ -480,7 +480,9 @@ class _CustodyImportScreenState extends ConsumerState<CustodyImportScreen>
                       ],
                     ],
                     Text(
-                      'Authorized budgets: ${_selectedNetworks.map(nativeSymbol).toSet().map((c) => '${_combinedBudget(c)} $c').join(' · ')}',
+                      _selectedNetworks.every((c) => nativeSymbol(c) == 'ETH')
+                          ? 'Combined authorized budget: ${_combinedBudget()} ETH'
+                          : 'Authorized budgets: ${_selectedNetworks.map(nativeSymbol).toSet().map((c) => '${_combinedBudget(c)} $c').join(' · ')}',
                       key: const Key('custody-combined-budget'),
                     ),
                     const SizedBox(height: 16),
