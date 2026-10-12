@@ -12,7 +12,7 @@ Migration `021_opensea_queue` adds leased request waiters. All processes must sh
 the same database and enable `OPENSEA_COORDINATE_REQUESTS`. Every HTTP call obtains
 a shared permit. Mint preparation takes priority over background work; a short
 queue absorbs small waits, while durable task retries handle longer cooldowns.
-Defaults retain conservative headroom: `OPENSEA_GLOBAL_REQUEST_SECONDS=6`,
+Defaults retain conservative headroom: `OPENSEA_GLOBAL_REQUEST_SECONDS=2`,
 `OPENSEA_MINT_REQUEST_SECONDS=20`, `OPENSEA_QUEUE_WAIT_SECONDS=8` and
 `OPENSEA_PREPARATION_MAX_ATTEMPTS=40`. Both per-endpoint and aggregate gates apply.
 Retry-After accepts seconds or HTTP dates. Capacity that exceeds the approval

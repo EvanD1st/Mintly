@@ -1,0 +1,13 @@
+# Artwork cache and request pacing
+
+The shared OpenSea request gap is 2 seconds across processes/accounts, not per user. Mint instructions retain a 20-second endpoint gap, queue wait 8 seconds and maximum preparation attempts 40. Owner fairness, cooldowns and the global execution lock are unchanged. Successful preparation quota is not established by the portal read-request number.
+
+A bounded operator-authorized probe on 12 October 2026 sent 60 read-only mint-builder requests, at least one second apart, over approximately 63 seconds during a quiet production window. Every response was 422 insufficient_funds for Pigeon Crew's paid public stage. No 429 or Retry-After occurred. Headers reported limit 120 and remaining 119 on these rejected requests. This establishes only observed rejection-path traffic; it does not establish a successful mint-instruction quota, sustained capacity or six-user production performance. No transaction was signed or submitted by the probe. The production mint gap remains 20 seconds.
+
+Migration 024_collection_artwork adds public collection metadata keyed by network/contract (or slug when no contract is known). Successful image URLs refresh after 24 hours and can be served for up to seven days during temporary failure. Missing metadata retries after 60 seconds, or 10 minutes when the provider supplies no acceptable image. Failed refresh does not extend stale lifetime. Stale images return immediately with a background refresh using its own database session, and artwork yields to due preparation.
+
+Android thumbnails use the existing Dart runtime's application cache directory without a new native plugin. CDN-only image downloads are singleflight, redirects are rejected, downloads are capped at 4 MB, decoded/resized to 256 pixels wide and stored as PNG. Disk storage is bounded at 50 MB with access-based eviction and seven-day expiry; memory storage is bounded at 8 MB. The OS can evict application cache. Web falls back to memory caching. Cache failures never block minting.
+
+Mint plans, copy events, activity and detail screens share CollectionThumbnail. A stored image displays before metadata refresh. Missing images retry at 60, 120 and then 300 seconds only while the widget is alive. Consent, proof validation, deadlines, spending limits, nonce and signer journal behavior do not depend on thumbnails.
+
+The local concurrent regression creates three real copy approvals across three user accounts and one separately approved automatic mint on a fourth wallet. All prepare through the real execution lock/signer and execute with successful disposable SeaDrop receipts and journal/nonces. Provider calldata is instrumented; this is a correctness regression, not production latency measurement.

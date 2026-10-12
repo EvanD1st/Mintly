@@ -35,10 +35,10 @@ class ApiService extends ChangeNotifier {
   int _sessionRevision = 0;
   final _artwork = <String, ({DateTime expires, Future<String?> value})>{};
 
-  Future<String?> collectionArtwork(String reference) {
+  Future<String?> collectionArtwork(String reference, {bool retryMissing = false}) {
     final now = DateTime.now();
     final cached = _artwork[reference];
-    if (cached != null && cached.expires.isAfter(now)) return cached.value;
+    if (!retryMissing && cached != null && cached.expires.isAfter(now)) return cached.value;
     final value = () async {
       try {
         final data = await _get(

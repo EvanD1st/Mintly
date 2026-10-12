@@ -13,6 +13,84 @@ from app.services import automatic, copy_mints
 from app.services.custody import CustodyVault
 from app.services.seadrop_mint import PARAM_TYPE, ALLOW_SELECTOR, SIGNED_SELECTOR, signed_mint_typed_data
 from app.services.signer.base import SEADROP_V1_ADDRESS
+
+
+async def test_three_user_copies_and_automatic_mint_prepare_concurrently(copying,monkeypatch):
+    """Actual copy approvals/signatures and one automatic plan on local SeaDrop."""
+    import asyncio
+    from datetime import datetime,timezone
+    from app.models import User,Wallet,AutomaticGrant,AutomaticNonce
+    from app.services.custody import private_write
+    from app.config import settings
+    c=copying;lab=c['lab']
+    monkeypatch.setattr(settings,'OPENSEA_GLOBAL_REQUEST_SECONDS',2)
+    monkeypatch.setattr(settings,'OPENSEA_MINT_REQUEST_SECONDS',20)
+    await c['approve']()
+    watches=[c['watch_id']]
+    grants=[lab.grant]
+    accounts=[lab.owner]
+    async with lab.factory() as db:
+        admin=await db.scalar(select(User).where(User.username=='admin'))
+        password_hash=lab.user.password_hash
+        users=[User(id=str(uuid.uuid4()),username=f'copy-concurrent-{i}',password_hash=password_hash,
+            role='member',is_active=True,must_change_password=False) for i in (1,2)]
+        db.add_all(users);await db.flush()
+        for i,user in enumerate([*users,admin],1):
+            owner=Account.create();accounts.append(owner)
+            lab.w.provider.make_request('hardhat_setBalance',[owner.address,hex(10**18)])
+            wallet=Wallet(id=str(uuid.uuid4()),user_id=user.id,address=owner.address,label=f'Wallet {i}',
+                signing_capability='custodial',is_demo=False)
+            key_id,gid=str(uuid.uuid4()),str(uuid.uuid4())
+            private_write(lab.tmp/f'{key_id}.keystore.json',json.dumps(Account.encrypt(owner.key,
+                (lab.tmp/'password').read_text(),kdf='scrypt',iterations=1024)))
+            policy=dict(grant_id=gid,key_id=key_id,user_id=user.id,wallet_id=wallet.id,account=owner.address,
+                chain_id=31337,contracts=[lab.nft.address],mint_kinds=['public'],budget_wei=10**16,
+                max_task_wei=10**15,expires_at=lab.end)
+            private_write(lab.tmp/f'{gid}.policy.json',json.dumps(policy))
+            grant=AutomaticGrant(id=gid,user_id=user.id,wallet_id=wallet.id,chain_id=31337,account=owner.address,
+                context_hash=automatic.digest(policy),scope={k:policy[k] for k in ('contracts','mint_kinds','max_task_wei')},
+                budget_wei=10**16,expires_at=datetime.fromtimestamp(lab.end,timezone.utc),status='enabled')
+            db.add(wallet);await db.flush();db.add(grant);grants.append(grant)
+        await db.commit()
+    for user,grant in zip(users,grants[1:3]):
+        login=await lab.client.post('/api/auth/login',json={'username':user.username,'password':'Member test password 123'})
+        headers={'Authorization':'Bearer '+login.json()['token']}
+        follow=await lab.client.post('/api/copy-mints/watches',headers=headers,json={
+            'address':c['source'].address,'label':'Shared source','chains':[31337]})
+        assert follow.status_code==200,follow.text
+        wid=follow.json()['id'];watches.append(wid)
+        approved=await lab.client.post(f'/api/copy-mints/watches/{wid}/rules',headers=headers,
+            json={**c['request'],'request_id':str(uuid.uuid4()),'grant_id':grant.id})
+        assert approved.status_code==200,approved.text
+    login=await lab.client.post('/api/auth/login',json={'username':'admin','password':'Admin test password 123'})
+    plan=await lab.client.post('/api/tasks/arm',headers={'Authorization':'Bearer '+login.json()['token']},
+        json={**lab.request,'wallet_id':grants[3].wallet_id,'grant_id':grants[3].id})
+    assert plan.status_code==200,plan.text
+    await c['mint'](1)
+    for wid in watches:
+        async with lab.factory() as db:
+            await copy_mints.scan_watch(db,await db.get(CopyWatch,wid),31337)
+    async with lab.factory() as db:
+        events=(await db.scalars(select(CopyEvent).where(CopyEvent.watch_id.in_(watches)))).all()
+        assert len(events)==3 and all(e.task_id for e in events),[(e.note,e.status) for e in events]
+        tids=[e.task_id for e in events]+[plan.json()['id']]
+        deadlines={t.id:t.expires_at_utc for t in (await db.scalars(select(MintTask).where(MintTask.id.in_(tids)))).all()}
+    results=await asyncio.gather(*(lab.sign(tid) for tid in tids))
+    assert all(r['status']=='prepared' for r in results)
+    async with lab.factory() as db:
+        tasks=(await db.scalars(select(MintTask).where(MintTask.id.in_(tids)))).all()
+        assert sum(t.copy_rule_id is not None for t in tasks)==3
+        assert len({t.wallet_id for t in tasks})==4
+        assert len((await db.scalars(select(AutomaticNonce))).all())==4
+        for t in tasks:
+            assert t.assigned_nonce==0 and t.expires_at_utc==deadlines[t.id]
+            receipt=lab.w.eth.wait_for_transaction_receipt(lab.w.eth.send_raw_transaction(t.signed_tx_raw))
+            assert receipt.status==1
+    journal=CustodyVault().journal()
+    try:
+        assert journal.execute('SELECT count(*) FROM signed').fetchone()[0]==4
+        assert journal.execute('SELECT count(*) FROM copy_signed').fetchone()[0]==3
+    finally:journal.close()
 from test_automatic_evm import lab
 from test_copy_mints import copying
 

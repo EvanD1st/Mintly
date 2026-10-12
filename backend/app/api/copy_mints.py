@@ -150,7 +150,7 @@ async def check_results(user=Depends(get_current_user),db=Depends(get_db),limit:
     rows=(await db.execute(select(CopyCheckResult,CopyEvent,CopyWatch).join(CopyEvent,CopyEvent.id==CopyCheckResult.event_id)
         .join(CopyWatch,CopyWatch.id==CopyCheckResult.watch_id).where(CopyCheckResult.user_id==user.id,
             CopyEvent.user_id==user.id,CopyWatch.user_id==user.id).order_by(CopyCheckResult.created_at.desc()).limit(limit))).all()
-    return {'results':[{'id':r.id,'watch_id':w.id,'watch_label':w.label,'wallet_id':r.wallet_id,'observation':e.observation,
+    return {'results':[{'id':r.id,'event_id':e.id,'watch_id':w.id,'watch_label':w.label,'wallet_id':r.wallet_id,'observation':e.observation,
         'status':r.status,'note':r.note,'quantity':r.quantity,'estimated_fee_wei':str(r.estimated_fee_wei) if r.estimated_fee_wei is not None else None,
         'checked_at':r.created_at,'transaction_sent':False} for r,e,w in rows]}
 

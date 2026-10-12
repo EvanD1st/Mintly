@@ -7,6 +7,7 @@ import '../services/external_url.dart';
 import '../models/drop_model.dart';
 import '../state/app_state.dart';
 import 'automatic_review_screen.dart';
+import '../widgets/collection_thumbnail.dart';
 
 class DropDetailScreen extends ConsumerWidget {
   final DropModel drop;
@@ -25,7 +26,8 @@ class DropDetailScreen extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('Drop details')),
       body: ListView(padding: const EdgeInsets.all(20), children: [
-        Text(drop.name, style: Theme.of(context).textTheme.headlineMedium),
+        Row(children:[CollectionThumbnail(name:drop.name,reference:'drop:${drop.id}',size:72),
+          const SizedBox(width:12),Expanded(child:Text(drop.name, style: Theme.of(context).textTheme.headlineMedium))]),
         const SizedBox(height: 6),
         Text('${drop.chain} · ${drop.siteLabel}', style: TextStyle(color: muted)),
         const SizedBox(height: 16),

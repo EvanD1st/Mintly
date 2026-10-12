@@ -3,10 +3,12 @@ import time
 import re
 from datetime import datetime, timezone, timedelta
 from urllib.parse import urlsplit
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy import select
 from app.api.deps import get_current_user, get_db
-from app.models import MintPlan, MintTask, Wallet, Drop, CopyEvent, OpenSeaRequestWaiter
+from app.models import MintPlan, MintTask, Wallet, Drop, CopyEvent, OpenSeaRequestWaiter, CollectionArtwork
+from app.database import AsyncSessionLocal
+from app.services.mint_plans import aware
 from app.config import settings
 from app.services.opensea import OpenSeaClient, OpenSeaUnavailable, collection_slug, singleflight, CHAINS
 
@@ -30,20 +32,33 @@ def image_url(value):
     return None
 
 
-async def collection_image(slug=None, *, chain_id=None, contract=None, allow_fetch=True):
-    cache_key = slug or (chain_id, contract)
+def artwork_key(slug, chain_id, contract):
+    return f'contract:{chain_id}:{contract.lower()}' if chain_id and contract else f'slug:{slug}'
+
+
+async def collection_image(slug=None, *, chain_id=None, contract=None, allow_fetch=True, db=None):
+    cache_key = artwork_key(slug, chain_id, contract)
+    persisted = await db.get(CollectionArtwork, cache_key) if db else None
+    now = datetime.now(timezone.utc)
+    old = image_url(persisted.image_url) if persisted and aware(persisted.stale_until) > now else None
+    if persisted and aware(persisted.refresh_after) > now:
+        return old
+    if not allow_fetch and old:
+        return old
+    if db:
+        await db.commit()  # No transaction or execution lock during provider IO.
     async def fetch():
         cached = _cache.get(cache_key)
         if cached and cached[0] > time.monotonic():
             return cached[1]
         if not allow_fetch:
-            return None
-        result = None
+            return old
+        result = old
         ttl = 60
+        resolved = slug or (persisted.collection_slug if persisted else None)
         try:
             client = OpenSeaClient()
             key = await client._key()
-            resolved = slug
             if resolved is None:
                 chain = next((name for name, spec in CHAINS.items() if spec[0] == chain_id), None)
                 if not chain or not re.fullmatch(r'0x[a-fA-F0-9]{40}', contract or ''):
@@ -56,15 +71,38 @@ async def collection_image(slug=None, *, chain_id=None, contract=None, allow_fet
                 return None
             status, data = await client._request('GET', f'/collections/{resolved}', key=key)
             if status == 200 and data.get('collection') == resolved:
-                result = image_url(data.get('image_url'))
-                ttl = 86400 if result else 600
+                supplied = image_url(data.get('image_url'))
+                result = supplied or old
+                ttl = 86400 if supplied else 600
         except OpenSeaUnavailable:
             pass
         _cache[cache_key] = (time.monotonic() + ttl, result)
+        if db:
+            from sqlalchemy.dialects.postgresql import insert as pg_insert
+            from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+            insert = pg_insert if db.bind.dialect.name == 'postgresql' else sqlite_insert
+            checked = datetime.now(timezone.utc)
+            values = dict(key=cache_key, collection_slug=resolved, image_url=result, refresh_after=checked+timedelta(seconds=ttl),
+                stale_until=checked+timedelta(days=7) if ttl==86400 else
+                    (persisted.stale_until if persisted else checked+timedelta(seconds=ttl)),
+                created_at=checked, updated_at=checked)
+            await db.execute(insert(CollectionArtwork).values(**values).on_conflict_do_update(
+                index_elements=['key'], set_={k:v for k,v in values.items() if k not in ('key','created_at')}))
+            await db.commit()
         while len(_cache) > 512:
             _cache.pop(next(iter(_cache)))
         return result
     return await singleflight(('artwork', cache_key), fetch)
+
+
+async def refresh_image(slug, chain_id, contract):
+    # Background work uses its own session; it never inherits a request session.
+    async with AsyncSessionLocal() as db:
+        try:
+            await collection_image(slug, chain_id=chain_id, contract=contract,
+                allow_fetch=not await minting_busy(db), db=db)
+        except Exception:
+            await db.rollback()  # Optional artwork cannot fail a screen request.
 
 
 async def minting_busy(db):
@@ -83,7 +121,7 @@ async def minting_busy(db):
 
 
 @router.get('')
-async def artwork(reference: str = Query(min_length=3, max_length=150),
+async def artwork(background_tasks: BackgroundTasks, reference: str = Query(min_length=3, max_length=150),
                   user=Depends(get_current_user), db=Depends(get_db)):
     kind, _, record_id = reference.partition(':')
     slug = None
@@ -93,6 +131,7 @@ async def artwork(reference: str = Query(min_length=3, max_length=150),
         if not plan or plan.user_id != user.id:
             raise HTTPException(404, 'Collection not found.')
         slug = plan.collection_slug
+        chain_id, contract = plan.chain_id, plan.contract_address
     elif kind == 'copy':
         event = await db.get(CopyEvent, record_id)
         if not event or event.user_id != user.id:
@@ -108,11 +147,18 @@ async def artwork(reference: str = Query(min_length=3, max_length=150),
             drop = await get_drop_detail(record_id, db)
         if not drop:
             raise HTTPException(404, 'Collection not found.')
+        chain_id, contract = drop.chain_id, drop.contract_address
         try:
             slug = collection_slug(drop.mint_page_url)
         except OpenSeaUnavailable:
             chain_id, contract = drop.chain_id, drop.contract_address
     else:
         raise HTTPException(422, 'Invalid collection reference.')
+    cached = await db.get(CollectionArtwork, artwork_key(slug, chain_id, contract))
+    now = datetime.now(timezone.utc)
+    if cached and cached.image_url and aware(cached.stale_until)>now:
+        if aware(cached.refresh_after)<=now:
+            background_tasks.add_task(refresh_image, slug, chain_id, contract)
+        return {'image_url': image_url(cached.image_url)}
     return {'image_url': await collection_image(slug, chain_id=chain_id, contract=contract,
-        allow_fetch=not await minting_busy(db))}
+        allow_fetch=not await minting_busy(db), db=db)}

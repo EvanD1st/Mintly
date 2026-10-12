@@ -10,6 +10,7 @@ import '../widgets/automation_control.dart';
 import 'automatic_review_screen.dart';
 import 'history_screen.dart';
 import 'mint_stages_screen.dart';
+import '../widgets/collection_thumbnail.dart';
 
 class SavedPlanScreen extends ConsumerStatefulWidget {
   final MintPlanModel plan;
@@ -43,7 +44,8 @@ class _SavedPlanState extends ConsumerState<SavedPlanScreen> {
   @override
   Widget build(BuildContext context) => Scaffold(appBar:AppBar(title:const Text('Saved mint plan')),
     body:ListView(padding:const EdgeInsets.all(20),children:[
-      Text(_plan.collectionName,style:Theme.of(context).textTheme.headlineSmall),
+      Row(children:[CollectionThumbnail(name:_plan.collectionName,reference:'plan:${_plan.id}'),
+        const SizedBox(width:12),Expanded(child:Text(_plan.collectionName,style:Theme.of(context).textTheme.headlineSmall))]),
       Text('${_plan.quantity} NFT(s) · ${_plan.chain}'),
       if (_plan.startsAt != null) Text('Opens ${WatTime.label(_plan.startsAt!)}'),
       Text(_taskStatus == null ? _plan.statusNote : 'Automatic mint: $_taskStatus. Follow its progress in Activity.'),

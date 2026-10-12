@@ -4,6 +4,7 @@ import '../models/mint_plan_model.dart';
 import '../state/app_state.dart';
 import '../services/wat_time.dart';
 import 'opensea_access_screen.dart';
+import '../widgets/collection_thumbnail.dart';
 
 class MintStagesScreen extends ConsumerStatefulWidget {
   final MintPlanModel plan;
@@ -49,7 +50,8 @@ class _StagesState extends ConsumerState<MintStagesScreen> {
   @override
   Widget build(BuildContext context)=>Scaffold(appBar:AppBar(title:const Text('Choose mint phase')),
     body:ListView(padding:const EdgeInsets.all(20),children:[
-      Text(widget.plan.collectionName,style:Theme.of(context).textTheme.headlineSmall),
+      Row(children:[CollectionThumbnail(name:widget.plan.collectionName,reference:'plan:${widget.plan.id}'),
+        const SizedBox(width:12),Expanded(child:Text(widget.plan.collectionName,style:Theme.of(context).textTheme.headlineSmall))]),
       const Text('Choose the phase and quantity you want. Mintly will not switch phases automatically.'),
       if(_busy) const LinearProgressIndicator(),
       if(_data?['note']!=null) Text('${_data!['note']}'),

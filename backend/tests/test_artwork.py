@@ -9,6 +9,7 @@ from app.main import app
 from app.models import User, Wallet, MintPlan, OpenSeaRequestWaiter
 from datetime import datetime, timezone, timedelta
 from app.services.opensea import OpenSeaClient, OpenSeaUnavailable
+from app.models import CollectionArtwork
 
 
 @pytest.fixture(autouse=True)
@@ -97,3 +98,62 @@ async def test_artwork_requires_login_and_owns_private_plan(test_db, monkeypatch
             assert (await client.get('/api/artwork?reference=https://evil.test')).status_code == 422
     finally:
         app.dependency_overrides.pop(get_db, None)
+
+
+async def test_persistent_cache_survives_memory_restart_and_busy_preparation(test_db, monkeypatch):
+    monkeypatch.setattr(OpenSeaClient, '_key', AsyncMock(return_value='server-only-test-key'))
+    fetch = AsyncMock(return_value=(200, {'collection':'example','image_url':'https://i.seadn.io/persist.png'}))
+    monkeypatch.setattr(OpenSeaClient, '_request', fetch)
+    expected = await artwork.collection_image('example',chain_id=8453,contract='0x'+'a'*40,db=test_db)
+    artwork._cache.clear()
+    assert await artwork.collection_image('example',chain_id=8453,contract='0x'+'A'*40,
+        db=test_db,allow_fetch=False)==expected
+    fetch.assert_awaited_once()
+    assert await test_db.get(CollectionArtwork,'contract:8453:0x'+'a'*40)
+
+
+async def test_failed_refresh_keeps_previous_image_without_extending_stale_deadline(test_db, monkeypatch):
+    now=datetime.now(timezone.utc)
+    deadline=now+timedelta(days=1)
+    test_db.add(CollectionArtwork(key='slug:example',image_url='https://i.seadn.io/old.png',
+        refresh_after=now-timedelta(seconds=1),stale_until=deadline))
+    await test_db.commit()
+    monkeypatch.setattr(OpenSeaClient,'_key',AsyncMock(return_value='server-only-test-key'))
+    monkeypatch.setattr(OpenSeaClient,'_request',AsyncMock(side_effect=OpenSeaUnavailable('cooldown')))
+    assert await artwork.collection_image('example',db=test_db)=='https://i.seadn.io/old.png'
+    row=await test_db.get(CollectionArtwork,'slug:example',populate_existing=True)
+    from app.services.mint_plans import aware
+    assert aware(row.stale_until)==deadline
+
+
+async def test_two_second_shared_capacity_preserves_twenty_second_mint_pacing(test_db,monkeypatch):
+    from app.services import opensea_limits as limits
+    from app.config import settings
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    monkeypatch.setattr(settings,'OPENSEA_COORDINATE_REQUESTS',True)
+    monkeypatch.setattr(settings,'OPENSEA_GLOBAL_REQUEST_SECONDS',2)
+    monkeypatch.setattr(settings,'OPENSEA_MINT_REQUEST_SECONDS',20)
+    factory=async_sessionmaker(test_db.bind,expire_on_commit=False)
+    now=datetime.now(timezone.utc)
+    assert await limits.acquire('/drops/a/mint',factory=factory,now=now)==(0,None)
+    assert await limits.acquire('/collections/a',factory=factory,now=now)==(2,'paced')
+    assert await limits.acquire('/collections/a',factory=factory,now=now+timedelta(seconds=2))==(0,None)
+    assert await limits.acquire('/drops/b/mint',factory=factory,now=now+timedelta(seconds=4))==(16,'paced')
+
+
+async def test_resolved_contract_survives_deferred_collection_lookup(test_db,monkeypatch):
+    contract='0x'+'b'*40
+    monkeypatch.setattr(OpenSeaClient,'_key',AsyncMock(return_value='server-only-test-key'))
+    request=AsyncMock(side_effect=[
+        (200,{'chain':'base','address':contract,'collection':'example'}),
+        OpenSeaUnavailable('Shared queue'),
+        (200,{'collection':'example','image_url':'https://i.seadn.io/resumed.png'})])
+    monkeypatch.setattr(OpenSeaClient,'_request',request)
+    assert await artwork.collection_image(chain_id=8453,contract=contract,db=test_db) is None
+    row=await test_db.get(CollectionArtwork,artwork.artwork_key(None,8453,contract))
+    assert row.collection_slug=='example'
+    row.refresh_after=datetime.now(timezone.utc)-timedelta(seconds=1)
+    await test_db.commit();artwork._cache.clear()
+    assert await artwork.collection_image(chain_id=8453,contract=contract,db=test_db)=='https://i.seadn.io/resumed.png'
+    assert [c.args[1] for c in request.await_args_list]==[
+        f'/chain/base/contract/{contract}','/collections/example','/collections/example']
