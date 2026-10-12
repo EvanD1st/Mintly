@@ -628,7 +628,7 @@ async def process_copy_events(db,watch_id,chain):
                 except OpenSeaUnavailable as error:
                     await db.refresh(event);await db.refresh(rule)
                     checked=datetime.now(timezone.utc)
-                    delay=max(error.retry_after_seconds or 0,*[e.get('retry_after_seconds') or 0 for e in events])
+                    delay=max([error.retry_after_seconds or 0]+[e.get('retry_after_seconds') or 0 for e in events])
                     if error.mint_reason=='precondition_unknown':delay=max(delay,min(900,60*2**min(attempts-1,4)))
                     from app.services.copy_retry import next_copy_retry
                     event.next_attempt_at=next_copy_retry(checked,min(end,aware(rule.expires_at)),attempts,event.id,delay)
