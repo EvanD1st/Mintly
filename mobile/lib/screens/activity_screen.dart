@@ -1,3 +1,4 @@
+import '../theme/compatible_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../theme/colors.dart';
@@ -49,15 +50,15 @@ class ActivityScreen extends ConsumerWidget {
 
         // Activity Items
         ...state.activities.map((ev) {
-          IconData icon = Icons.notifications_none;
+          IconData icon = MintlyIcons.notifications;
           if (ev.iconName == 'shield-check') {
-            icon = Icons.verified_user_outlined;
+            icon = MintlyIcons.verifiedUser;
           } else if (ev.iconName == 'download') {
-            icon = Icons.download_outlined;
+            icon = MintlyIcons.download;
           } else if (ev.iconName == 'timer') {
             icon = Icons.timer_outlined;
           } else if (ev.iconName == 'circle-pause') {
-            icon = Icons.pause_circle_outline;
+            icon = MintlyIcons.pauseCircle;
           }
 
           return Container(
@@ -74,9 +75,7 @@ class ActivityScreen extends ConsumerWidget {
                     color: soft,
                     shape: BoxShape.circle,
                   ),
-                  child: Center(
-                    child: Icon(icon, size: 18, color: green),
-                  ),
+                  child: Center(child: Icon(icon, size: 18, color: green)),
                 ),
                 const SizedBox(width: 14),
                 Expanded(
@@ -85,7 +84,11 @@ class ActivityScreen extends ConsumerWidget {
                     children: [
                       Text(
                         ev.label,
-                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: ink),
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: ink,
+                        ),
                       ),
                       const SizedBox(height: 2),
                       Text(

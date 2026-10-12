@@ -314,7 +314,7 @@ class _HistoryState extends ConsumerState<HistoryScreen> {
               ),
             ),
           ),
-        ExpansionTile(
+        DisclosureSection(
           title: const Text('Approval & recovery history'),
           children: [_recordAudit(record)],
         ),
@@ -473,7 +473,8 @@ class _HistoryState extends ConsumerState<HistoryScreen> {
                 ('copy_events', 'Copies'),
                 ('activity', 'Updates'),
               ])
-                ChoiceChip(
+                FilterChip(
+                  deleteIcon: const SizedBox.shrink(),
                   label: Text(item.$2),
                   selected: _section == item.$1,
                   onSelected: (_) {

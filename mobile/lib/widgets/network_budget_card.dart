@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../state/app_state.dart';
 import '../theme/compatible_icons.dart';
+import 'refresh_glyph.dart';
 
 String formatNative(dynamic raw) {
   final value = BigInt.tryParse('$raw') ?? BigInt.zero;
@@ -80,6 +81,7 @@ class NetworkBudgetCard extends ConsumerStatefulWidget {
 
 class _NetworkBudgetCardState extends ConsumerState<NetworkBudgetCard> {
   int? _chain;
+  final _networkMenuKey = GlobalKey<PopupMenuButtonState<int>>();
   @override
   Widget build(BuildContext context) => Card(
     margin: const EdgeInsets.only(bottom: 18),
@@ -109,7 +111,7 @@ class _NetworkBudgetCardState extends ConsumerState<NetworkBudgetCard> {
                   IconButton(
                     tooltip: 'Refresh budget',
                     onPressed: () => ref.invalidate(networkBudgetsProvider),
-                    icon: const Icon(Icons.refresh, size: 19),
+                    icon: const RefreshGlyph(size: 19),
                   ),
                 ],
               ),
@@ -120,45 +122,50 @@ class _NetworkBudgetCardState extends ConsumerState<NetworkBudgetCard> {
               else if (selected == null)
                 const Text('No active spending allowance')
               else ...[
-                PopupMenuButton<int>(
-                  tooltip: 'Available budget by network',
-                  onSelected: (value) => setState(() => _chain = value),
-                  itemBuilder: (_) => entries
-                      .map(
-                        (e) => PopupMenuItem(
-                          value: e.chainId,
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(e.name),
-                              Text(
-                                'ETH ${formatNative(e.available)}',
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      )
-                      .toList(),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                    child: Row(
-                      children: [
-                        Expanded(
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: InkWell(
+                          onTap: () =>
+                              _networkMenuKey.currentState?.showButtonMenu(),
                           child: Text(
                             'ETH ${formatNative(selected.available)}',
                             style: Theme.of(context).textTheme.headlineSmall
                                 ?.copyWith(fontWeight: FontWeight.w700),
                           ),
                         ),
-                        const RotatedBox(
+                      ),
+                      PopupMenuButton<int>(
+                        key: _networkMenuKey,
+                        tooltip: 'Available budget by network',
+                        icon: const RotatedBox(
                           quarterTurns: 1,
                           child: Icon(MintlyIcons.chevronRight),
                         ),
-                      ],
-                    ),
+                        onSelected: (value) => setState(() => _chain = value),
+                        itemBuilder: (_) => entries
+                            .map(
+                              (e) => PopupMenuItem(
+                                value: e.chainId,
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(e.name),
+                                    Text(
+                                      'ETH ${formatNative(e.available)}',
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            )
+                            .toList(),
+                      ),
+                    ],
                   ),
                 ),
                 Text(

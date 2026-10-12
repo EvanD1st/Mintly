@@ -79,7 +79,8 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
                 ('review', 'Saved'),
                 ('tasks', 'Armed / active'),
               ])
-                ChoiceChip(
+                FilterChip(
+                  deleteIcon: const SizedBox.shrink(),
                   label: Text(item.$2),
                   selected: _filter == item.$1,
                   onSelected: (_) => setState(() => _filter = item.$1),
@@ -138,7 +139,7 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
               ),
             ),
           if (state.mintPermissions.isNotEmpty)
-            ExpansionTile(
+            DisclosureSection(
               title: const Text('Wallet permissions'),
               subtitle: const Text('Manage approvals and revocations'),
               children: [
@@ -663,7 +664,7 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
               style: TextStyle(fontSize: 12),
             ),
             const SizedBox(height: 14),
-            ExpansionTile(
+            DisclosureSection(
               tilePadding: EdgeInsets.zero,
               title: const Text('Collection & validation details'),
               children: [
