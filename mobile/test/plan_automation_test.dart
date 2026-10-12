@@ -76,6 +76,9 @@ void main() {
     expect(tester.widget<TextField>(find.byType(TextField).first).controller!.text, '2');
     await tester.pageBack();
     await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Edit plan'));
+    await tester.tap(find.text('Edit plan'));
+    await tester.pumpAndSettle();
     await tester.ensureVisible(find.text('Remove'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Remove'));

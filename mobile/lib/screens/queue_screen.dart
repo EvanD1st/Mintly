@@ -16,6 +16,7 @@ import 'mint_stages_screen.dart';
 import '../models/task_model.dart';
 import '../widgets/screen_components.dart';
 import '../widgets/collection_thumbnail.dart';
+import '../widgets/main_navigation.dart';
 
 class QueueScreen extends ConsumerStatefulWidget {
   const QueueScreen({super.key});
@@ -68,26 +69,34 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
           const ScreenHeading(
             'Mint plans',
             'Review saved plans. Track armed mints.',
+            action: AutomationControl(toolbar: true),
           ),
-          const AutomationControl(compact: true),
           Wrap(
             spacing: 8,
             runSpacing: 8,
             children: [
               for (final item in [
                 ('all', 'All'),
-                ('review', 'Saved'),
-                ('tasks', 'Armed / active'),
+                ('review', 'Needs approval'),
+                ('tasks', 'Armed'),
               ])
                 FilterChip(
                   deleteIcon: const SizedBox.shrink(),
                   label: Text(item.$2),
                   selected: _filter == item.$1,
+                  showCheckmark: false,
+                  selectedColor: scheme.primary,
+                  labelStyle: TextStyle(
+                    fontSize: 12,
+                    color: _filter == item.$1
+                        ? scheme.onPrimary
+                        : scheme.onSurface,
+                  ),
                   onSelected: (_) => setState(() => _filter = item.$1),
                 ),
             ],
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 12),
           if (state.isLoading) const LinearProgressIndicator(),
           if (state.error != null)
             Card(
@@ -99,19 +108,17 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
               ),
             ),
           if (tasks.isNotEmpty) ...[
-            _section('Automatic mints', tasks.length),
+            _section(
+              tasks.every((t) => activeStatuses.contains(t.status))
+                  ? 'Armed mints'
+                  : 'Automatic mints',
+              tasks.length,
+            ),
             ...tasks.map((task) => _taskCard(context, notifier, task)),
             const SizedBox(height: 12),
           ],
           if (plans.isNotEmpty) ...[
-            _section('Saved plans', plans.length),
-            const Padding(
-              padding: EdgeInsets.only(bottom: 12),
-              child: Text(
-                'Review and approve a plan before automatic execution.',
-                style: TextStyle(fontSize: 12),
-              ),
-            ),
+            _section('Needs approval', plans.length),
             ...plans.map((plan) => _planCard(context, notifier, plan)),
           ],
           if (plans.isEmpty &&
@@ -238,13 +245,13 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
   }
 
   Widget _section(String title, int count) => Padding(
-    padding: const EdgeInsets.only(bottom: 12),
+    padding: const EdgeInsets.only(bottom: 8),
     child: Row(
       children: [
         Flexible(
           child: Text(
             title,
-            style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w700),
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
           ),
         ),
         const SizedBox(width: 10),
@@ -261,6 +268,7 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
     MintlyNotifier notifier,
     MintPlanModel plan,
   ) {
+    final origin = context;
     void details() {
       final colors = Theme.of(context).colorScheme;
       Navigator.push(
@@ -277,6 +285,7 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
                   plan;
               return Scaffold(
                 appBar: AppBar(title: const Text('Plan details')),
+                bottomNavigationBar: detailsNavigation(origin, 1),
                 body: ListView(
                   padding: const EdgeInsets.all(20),
                   children: [
@@ -302,59 +311,68 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
     final starts = plan.startsAt == null
         ? 'Time unavailable'
         : '${DateFormat('d MMM, HH:mm').format(plan.startsAt!.toUtc().add(const Duration(hours: 1)))} WAT';
-    return Card(
-      margin: const EdgeInsets.only(bottom: 16),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              children: [
-                CollectionThumbnail(
-                  name: plan.collectionName,
-                  reference: 'plan:${plan.id}',
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        plan.collectionName,
-                        style: const TextStyle(
-                          fontSize: 17,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(plan.chain),
-                    ],
-                  ),
-                ),
-              ],
+    return AppPanel(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          CollectionHeader(
+            name: plan.collectionName,
+            network: plan.chain,
+            status: plan.status,
+            artwork: CollectionThumbnail(
+              name: plan.collectionName,
+              reference: 'plan:${plan.id}',
+              size: 56,
             ),
-            const SizedBox(height: 12),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: StatusBadge(plan.status),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              const AppGlyph('clock', size: 15),
+              const SizedBox(width: 7),
+              const Text('Opens', style: TextStyle(fontSize: 11)),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  starts,
+                  style: const TextStyle(fontSize: 12),
+                  textAlign: TextAlign.right,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          FactGrid([
+            CompactFact('Phase', plan.stageName ?? 'Not selected', 'phase'),
+            CompactFact(
+              'Quantity',
+              '${plan.quantity} NFT${plan.quantity == 1 ? '' : 's'}',
+              'quantity',
             ),
-            const SizedBox(height: 8),
-            DetailRow('Mint time', starts),
-            DetailRow('Phase', plan.stageName ?? 'Not selected'),
-            DetailRow('Quantity', '${plan.quantity} NFTs'),
-            DetailRow(
+            CompactFact(
               'Mint price',
               plan.priceEth == null
                   ? 'Unverified'
                   : double.tryParse(plan.priceEth!) == 0
                   ? 'Free'
                   : '${plan.priceEth} ETH each',
+              'wallet',
             ),
-            const SizedBox(height: 10),
-            FilledButton(onPressed: details, child: const Text('Review mint')),
-          ],
-        ),
+          ]),
+          const SizedBox(height: 9),
+          FilledButton(
+            onPressed: details,
+            style: FilledButton.styleFrom(
+              minimumSize: const Size.fromHeight(38),
+            ),
+            child: const Text('Review mint'),
+          ),
+          const SizedBox(height: 5),
+          const Text(
+            'Saved plans need approval before automatic execution.',
+            style: TextStyle(fontSize: 10, height: 1.2),
+          ),
+        ],
       ),
     );
   }
@@ -364,148 +382,135 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
     MintlyNotifier notifier,
     MintTaskModel task,
   ) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 16),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              children: [
-                CollectionThumbnail(
-                  name: task.dropName,
-                  reference: 'drop:${task.dropId}',
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        task.dropName,
-                        style: const TextStyle(
-                          fontSize: 17,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      Text(task.chain),
-                    ],
-                  ),
-                ),
-              ],
+    final reference = task.planId != null
+        ? 'plan:${task.planId}'
+        : 'drop:${task.dropId}';
+    return AppPanel(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          CollectionHeader(
+            name: task.dropName,
+            network: task.chain,
+            status: task.status,
+            artwork: CollectionThumbnail(
+              name: task.dropName,
+              reference: reference,
+              size: 56,
             ),
-            const SizedBox(height: 12),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: StatusBadge(task.status),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              const AppGlyph('clock', size: 15),
+              const SizedBox(width: 7),
+              const Text('Mint time', style: TextStyle(fontSize: 11)),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  task.timeWatLabel,
+                  style: const TextStyle(fontSize: 12),
+                  textAlign: TextAlign.right,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          FactGrid([
+            CompactFact('Phase', task.stageName, 'phase'),
+            CompactFact(
+              'Quantity',
+              '${task.quantity} NFT${task.quantity == 1 ? '' : 's'}',
+              'quantity',
             ),
-            DetailRow('Mint time', task.timeWatLabel),
-            DetailRow('Phase', task.stageName),
-            DetailRow('Quantity', '${task.quantity} NFTs'),
-            DetailRow(
+            CompactFact(
               'Mint price',
               double.tryParse(task.unitPriceEth) == 0
                   ? 'Free'
                   : '${task.unitPriceEth} ETH each',
+              'wallet',
             ),
-            DetailRow('Gas cap', '${task.feeCapEth} ETH'),
-            if (task.failureReason != null)
-              Text(
-                task.failureReason!,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-            OutlinedButton(
-              onPressed: () => Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (detailContext) => Scaffold(
-                    appBar: AppBar(title: const Text('Mint details')),
-                    body: ListView(
-                      padding: const EdgeInsets.all(20),
-                      children: [
-                        Text(
-                          task.dropName,
-                          style: Theme.of(context).textTheme.headlineSmall,
+            CompactFact('Gas cap', '${task.feeCapEth} ETH', 'gas'),
+          ]),
+          const SizedBox(height: 7),
+          if (task.status == 'armed')
+            const Text(
+              'Runs automatically at the selected time.',
+              style: TextStyle(fontSize: 10),
+            ),
+          if (task.failureReason != null)
+            Text(
+              task.failureReason!,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 11),
+            ),
+          const SizedBox(height: 7),
+          OutlinedButton(
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (detailContext) => Scaffold(
+                  appBar: AppBar(title: const Text('Mint details')),
+                  bottomNavigationBar: detailsNavigation(context, 1),
+                  body: ListView(
+                    padding: const EdgeInsets.all(20),
+                    children: [
+                      CollectionHeader(
+                        name: task.dropName,
+                        network: task.chain,
+                        status: task.status,
+                        artwork: CollectionThumbnail(
+                          name: task.dropName,
+                          reference: reference,
+                          size: 72,
                         ),
-                        DetailRow(
-                          'Approved total cap',
-                          '${task.totalCapEth} ETH',
-                        ),
-                        if (task.progress != null)
-                          MintProgress(progress: task.progress!)
-                        else
-                          Text('Status: ${task.status}'),
-                        if (task.failureReason != null)
-                          Text(task.failureReason!),
-                        if (task.transactionHash != null)
-                          SelectableText(task.transactionHash!),
-                        if (task.explorerUrl != null)
-                          TextButton(
-                            onPressed: () async {
-                              final uri = Uri.tryParse(task.explorerUrl!);
-                              if (uri != null &&
-                                  uri.scheme == 'https' &&
-                                  uri.host == 'sepolia.etherscan.io') {
-                                await openExternalUrl(context, uri);
-                              }
-                            },
-                            child: const Text('View transaction'),
-                          ),
-                        if ([
-                          'prepared',
-                          'submitted',
-                          'uncertain',
-                        ].contains(task.status))
-                          const Text(
-                            'Transaction may be in flight. A database cancellation cannot undo it.',
-                          ),
-                        if (['armed', 'preparing'].contains(task.status))
-                          OutlinedButton(
-                            onPressed: () async {
-                              try {
-                                await notifier.disarmTask(task.id);
-                                if (detailContext.mounted) {
-                                  Navigator.pop(detailContext);
-                                }
-                                if (context.mounted) {
-                                  MintlyNotice.show(
-                                    context,
-                                    const SnackBar(
-                                      content: Text('Task disarmed.'),
-                                    ),
-                                  );
-                                }
-                              } catch (error) {
-                                if (context.mounted) {
-                                  MintlyNotice.show(
-                                    context,
-                                    SnackBar(content: Text('$error')),
-                                  );
-                                }
-                              }
-                            },
-                            child: const Text('Disarm task'),
-                          ),
+                      ),
+                      const SizedBox(height: 12),
+                      DetailRow(
+                        'Approved total cap',
+                        '${task.totalCapEth} ETH',
+                      ),
+                      if (task.progress != null)
+                        MintProgress(progress: task.progress!)
+                      else
+                        Text('Status: ${task.status}'),
+                      if (task.failureReason != null) Text(task.failureReason!),
+                      if (task.transactionHash != null)
+                        SelectableText(task.transactionHash!),
+                      if (task.explorerUrl != null)
                         TextButton(
                           onPressed: () async {
+                            final uri = Uri.tryParse(task.explorerUrl!);
+                            if (uri != null &&
+                                uri.scheme == 'https' &&
+                                uri.host == 'sepolia.etherscan.io') {
+                              await openExternalUrl(context, uri);
+                            }
+                          },
+                          child: const Text('View transaction'),
+                        ),
+                      if ([
+                        'prepared',
+                        'submitted',
+                        'uncertain',
+                      ].contains(task.status))
+                        const Text(
+                          'Transaction may be in flight. A database cancellation cannot undo it.',
+                        ),
+                      if (['armed', 'preparing'].contains(task.status))
+                        OutlinedButton(
+                          onPressed: () async {
                             try {
-                              final inFlight = await notifier.removeTask(
-                                task.id,
-                              );
+                              await notifier.disarmTask(task.id);
                               if (detailContext.mounted) {
                                 Navigator.pop(detailContext);
                               }
                               if (context.mounted) {
                                 MintlyNotice.show(
                                   context,
-                                  SnackBar(
-                                    content: Text(
-                                      inFlight
-                                          ? 'Removed. Transaction tracking continues in Settings → History.'
-                                          : 'Removed. Record saved in Settings → History.',
-                                    ),
+                                  const SnackBar(
+                                    content: Text('Task disarmed.'),
                                   ),
                                 );
                               }
@@ -518,17 +523,46 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
                               }
                             }
                           },
-                          child: const Text('Remove'),
+                          child: const Text('Disarm task'),
                         ),
-                      ],
-                    ),
+                      TextButton(
+                        onPressed: () async {
+                          try {
+                            final inFlight = await notifier.removeTask(task.id);
+                            if (detailContext.mounted) {
+                              Navigator.pop(detailContext);
+                            }
+                            if (context.mounted) {
+                              MintlyNotice.show(
+                                context,
+                                SnackBar(
+                                  content: Text(
+                                    inFlight
+                                        ? 'Removed. Transaction tracking continues in Settings → History.'
+                                        : 'Removed. Record saved in Settings → History.',
+                                  ),
+                                ),
+                              );
+                            }
+                          } catch (error) {
+                            if (context.mounted) {
+                              MintlyNotice.show(
+                                context,
+                                SnackBar(content: Text('$error')),
+                              );
+                            }
+                          }
+                        },
+                        child: const Text('Remove'),
+                      ),
+                    ],
                   ),
                 ),
               ),
-              child: const Text('View mint details'),
             ),
-          ],
-        ),
+            child: const Text('View mint details'),
+          ),
+        ],
       ),
     );
   }
@@ -583,140 +617,134 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
         ? 'Time unavailable'
         : '${DateFormat('d MMM, HH:mm').format(plan.startsAt!.toUtc().add(const Duration(hours: 1)))} WAT';
     final ready = plan.status == 'ready_for_approval';
-    return Card(
-      color: panel,
-      margin: const EdgeInsets.only(bottom: 12),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-        side: BorderSide(color: line),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                CollectionThumbnail(
-                  name: plan.collectionName,
-                  reference: 'plan:${plan.id}',
-                  size: 72,
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        plan.collectionName,
-                        style: const TextStyle(
-                          fontSize: 21,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      Text(plan.chain),
-                      const SizedBox(height: 8),
-                      StatusBadge(plan.status),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 22),
-            const Text(
-              'Mint details',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
-            ),
-            DetailRow('Phase', plan.stageName ?? 'Not selected'),
-            DetailRow('Mint time', starts),
-            DetailRow('Quantity', '${plan.quantity} NFTs'),
-            DetailRow('Receiving wallet', shortAddress(plan.walletAddress)),
-            const Divider(height: 28),
-            const Text(
-              'Estimated cost',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
-            ),
-            DetailRow(
-              'Mint price per NFT',
-              plan.priceEth == null ? 'Unverified' : '${plan.priceEth} ETH',
-            ),
-            DetailRow(
-              'Mint value',
-              plan.mintValueEth == null
-                  ? 'Unverified'
-                  : '${plan.mintValueEth} ETH',
-            ),
-            DetailRow(
-              'Network fee',
-              plan.estimatedNetworkFeeEth == null
-                  ? 'Unavailable'
-                  : '${plan.estimatedNetworkFeeEth} ETH',
-            ),
-            DetailRow(
-              'Estimated total',
-              plan.estimatedTotalEth == null
-                  ? 'Unavailable'
-                  : '${plan.estimatedTotalEth} ETH',
-              emphasis: true,
-            ),
-            const Text(
-              'Final fees are checked before signing. Review spending limits before approval.',
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        CollectionHeader(
+          name: plan.collectionName,
+          network: plan.chain,
+          status: plan.status,
+          artwork: CollectionThumbnail(
+            name: plan.collectionName,
+            reference: 'plan:${plan.id}',
+            size: 76,
+          ),
+        ),
+        const SizedBox(height: 12),
+        AppPanel(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Mint details',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+              ),
+              const Divider(height: 15),
+              DetailRow('Phase', plan.stageName ?? 'Not selected'),
+              DetailRow('Mint time', starts),
+              DetailRow(
+                'Quantity',
+                '${plan.quantity} NFT${plan.quantity == 1 ? '' : 's'}',
+              ),
+              DetailRow('Receiving wallet', shortAddress(plan.walletAddress)),
+            ],
+          ),
+        ),
+        AppPanel(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Estimated cost',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+              ),
+              const Divider(height: 15),
+              DetailRow(
+                'Mint · ${plan.quantity} NFT${plan.quantity == 1 ? '' : 's'}',
+                plan.mintValueEth == null
+                    ? 'Unverified'
+                    : '${plan.mintValueEth} ETH',
+              ),
+              DetailRow(
+                'Network fee',
+                plan.estimatedNetworkFeeEth == null
+                    ? 'Unavailable'
+                    : '${plan.estimatedNetworkFeeEth} ETH',
+              ),
+              const Divider(height: 15),
+              DetailRow(
+                'Estimated total',
+                plan.estimatedTotalEth == null
+                    ? 'Unavailable'
+                    : '${plan.estimatedTotalEth} ETH',
+                emphasis: true,
+              ),
+              const Text(
+                'Final fees are checked before signing.',
+                style: TextStyle(fontSize: 10),
+              ),
+            ],
+          ),
+        ),
+        AppPanel(
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          child: DisclosureSection(
+            tilePadding: EdgeInsets.zero,
+            title: const Text(
+              'Collection & validation details',
               style: TextStyle(fontSize: 12),
             ),
-            const SizedBox(height: 14),
-            DisclosureSection(
-              tilePadding: EdgeInsets.zero,
-              title: const Text('Collection & validation details'),
-              children: [
-                Text(plan.statusNote),
-                SelectableText(plan.walletAddress),
-                SelectableText(plan.contractAddress),
-                SelectableText(plan.openSeaUrl),
-                if (plan.estimatedTotalUsdt != null)
-                  Text(
-                    '≈ ${plan.estimatedTotalUsdt} USDT · display estimate only',
-                  ),
-              ],
-            ),
-            const SizedBox(height: 14),
-            if ([
-              'ready_for_approval',
-              'scheduled',
-              'unverified',
-            ].contains(plan.status))
-              FilledButton(
-                onPressed: () async {
-                  try {
-                    final data = await ref
-                        .read(apiServiceProvider)
-                        .automaticPlanContext(plan.id);
-                    if (!context.mounted) return;
-                    await Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => AutomaticReviewScreen(
-                          drop: DropModel.fromJson(
-                            data['drop'] as Map<String, dynamic>,
-                          ),
-                          plan: MintPlanModel.fromJson(
-                            data['plan'] as Map<String, dynamic>,
-                          ),
-                          initialMintKind: data['mint_kind'] as String,
-                        ),
+            children: [
+              Text(plan.statusNote),
+              SelectableText(plan.walletAddress),
+              SelectableText(plan.contractAddress),
+              SelectableText(plan.openSeaUrl),
+              if (plan.estimatedTotalUsdt != null)
+                Text(
+                  '≈ ${plan.estimatedTotalUsdt} USDT · display estimate only',
+                ),
+            ],
+          ),
+        ),
+        if ([
+          'ready_for_approval',
+          'scheduled',
+          'unverified',
+        ].contains(plan.status))
+          FilledButton(
+            onPressed: () async {
+              try {
+                final data = await ref
+                    .read(apiServiceProvider)
+                    .automaticPlanContext(plan.id);
+                if (!context.mounted) return;
+                await Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => AutomaticReviewScreen(
+                      drop: DropModel.fromJson(
+                        data['drop'] as Map<String, dynamic>,
                       ),
-                    );
-                    await notifier.loadInitialData();
-                  } catch (error) {
-                    if (context.mounted) {
-                      MintlyNotice.show(
-                        context,
-                        SnackBar(content: Text('$error')),
-                      );
-                    }
-                  }
-                },
-                child: const Text('Review & arm'),
-              ),
+                      plan: MintPlanModel.fromJson(
+                        data['plan'] as Map<String, dynamic>,
+                      ),
+                      initialMintKind: data['mint_kind'] as String,
+                    ),
+                  ),
+                );
+                await notifier.loadInitialData();
+              } catch (error) {
+                if (context.mounted) {
+                  MintlyNotice.show(context, SnackBar(content: Text('$error')));
+                }
+              }
+            },
+            child: const Text('Review & arm'),
+          ),
+        DisclosureSection(
+          tilePadding: EdgeInsets.zero,
+          title: const Text('Edit plan', style: TextStyle(fontSize: 13)),
+          children: [
             Wrap(
               spacing: 8,
               children: [
@@ -858,7 +886,7 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
             ),
           ],
         ),
-      ),
+      ],
     );
   }
 }

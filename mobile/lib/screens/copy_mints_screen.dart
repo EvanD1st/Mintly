@@ -26,7 +26,10 @@ class CopyGlyph extends StatelessWidget {
     label: kind,
     child: CustomPaint(
       size: Size.square(size),
-      painter: _GlyphPainter(kind, color ?? Theme.of(context).colorScheme.primary),
+      painter: _GlyphPainter(
+        kind,
+        color ?? Theme.of(context).colorScheme.primary,
+      ),
     ),
   );
 }
@@ -151,13 +154,13 @@ class _Panel extends StatelessWidget {
   Widget build(BuildContext context) {
     final dark = Theme.of(context).brightness == Brightness.dark;
     return Container(
-      margin: const EdgeInsets.only(bottom: 14),
-      padding: const EdgeInsets.all(16),
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: highlighted
             ? MintlyColors.getSoft(dark)
             : MintlyColors.getPanel(dark),
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(15),
         border: Border.all(color: MintlyColors.getLine(dark)),
       ),
       child: Material(type: MaterialType.transparency, child: child),
@@ -172,8 +175,8 @@ class _Avatar extends StatelessWidget {
   Widget build(BuildContext context) {
     final dark = Theme.of(context).brightness == Brightness.dark;
     return Container(
-      width: 54,
-      height: 54,
+      width: 44,
+      height: 44,
       alignment: Alignment.center,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
@@ -334,7 +337,10 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
       try {
         final checks = await api.fetchCopyCheckResults();
         if (mounted && generation == _generation) {
-          setState(() => _checks = (checks['results'] as List? ?? []).cast<Map<String, dynamic>>());
+          setState(
+            () => _checks = (checks['results'] as List? ?? [])
+                .cast<Map<String, dynamic>>(),
+          );
         }
       } catch (_) {
         // Keep the existing activity when check-only results cannot refresh.
@@ -570,141 +576,198 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
             .where((s) => s.isNotEmpty)
             .toList()
           ..sort();
+    final manageLabel = watch['check_only'] == true
+        ? 'Manage checks'
+        : rules.any((r) => ['active', 'paused'].contains(r['status']))
+        ? 'Manage'
+        : 'Set up copy';
     return _Panel(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               _Avatar('${watch['label']}'),
-              const SizedBox(width: 12),
+              const SizedBox(width: 10),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      '${watch['label']}',
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    InkWell(
-                      onTap: () => Clipboard.setData(
-                        ClipboardData(text: '${watch['address']}'),
-                      ),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 5),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(_short('${watch['address']}')),
-                            const SizedBox(width: 8),
-                            const CopyGlyph('copy', size: 15),
-                          ],
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            '${watch['label']}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
                         ),
-                      ),
+                        StatusBadge(
+                          watch['check_only'] == true
+                              ? 'check_only'
+                              : active
+                              ? 'active'
+                              : rules.any((r) => r['status'] == 'paused')
+                              ? 'paused'
+                              : 'watching',
+                          compact: true,
+                        ),
+                      ],
+                    ),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: InkWell(
+                            onTap: () => Clipboard.setData(
+                              ClipboardData(text: '${watch['address']}'),
+                            ),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 6),
+                              child: Row(
+                                children: [
+                                  Flexible(
+                                    child: Text(
+                                      _short('${watch['address']}'),
+                                      style: const TextStyle(fontSize: 11),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 5),
+                                  const CopyGlyph('copy', size: 13),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                        TextButton(
+                          style: TextButton.styleFrom(
+                            minimumSize: const Size(0, 30),
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            padding: const EdgeInsets.symmetric(horizontal: 4),
+                          ),
+                          onPressed: _busy ? null : () => _setup(watch),
+                          child: Text(
+                            manageLabel,
+                            style: const TextStyle(fontSize: 11),
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
               ),
-              PopupMenuButton<String>(
-                tooltip: 'Wallet options',
-                icon: const CopyGlyph('more'),
-                onSelected: (value) {
-                  if (value == 'stop-checks') {
-                    _act(() => ref.read(apiServiceProvider).stopCopyChecks('${watch['id']}'));
-                  }
-                  if (value == 'edit') _follow(watch);
-                  if (value == 'remove') _remove(watch);
-                  if (value == 'pause') {
-                    _act(
-                      () => ref
-                          .read(apiServiceProvider)
-                          .pauseCopying(active, watchId: '${watch['id']}'),
-                    );
-                  }
-                },
-                itemBuilder: (_) => [
-                  if (watch['check_only'] == true)
-                    const PopupMenuItem(value: 'stop-checks', child: Text('Stop check-only')) ,
-                  const PopupMenuItem(
-                    value: 'edit',
-                    child: Text('Edit name / networks'),
-                  ),
-                  if (rules.any(
-                    (r) => ['active', 'paused'].contains(r['status']),
-                  ))
-                    PopupMenuItem(
-                      value: 'pause',
-                      child: Text(active ? 'Pause copying' : 'Resume copying'),
+              SizedBox(
+                width: 28,
+                child: PopupMenuButton<String>(
+                  tooltip: 'Wallet options',
+                  icon: const CopyGlyph('more'),
+                  onSelected: (value) {
+                    if (value == 'stop-checks') {
+                      _act(
+                        () => ref
+                            .read(apiServiceProvider)
+                            .stopCopyChecks('${watch['id']}'),
+                      );
+                    }
+                    if (value == 'edit') _follow(watch);
+                    if (value == 'remove') _remove(watch);
+                    if (value == 'pause') {
+                      _act(
+                        () => ref
+                            .read(apiServiceProvider)
+                            .pauseCopying(active, watchId: '${watch['id']}'),
+                      );
+                    }
+                  },
+                  itemBuilder: (_) => [
+                    if (watch['check_only'] == true)
+                      const PopupMenuItem(
+                        value: 'stop-checks',
+                        child: Text('Stop check-only'),
+                      ),
+                    const PopupMenuItem(
+                      value: 'edit',
+                      child: Text('Edit name / networks'),
                     ),
-                  const PopupMenuItem(
-                    value: 'remove',
-                    child: Text('Remove wallet'),
-                  ),
-                ],
+                    if (rules.any(
+                      (r) => ['active', 'paused'].contains(r['status']),
+                    ))
+                      PopupMenuItem(
+                        value: 'pause',
+                        child: Text(
+                          active ? 'Pause copying' : 'Resume copying',
+                        ),
+                      ),
+                    const PopupMenuItem(
+                      value: 'remove',
+                      child: Text('Remove wallet'),
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
-          const SizedBox(height: 10),
           Wrap(
-            spacing: 7,
-            runSpacing: 7,
+            spacing: 5,
+            runSpacing: 5,
             children: [
+              for (final rule in rules.take(1))
+                if (rule['snapshot'] is Map)
+                  _Chip(
+                    (rule['snapshot'] as Map)['free_only'] == true
+                        ? 'Free mints only'
+                        : (rule['snapshot'] as Map)['paid_only'] == true
+                        ? 'Paid mints'
+                        : 'Free & paid mints',
+                  ),
               for (final chain in watch['chains'] as List)
                 _Chip(_network(chain)),
-              _Chip(watch['check_only'] == true ? 'Check-only · no spending' : active ? 'Copying on' : 'Watching only'),
-              for (final rule in rules.take(1))
-                if (rule['snapshot'] is Map) _Chip((rule['snapshot'] as Map)['free_only'] == true ? 'Free mints only' : (rule['snapshot'] as Map)['paid_only'] == true ? 'Paid mints' : 'Free & paid mints'),
+              if (watch['check_only'] == true)
+                const _Chip('Check-only · no spending'),
+              if (watch['check_only'] != true && !active)
+                const _Chip('Watching only'),
             ],
           ),
-          const SizedBox(height: 18),
+          const SizedBox(height: 5),
           Row(
             children: [
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Recent public mints',
-                      style: TextStyle(fontSize: 12),
-                    ),
-                    Text(
-                      '${watch['recent_mints']}',
-                      style: const TextStyle(
-                        fontSize: 28,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ],
+                child: Text(
+                  '${watch['recent_mints']} recent public mints',
+                  style: const TextStyle(fontSize: 10),
                 ),
               ),
-              Expanded(flex: 2, child: FilledButton(
-                onPressed: _busy ? null : () => _setup(watch),
-                child: Text(watch['check_only'] == true ? 'Manage checks' : active ? 'Copying active · Manage' : rules.any((r) => r['status'] == 'paused') ? 'Copying paused · Manage' : 'Set up copy', textAlign: TextAlign.center),
-              )),
+              TextButton(
+                style: TextButton.styleFrom(
+                  minimumSize: const Size(0, 30),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                ),
+                onPressed: () {
+                  setState(() {
+                    _tab = 1;
+                    _filter = '${watch['id']}';
+                  });
+                  _load();
+                },
+                child: const Text(
+                  'View activity',
+                  style: TextStyle(fontSize: 11),
+                ),
+              ),
             ],
           ),
-          const SizedBox(height: 8),
           Text(
             unavailable
                 ? 'Network check delayed. Last saved activity is preserved.'
                 : checked.isEmpty
                 ? 'Scanning recent blocks…'
                 : 'Checked ${_date(checked.first)} · last 7 days, scanned blocks',
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-          TextButton(
-            onPressed: () {
-              setState(() {
-                _tab = 1;
-                _filter = '${watch['id']}';
-              });
-              _load();
-            },
-            child: const Text('View activity'),
+            style: const TextStyle(fontSize: 10, height: 1.2),
           ),
         ],
       ),
@@ -724,19 +787,29 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
         ScreenHeading(
           'Copy',
           'Follow wallets. Mint on your terms.',
-          action: IconButton(
-            tooltip: 'Follow another wallet',
-            icon: const CopyGlyph('add'),
-            onPressed: _busy || _data == null ? null : () => _follow(),
+          action: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                tooltip: 'Follow another wallet',
+                icon: const CopyGlyph('add', size: 20),
+                constraints: const BoxConstraints.tightFor(
+                  width: 32,
+                  height: 32,
+                ),
+                padding: EdgeInsets.zero,
+                onPressed: _busy || _data == null ? null : () => _follow(),
+              ),
+              const AutomationControl(toolbar: true),
+            ],
           ),
         ),
-        const AutomationControl(compact: true),
         const NetworkBudgetCard(),
         _Panel(
           highlighted: true,
           child: Row(
             children: [
-              const CopyGlyph('wallets', size: 32),
+              const CopyGlyph('wallets', size: 27),
               const SizedBox(width: 15),
               Expanded(
                 child: Column(
@@ -746,13 +819,14 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
                       '${_watches.length} wallet${_watches.length == 1 ? '' : 's'} followed',
                       style: const TextStyle(
                         fontWeight: FontWeight.w700,
-                        fontSize: 16,
+                        fontSize: 14,
                       ),
                     ),
                     Text(
                       _active
                           ? 'Automatic copying active'
                           : 'Auto-copy paused / not enabled',
+                      style: const TextStyle(fontSize: 12),
                     ),
                   ],
                 ),
@@ -785,16 +859,19 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
             ),
           ),
         ),
-        const SizedBox(height: 22),
+        const SizedBox(height: 12),
         Row(
           children: [
             const Expanded(
               child: Text(
                 'Followed wallets',
-                style: TextStyle(fontSize: 19, fontWeight: FontWeight.w700),
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
               ),
             ),
-            Text('${watches.length} wallets'),
+            Text(
+              '${watches.length} wallet${watches.length == 1 ? '' : 's'}',
+              style: const TextStyle(fontSize: 11),
+            ),
           ],
         ),
         const SizedBox(height: 14),
@@ -884,7 +961,10 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              CollectionThumbnail(name: '${o['name']}', reference: 'copy:${event['id']}'),
+              CollectionThumbnail(
+                name: '${o['name']}',
+                reference: 'copy:${event['id']}',
+              ),
               const SizedBox(width: 13),
               Expanded(
                 child: Column(
@@ -901,8 +981,16 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
                     Wrap(
                       spacing: 7,
                       runSpacing: 7,
-                      children: [_Chip(label), _Chip('${o['chain']}'),
-                        _Chip(o['mint_kind'] == 'allowlist' || o['mint_kind'] == 'signed' ? 'Whitelist' : 'Public')],
+                      children: [
+                        _Chip(label),
+                        _Chip('${o['chain']}'),
+                        _Chip(
+                          o['mint_kind'] == 'allowlist' ||
+                                  o['mint_kind'] == 'signed'
+                              ? 'Whitelist'
+                              : 'Public',
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 9),
                     Text('Followed ${event['wallet_label']}'),
@@ -942,13 +1030,24 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
           _CopyDetails(key: ValueKey(event['id']), event: event),
           if (event['retryable'] == true)
             OutlinedButton(
-              onPressed: _busy ? null : () => _act(() => ref.read(apiServiceProvider).retryCopyMint('${event['id']}')),
+              onPressed: _busy
+                  ? null
+                  : () => _act(
+                      () => ref
+                          .read(apiServiceProvider)
+                          .retryCopyMint('${event['id']}'),
+                    ),
               child: const Text('Retry'),
             )
-          else if (event['task_id'] == null && (o['mint_kind'] == 'allowlist' || o['mint_kind'] == 'signed'))
+          else if (event['task_id'] == null &&
+              (o['mint_kind'] == 'allowlist' || o['mint_kind'] == 'signed'))
             OutlinedButton(
-              onPressed: _busy || !_watches.any((w) => w['id'] == event['watch_id'])
-                  ? null : () => _setup(_watches.firstWhere((w) => w['id'] == event['watch_id'])),
+              onPressed:
+                  _busy || !_watches.any((w) => w['id'] == event['watch_id'])
+                  ? null
+                  : () => _setup(
+                      _watches.firstWhere((w) => w['id'] == event['watch_id']),
+                    ),
               child: const Text('Whitelist settings'),
             )
           else if (event['task_id'] == null)
@@ -969,13 +1068,14 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
       children: [
         Text(
           'Copy activity',
-          style: Theme.of(
-            context,
-          ).textTheme.headlineLarge?.copyWith(fontWeight: FontWeight.w700),
+          style: Theme.of(context).textTheme.headlineLarge?.copyWith(
+            fontSize: 26,
+            fontWeight: FontWeight.w700,
+          ),
         ),
         const SizedBox(height: 7),
         const Text('Public mints and updates for your copied wallets.'),
-        const SizedBox(height: 22),
+        const SizedBox(height: 12),
         Row(
           children: [
             Expanded(
@@ -990,7 +1090,7 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
                         fontSize: 25,
                       ),
                     ),
-                    const Text('copied mints'),
+                    const Text('copied mints', style: TextStyle(fontSize: 11)),
                   ],
                 ),
               ),
@@ -1001,16 +1101,15 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      copyEth(_activity?['spent_wei'] ?? '0'),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 20,
-                      ),
+                    NativeAmountText(
+                      _activity?['spent_wei'] ?? '0',
+                      fontSize: 20,
+                      bold: true,
                     ),
-                    const Text('ETH spent · all fees'),
+                    const Text(
+                      'Spent · all fees',
+                      style: TextStyle(fontSize: 11),
+                    ),
                   ],
                 ),
               ),
@@ -1051,20 +1150,41 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
             child: Padding(
               padding: EdgeInsets.symmetric(vertical: 18),
               child: Text(
-                  'No supported mints detected yet. New activity appears after network confirmation.',
+                'No supported mints detected yet. New activity appears after network confirmation.',
               ),
             ),
           ),
-        if (_checks.any((c) => _filter == null || c['watch_id'] == _filter)) ...[
-          const Text('Check-only results', style: TextStyle(fontWeight: FontWeight.w700)),
+        if (_checks.any(
+          (c) => _filter == null || c['watch_id'] == _filter,
+        )) ...[
+          const Text(
+            'Check-only results',
+            style: TextStyle(fontWeight: FontWeight.w700),
+          ),
           const SizedBox(height: 10),
-          for (final check in _checks.where((c) => _filter == null || c['watch_id'] == _filter))
-            _Panel(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('${(check['observation'] as Map)['name']}', style: const TextStyle(fontWeight: FontWeight.w700)),
-              Text(check['status'] == 'would_copy' ? 'Would copy' : check['status'] == 'would_skip' ? 'Would skip' : 'Not verified'),
-              Text('${check['note']}'),
-              const Text('No transaction sent.'),
-            ])),
+          for (final check in _checks.where(
+            (c) => _filter == null || c['watch_id'] == _filter,
+          ))
+            _Panel(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '${(check['observation'] as Map)['name']}',
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  Text(
+                    check['status'] == 'would_copy'
+                        ? 'Would copy'
+                        : check['status'] == 'would_skip'
+                        ? 'Would skip'
+                        : 'Not verified',
+                  ),
+                  Text('${check['note']}'),
+                  const Text('No transaction sent.'),
+                ],
+              ),
+            ),
         ],
         ...events.map(_event),
         if (_activity?['next_offset'] != null)
@@ -1158,10 +1278,7 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
         ),
         child: Row(
           children: [
-            for (final (index, name) in [
-              (0, 'Following'),
-              (1, 'Activity'),
-            ])
+            for (final (index, name) in [(0, 'Following'), (1, 'Activity')])
               Expanded(
                 child: TextButton(
                   onPressed: () {
@@ -1173,19 +1290,23 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
                   },
                   child: Container(
                     width: double.infinity,
-                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    padding: const EdgeInsets.symmetric(vertical: 7),
                     decoration: BoxDecoration(
-                      color: _tab == index ? Theme.of(context).colorScheme.primary.withValues(alpha: .12) : Colors.transparent,
+                      color: _tab == index
+                          ? Theme.of(
+                              context,
+                            ).colorScheme.primary.withValues(alpha: .12)
+                          : Colors.transparent,
                       borderRadius: BorderRadius.circular(18),
                     ),
                     child: Text(
-                          name,
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            fontWeight: _tab == index
-                                ? FontWeight.w700
-                                : FontWeight.w400,
-                          ),
+                      name,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontWeight: _tab == index
+                            ? FontWeight.w700
+                            : FontWeight.w400,
+                      ),
                     ),
                   ),
                 ),

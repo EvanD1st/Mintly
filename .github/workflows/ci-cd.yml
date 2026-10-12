@@ -91,6 +91,14 @@ jobs:
       - run: flutter analyze
       - run: flutter test
         if: success() || failure()
+      - name: Save rendered dark screens
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dark-screen-previews
+          path: mobile/build/dark-redesign/*.png
+          if-no-files-found: ignore
+          retention-days: 14
 
   secure-session:
     runs-on: ubuntu-24.04
