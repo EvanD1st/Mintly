@@ -10,6 +10,7 @@ branch_labels = depends_on = None
 def upgrade():
     op.create_table('collection_artwork',
         sa.Column('key', sa.String(150), primary_key=True),
+        sa.Column('collection_slug', sa.String(100), nullable=True),
         sa.Column('image_url', sa.String(2048), nullable=True),
         sa.Column('refresh_after', sa.DateTime(timezone=True), nullable=False),
         sa.Column('stale_until', sa.DateTime(timezone=True), nullable=False),

@@ -55,10 +55,10 @@ async def collection_image(slug=None, *, chain_id=None, contract=None, allow_fet
             return old
         result = old
         ttl = 60
+        resolved = slug or (persisted.collection_slug if persisted else None)
         try:
             client = OpenSeaClient()
             key = await client._key()
-            resolved = slug
             if resolved is None:
                 chain = next((name for name, spec in CHAINS.items() if spec[0] == chain_id), None)
                 if not chain or not re.fullmatch(r'0x[a-fA-F0-9]{40}', contract or ''):
@@ -82,7 +82,7 @@ async def collection_image(slug=None, *, chain_id=None, contract=None, allow_fet
             from sqlalchemy.dialects.sqlite import insert as sqlite_insert
             insert = pg_insert if db.bind.dialect.name == 'postgresql' else sqlite_insert
             checked = datetime.now(timezone.utc)
-            values = dict(key=cache_key, image_url=result, refresh_after=checked+timedelta(seconds=ttl),
+            values = dict(key=cache_key, collection_slug=resolved, image_url=result, refresh_after=checked+timedelta(seconds=ttl),
                 stale_until=checked+timedelta(days=7) if ttl==86400 else
                     (persisted.stale_until if persisted else checked+timedelta(seconds=ttl)),
                 created_at=checked, updated_at=checked)

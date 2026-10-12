@@ -139,3 +139,21 @@ async def test_two_second_shared_capacity_preserves_twenty_second_mint_pacing(te
     assert await limits.acquire('/collections/a',factory=factory,now=now)==(2,'paced')
     assert await limits.acquire('/collections/a',factory=factory,now=now+timedelta(seconds=2))==(0,None)
     assert await limits.acquire('/drops/b/mint',factory=factory,now=now+timedelta(seconds=4))==(16,'paced')
+
+
+async def test_resolved_contract_survives_deferred_collection_lookup(test_db,monkeypatch):
+    contract='0x'+'b'*40
+    monkeypatch.setattr(OpenSeaClient,'_key',AsyncMock(return_value='server-only-test-key'))
+    request=AsyncMock(side_effect=[
+        (200,{'chain':'base','address':contract,'collection':'example'}),
+        OpenSeaUnavailable('Shared queue'),
+        (200,{'collection':'example','image_url':'https://i.seadn.io/resumed.png'})])
+    monkeypatch.setattr(OpenSeaClient,'_request',request)
+    assert await artwork.collection_image(chain_id=8453,contract=contract,db=test_db) is None
+    row=await test_db.get(CollectionArtwork,artwork.artwork_key(None,8453,contract))
+    assert row.collection_slug=='example'
+    row.refresh_after=datetime.now(timezone.utc)-timedelta(seconds=1)
+    await test_db.commit();artwork._cache.clear()
+    assert await artwork.collection_image(chain_id=8453,contract=contract,db=test_db)=='https://i.seadn.io/resumed.png'
+    assert [c.args[1] for c in request.await_args_list]==[
+        f'/chain/base/contract/{contract}','/collections/example','/collections/example']
