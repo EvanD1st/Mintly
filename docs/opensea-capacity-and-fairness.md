@@ -1,7 +1,7 @@
 # OpenSea capacity and account fairness
 
 Mintly retains one operator-provisioned server-side OpenSea key. The shared
-request gate defaults to six seconds between requests globally, 20 seconds
+request gate defaults to two seconds between requests globally, 20 seconds
 between mint-builder requests, an eight-second short queue, and at most 40
 durable preparation attempts. A 503 response with an explicit `Retry-After`
 holds the affected endpoint across processes; a response indicating an

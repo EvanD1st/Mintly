@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     OPENSEA_ALLOW_INSTANT_KEYS: bool = False
     OPENSEA_SHARED_KEY_GID: int | None = None
     OPENSEA_COORDINATE_REQUESTS: bool = False
-    OPENSEA_GLOBAL_REQUEST_SECONDS: float = 6.0
+    OPENSEA_GLOBAL_REQUEST_SECONDS: float = 2.0
     OPENSEA_MINT_REQUEST_SECONDS: float = 20.0
     # Must outlast the default 6s shared gap, or sequential preparation reads
     # can never progress past their first request.

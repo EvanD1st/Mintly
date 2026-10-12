@@ -93,6 +93,6 @@ existing installed-release asset/font audits remain required for all five
 supported Android releases.
 
 Copy observation/retry behavior and the global execution lock remain unchanged.
-OpenSea defaults remain global gap 6 seconds, mint gap 20 seconds, queue wait
+OpenSea defaults remain global gap 2 seconds, mint gap 20 seconds, queue wait
 8 seconds and maximum preparation attempts 40. Additional chains do not increase
 provider quota or guarantee every collection supports a qualifying mint stage.
