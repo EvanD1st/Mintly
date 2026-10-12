@@ -2,9 +2,25 @@
 
 import pytest
 from datetime import datetime, timezone, timedelta
-from app.models import MintTask, MintAuthorization, Wallet, User
+from app.models import MintTask, MintAuthorization, Wallet, User, Drop, MintStage
 from app.worker import MintlyWorker
 from sqlalchemy import select
+
+
+async def seed_task_scope(db, authorization_id, now):
+    """Use valid foreign keys on PostgreSQL as well as permissive SQLite."""
+    member = await db.scalar(select(User).where(User.username == 'member'))
+    address = '0x' + '1' * 40
+    db.add(Wallet(id='wallet_1', user_id=member.id, label='Lease wallet', address=address))
+    db.add(Drop(id='orbit', name='Lease fixture', mint_page_url='https://example.test/mint', is_demo=True))
+    await db.flush()
+    db.add(MintStage(id='orbit-wl', drop_id='orbit', stage_name='Public',
+        start_time_utc=now-timedelta(minutes=5), end_time_utc=now+timedelta(hours=1)))
+    await db.flush()
+    db.add(MintAuthorization(id=authorization_id, wallet_id='wallet_1', drop_id='orbit', stage_id='orbit-wl',
+        quantity=1, max_price_per_token_wei=0, max_fee_wei=10000, total_spend_cap_wei=10000,
+        recipient_address=address, user_consent_text='Disposable worker fixture only', authorized_at=now))
+    await db.commit()
 
 
 @pytest.mark.asyncio
@@ -12,9 +28,7 @@ async def test_worker_leases_prevent_duplicate_claims(test_db):
     """Verifies that two workers cannot claim the same task concurrently."""
     # Insert an armed task scheduled in the past (ready now)
     now = datetime.now(timezone.utc)
-    member = await test_db.scalar(select(User).where(User.username == 'member'))
-    test_db.add(Wallet(id='wallet_1', user_id=member.id, label='Lease wallet', address='0x' + '1' * 40))
-    await test_db.commit()
+    await seed_task_scope(test_db, 'auth_lease_test', now)
     task = MintTask(
         authorization_id="auth_lease_test",
         wallet_id="wallet_1",
@@ -48,6 +62,7 @@ async def test_worker_leases_prevent_duplicate_claims(test_db):
 async def test_worker_reconciles_crash_before_broadcast(test_db):
     """Verifies that a task interrupted in 'submitting' state is reconciled safely."""
     now = datetime.now(timezone.utc)
+    await seed_task_scope(test_db, 'auth_crash_test', now)
     task = MintTask(
         authorization_id="auth_crash_test",
         wallet_id="wallet_1",
