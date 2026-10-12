@@ -95,8 +95,9 @@ class ThumbnailCache {
         );
         final descriptor = await ui.ImageDescriptor.encoded(encodedBuffer);
         try {
-          if (descriptor.width * descriptor.height > 16 * 1024 * 1024)
+          if (descriptor.width * descriptor.height > 16 * 1024 * 1024) {
             return null;
+          }
         } finally {
           descriptor.dispose();
           encodedBuffer.dispose();
