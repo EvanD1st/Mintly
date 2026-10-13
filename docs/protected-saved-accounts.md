@@ -1,4 +1,4 @@
-# Protected Mintly accounts (Android 1.1.3+6)
+# Protected Mintly accounts (Android 1.1.4+7)
 
 Saved accounts are Mintly identities. The operator's X/Twscrape session remains
 server-side and is unrelated to login switching.
