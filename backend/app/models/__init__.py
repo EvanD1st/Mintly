@@ -32,3 +32,4 @@ from app.models.mint_diagnostic import MintAttemptDiagnostic
 
 from app.models.opensea_gate import OpenSeaRequestGate,OpenSeaRequestWaiter
 from app.models.collection_artwork import CollectionArtwork
+from app.models.feed import FeedWalletCheck, FeedWalletSelection

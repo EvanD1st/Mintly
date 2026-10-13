@@ -1,9 +1,9 @@
 """SQLAlchemy models for X/Twikit sources and raw posts."""
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, date, timezone
 from typing import Optional
-from sqlalchemy import String, Boolean, Integer, DateTime, JSON, Text
+from sqlalchemy import String, Boolean, Integer, DateTime, Date, JSON, Text
 from sqlalchemy.orm import Mapped, mapped_column
 from app.database import Base
 
@@ -35,3 +35,5 @@ class SourcePost(Base):
     is_correction: Mapped[bool] = mapped_column(Boolean, default=False)
     replaces_post_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     is_manual_import: Mapped[bool] = mapped_column(Boolean, default=False)
+    list_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True, index=True)
+    parser_version: Mapped[int] = mapped_column(Integer, default=0, server_default='0')

@@ -39,6 +39,9 @@ class DropSchema(BaseModel):
     manual_notice: Optional[str] = None
     is_demo: bool
     stages: List[MintStageSchema] = []
+    source_price_text: Optional[str] = None
+    source_time_text: Optional[str] = None
+    wallet_check: Optional[dict] = None
 
 
 class DropListResponse(BaseModel):
@@ -47,6 +50,9 @@ class DropListResponse(BaseModel):
     drops: List[DropSchema]
     checked_wallet_label: str
     last_checked_text: str
+    selected_wallet_id: Optional[str] = None
+    wallets: List[dict] = []
+    feed_status_text: str = ''
 
 
 class EligibilityRecheckRequest(BaseModel):

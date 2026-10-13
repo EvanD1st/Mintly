@@ -77,7 +77,34 @@ async def test_mixed_feature_reads_and_writes_during_four_wallet_preparation(cop
                 r=await instance.client.post('/api/notifications/'+path,json=body)
                 assert r.status_code==200
         release.set()
-        await asyncio.gather(*(read(path) for path in paths for _ in range(3)),logins(),device_settings(),scenario)
+        async def discovery_checks():
+            from app.models import FeedWalletCheck, Drop, Wallet
+            from app.services import feed_checks
+            # The local chain is advertised only inside this disposable test.
+            monkeypatch.setattr(feed_checks,'supported',lambda d:d.chain_id==31337)
+            from datetime import datetime,timezone
+            monkeypatch.setattr(OpenSeaClient,'get_drop',AsyncMock(return_value={'chain':'local',
+                'contract_address':instance.nft.address,'stages':[{'uuid':'local-public','label':'Public',
+                    'stage_type':'public_sale','start_time':datetime.fromtimestamp(instance.start,timezone.utc).isoformat(),
+                    'end_time':datetime.fromtimestamp(instance.end,timezone.utc).isoformat(),'price':'10',
+                    'max_per_wallet':'20','price_currency_address':'0x'+'0'*40}]}))
+            from app.services.opensea import CHAINS
+            monkeypatch.setitem(CHAINS,'local',(31337,'Local test'))
+            async with instance.factory() as db:
+                from app.models import User
+                owner=await db.get(User,instance.user.id)
+                wallet=await db.get(Wallet,instance.wallet.id)
+                drop=await db.scalar(select(Drop).where(Drop.contract_address==instance.nft.address))
+                drop.mint_page_url='https://opensea.io/collection/local-test'
+                await db.commit()
+                await feed_checks.queue_checks(db,owner,wallet,[drop])
+            assert await feed_checks.step(instance.factory)
+            async with instance.factory() as db:
+                row=await db.get(FeedWalletCheck,(instance.user.id,instance.wallet.id,drop.id))
+                assert row.status=='complete' and row.result['address']==instance.wallet.address
+                assert row.result['stages'][0]['eligibility']=='eligible'
+                assert row.result['stages'][0]['remaining'] is not None
+        await asyncio.gather(*(read(path) for path in paths for _ in range(3)),logins(),device_settings(),discovery_checks(),scenario)
         # After simultaneous preparation, verify all nominal screen APIs again.
         await asyncio.gather(*(read(path) for path in paths))
         assert metadata_calls==1, 'Cached artwork must not issue repeated provider requests.'

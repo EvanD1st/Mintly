@@ -69,6 +69,9 @@ class DropModel {
   final String? manualNotice;
   final bool isDemo;
   final List<MintStageModel> stages;
+  final Map<String, dynamic>? walletCheck;
+  final String? sourcePriceText;
+  final String? sourceTimeText;
 
   DropModel({
     required this.id,
@@ -85,6 +88,9 @@ class DropModel {
     this.manualNotice,
     required this.isDemo,
     required this.stages,
+    this.walletCheck,
+    this.sourcePriceText,
+    this.sourceTimeText,
   });
 
   factory DropModel.fromJson(Map<String, dynamic> json) {
@@ -103,6 +109,9 @@ class DropModel {
       isSupportedIntegration: json['is_supported_integration'] ?? false,
       manualNotice: json['manual_notice'],
       isDemo: json['is_demo'] ?? false,
+      walletCheck: json['wallet_check'] as Map<String, dynamic>?,
+      sourcePriceText: json['source_price_text'] as String?,
+      sourceTimeText: json['source_time_text'] as String?,
       stages: rawStages
           .map((s) => MintStageModel.fromJson(s as Map<String, dynamic>))
           .toList(),

@@ -35,10 +35,15 @@ class ApiService extends ChangeNotifier {
   int _sessionRevision = 0;
   final _artwork = <String, ({DateTime expires, Future<String?> value})>{};
 
-  Future<String?> collectionArtwork(String reference, {bool retryMissing = false}) {
+  Future<String?> collectionArtwork(
+    String reference, {
+    bool retryMissing = false,
+  }) {
     final now = DateTime.now();
     final cached = _artwork[reference];
-    if (!retryMissing && cached != null && cached.expires.isAfter(now)) return cached.value;
+    if (!retryMissing && cached != null && cached.expires.isAfter(now)) {
+      return cached.value;
+    }
     final value = () async {
       try {
         final data = await _get(
@@ -64,6 +69,9 @@ class ApiService extends ChangeNotifier {
   String sourceStatusText = 'Waiting for live data';
   String checkedWalletLabel = 'No wallet connected';
   String lastCheckedText = 'Wallet-specific eligibility is unverified';
+  String? selectedFeedWallet;
+  List<Map<String, dynamic>> feedWallets = [];
+  int _feedRevision = 0;
 
   bool sessionRemembered = false;
   bool restoringSession = false;
@@ -301,8 +309,20 @@ class ApiService extends ChangeNotifier {
   }
 
   Future<List<DropModel>> fetchDrops(String filter) async {
+    final revision = ++_feedRevision;
+    final wallet = selectedFeedWallet;
     final data =
-        await _get('/drops?filter_kind=$filter') as Map<String, dynamic>;
+        await _get(
+              '/drops?daily_only=true&filter_kind=$filter${wallet == null ? '' : '&wallet_id=${Uri.encodeQueryComponent(wallet)}'}',
+            )
+            as Map<String, dynamic>;
+    if (revision != _feedRevision) {
+      throw const ApiException('Wallet selection changed.');
+    }
+    selectedFeedWallet = data['selected_wallet_id'] as String?;
+    feedWallets = (data['wallets'] as List? ?? [])
+        .map((w) => Map<String, dynamic>.from(w))
+        .toList();
     sourceStatusText =
         data['source_status_text'] as String? ?? 'Live source unavailable';
     checkedWalletLabel =
@@ -310,6 +330,36 @@ class ApiService extends ChangeNotifier {
     lastCheckedText =
         data['last_checked_text'] as String? ?? 'Eligibility unverified';
     return (data['drops'] as List).map((d) => DropModel.fromJson(d)).toList();
+  }
+
+  void clearFeedSelection() {
+    _feedRevision++;
+    selectedFeedWallet = null;
+    feedWallets = [];
+  }
+
+  Future<void> queueFeedChecks(List<DropModel> drops) async {
+    final wallet = selectedFeedWallet;
+    if (wallet == null || drops.isEmpty) return;
+    await _post('/drops/wallet-checks', {
+      'wallet_id': wallet,
+      'drop_ids': drops.take(20).map((d) => d.id).toList(),
+    });
+  }
+
+  Future<MintPlanModel> prepareFeedPlan(DropModel drop) async {
+    final stage = drop.walletCheck?['recommended_stage'];
+    if (selectedFeedWallet == null || stage == null) {
+      throw const ApiException('Check wallet eligibility first.');
+    }
+    return MintPlanModel.fromJson(
+      Map<String, dynamic>.from(
+        await _post('/drops/${drop.id}/prepare-plan', {
+          'wallet_id': selectedFeedWallet,
+          'stage_uuid': stage['id'],
+        }),
+      ),
+    );
   }
 
   Future<Map<String, dynamic>> fetchSourceStatus() async =>
@@ -414,7 +464,9 @@ class ApiService extends ChangeNotifier {
   }
 
   Future<List<MintTaskModel>> fetchQueue() async {
-    final data = await _get('/tasks/queue?native_currencies=true') as Map<String, dynamic>;
+    final data =
+        await _get('/tasks/queue?native_currencies=true')
+            as Map<String, dynamic>;
     return (data['tasks'] as List)
         .map((t) => MintTaskModel.fromJson(t))
         .toList();
@@ -653,7 +705,9 @@ class ApiService extends ChangeNotifier {
     String section, {
     int offset = 0,
   }) async =>
-      (await _get('/history?native_currencies=true&section=$section&offset=$offset'))
+      (await _get(
+            '/history?native_currencies=true&section=$section&offset=$offset',
+          ))
           as Map<String, dynamic>;
 
   Future<Map<String, dynamic>> automaticPlanContext(String id) async =>

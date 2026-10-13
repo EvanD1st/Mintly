@@ -15,7 +15,7 @@ if ! command -v docker >/dev/null || ! docker compose version >/dev/null 2>&1; t
     sudo -n systemctl enable --now docker
 fi
 DOCKER=(docker)
-if ! docker info >/dev/null 2>&1; then DOCKER=(sudo -n --preserve-env=MINTLY_ENV_FILE,MINTLY_RELEASE,MINTLY_FIREBASE_FILE,MINTLY_X_COOKIES_FILE,MINTLY_OPENSEA_DIR,MINTLY_OPENSEA_AUTO_RENEW docker); fi
+if ! docker info >/dev/null 2>&1; then DOCKER=(sudo -n --preserve-env=MINTLY_ENV_FILE,MINTLY_RELEASE,MINTLY_FIREBASE_FILE,MINTLY_X_COOKIES_FILE,MINTLY_X_ACCOUNTS_DIR,MINTLY_OPENSEA_DIR,MINTLY_OPENSEA_AUTO_RENEW docker); fi
 
 export MINTLY_ENV_FILE="$APP_DIR/shared/.env"
 export MINTLY_RELEASE="${MINTLY_RELEASE:-local}"
@@ -65,10 +65,12 @@ if [[ -f "$APP_DIR/shared/firebase-service-account.json" ]]; then
         COMPOSE+=(-f "$RELEASE_DIR/backend/docker-compose.automatic-firebase.yml")
     fi
 fi
-if [[ -f "$APP_DIR/shared/x-cookies.json" ]]; then
-    chmod 600 "$APP_DIR/shared/x-cookies.json"
-    export MINTLY_X_COOKIES_FILE="$APP_DIR/shared/x-cookies.json"
-    COMPOSE+=(-f "$RELEASE_DIR/backend/docker-compose.x-session.yml")
+if sudo -n test -f "$APP_DIR/shared/x-session/accounts.db"; then
+    export MINTLY_X_ACCOUNTS_DIR="$APP_DIR/shared/x-session"
+    sudo -n chown -R 10001:10001 "$MINTLY_X_ACCOUNTS_DIR"
+    sudo -n chmod 700 "$MINTLY_X_ACCOUNTS_DIR"
+    sudo -n chmod 600 "$MINTLY_X_ACCOUNTS_DIR/accounts.db"
+    COMPOSE+=(-f "$RELEASE_DIR/backend/docker-compose.x-twscrape.yml")
 fi
 "${COMPOSE[@]}" config --quiet
 "${COMPOSE[@]}" build backend

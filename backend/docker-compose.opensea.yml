@@ -1,4 +1,11 @@
 services:
+  discovery-worker:
+    environment:
+      OPENSEA_KEY_FILE: /run/opensea/key.json
+      OPENSEA_SHARED_KEY_GID: "10001"
+      OPENSEA_COORDINATE_REQUESTS: "true"
+    volumes:
+      - ${MINTLY_OPENSEA_DIR:?Set MINTLY_OPENSEA_DIR}:/run/opensea:rw
   backend:
     environment:
       OPENSEA_KEY_FILE: /run/opensea/key.json

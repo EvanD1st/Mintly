@@ -18,13 +18,19 @@ async def stages(db,plan,user_id):
     wallet=await db.get(Wallet,plan.wallet_id)
     if plan.user_id!=user_id or plan.archived_at or not wallet or wallet.archived_at or wallet.user_id!=user_id:
         raise HTTPException(404,'Mint plan not found.')
-    client=OpenSeaClient();detail=await client.get_drop(plan.collection_slug)
+    return await wallet_stages(db,wallet,plan.collection_slug,plan.chain_id,plan.contract_address,plan.selected_stage)
+
+
+async def wallet_stages(db,wallet,slug,chain_id,contract,selected_stage=None):
+    """Read-only discovery shared with Today; never creates/selects a personal plan."""
+    user_id=wallet.user_id
+    client=OpenSeaClient();detail=await client.get_drop(slug)
     from app.services.opensea import CHAINS
-    if CHAINS[detail['chain']][0]!=plan.chain_id or detail['contract_address'].lower()!=plan.contract_address.lower():
+    if CHAINS[detail['chain']][0]!=chain_id or detail['contract_address'].lower()!=contract.lower():
         raise HTTPException(409,'The collection network or contract changed.')
     public_verified=True
     try:
-        schedule=await verified_stage_schedule(detail,plan.chain_id,plan.contract_address)
+        schedule=await verified_stage_schedule(detail,chain_id,contract)
     except OpenSeaUnavailable as error:
         if error.status != 503:raise
         schedule=stage_schedule(detail)
@@ -35,7 +41,7 @@ async def stages(db,plan,user_id):
     if access:
         try:
             from app.api.opensea_access import broker
-            response=await broker(wallet.id,'stages',slug=plan.collection_slug,key=await client._key())
+            response=await broker(wallet.id,'stages',slug=slug,key=await client._key())
             if response.get('address','').lower()!=wallet.address.lower():raise ValueError('Wallet result differs')
             for row in response['stages']:
                 key=stage_key(row['stage_uuid'])
@@ -50,10 +56,10 @@ async def stages(db,plan,user_id):
     try:
         from eth_abi import encode,decode
         from eth_utils import keccak,to_checksum_address
-        web3=await automatic.provider_for(plan.chain_id)
+        web3=await automatic.provider_for(chain_id)
         try:
             try:
-                minted,supply,maximum=decode(['uint256']*3,await web3.eth.call({'to':to_checksum_address(plan.contract_address),
+                minted,supply,maximum=decode(['uint256']*3,await web3.eth.call({'to':to_checksum_address(contract),
                     'data':keccak(text='getMintStats(address)')[:4]+encode(['address'],[to_checksum_address(wallet.address)])}))
             except Exception:
                 if note is None:note='Eligibility found; remaining allowance could not be checked on-chain. It will be checked before signing.'
@@ -81,7 +87,7 @@ async def stages(db,plan,user_id):
             'price_wei':str(price) if price is not None else None,
             'starts_at':stage['starts_at'].isoformat(),'ends_at':stage['ends_at'].isoformat(),
             'timing':'ended' if stage['ends_at']<=now else 'upcoming' if stage['starts_at']>now else 'open',
-            'selected':bool(plan.selected_stage and stage_key(plan.selected_stage['uuid'])==stage_key(stage['uuid']))})
+            'selected':bool(selected_stage and stage_key(selected_stage['uuid'])==stage_key(stage['uuid']))})
     if not public_verified and note is None:
         note='Public mint terms could not be verified on chain. Try again before selecting the public phase.'
     return {'wallet_id':wallet.id,'address':wallet.address,'stages':result,'access_enabled':access,'note':note},schedule

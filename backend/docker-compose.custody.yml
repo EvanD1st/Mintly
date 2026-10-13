@@ -48,7 +48,7 @@ services:
 
   backend:
     networks: [default, custody-control]
-    environment:
+    environment: &backend-read-env
       ENABLE_CUSTODIAL_AUTOMATIC: ${CUSTODY_TASK_ARMING:-false}
       AUTOMATIC_CHAIN_ID: ${CUSTODY_CHAIN_ID:-11155111}
       ENABLE_ROBINHOOD_AUTOMATIC: ${ENABLE_ROBINHOOD_AUTOMATIC:-false}
@@ -66,6 +66,15 @@ services:
       AUTOMATIC_RPC: ${CUSTODY_RPC:-${CUSTODY_SEPOLIA_RPC:-}}
       AUTOMATIC_SIGNER_URL: http://automatic-signer:18766
       AUTOMATIC_SIGNER_TOKEN_FILE: /run/custody-token/token
+    volumes:
+      - ${CUSTODY_TOKEN_DIR:?Set protected token directory}:/run/custody-token:ro
+
+  discovery-worker:
+    networks: [default, custody-control]
+    environment:
+      <<: *backend-read-env
+      ENABLE_CUSTODIAL_AUTOMATIC: "false"
+      ENABLE_COPY_MINTS: "false"
     volumes:
       - ${CUSTODY_TOKEN_DIR:?Set protected token directory}:/run/custody-token:ro
 
