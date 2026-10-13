@@ -1,0 +1,731 @@
+{
+  "production_revision": "a238a7252e63c78ebf3696af2ae9804229d51ad5",
+  "tested_revision": "7e4c1f9de14f84910f7fd39f4007add1e6c32efb",
+  "ci_url": "https://github.com/EvanD1st/Mintly/actions/runs/38343236947",
+  "ci_conclusion": "success",
+  "production_reads": {
+    "wallets": {
+      "samples": 5,
+      "median_ms": 8.95,
+      "max_ms": 107.8
+    },
+    "mint plans": {
+      "samples": 5,
+      "median_ms": 9.42,
+      "max_ms": 20.59
+    },
+    "daily budget": {
+      "samples": 5,
+      "median_ms": 7.82,
+      "max_ms": 15.49
+    },
+    "policies": {
+      "samples": 5,
+      "median_ms": 5.01,
+      "max_ms": 14.29
+    },
+    "mint queue": {
+      "samples": 5,
+      "median_ms": 7.74,
+      "max_ms": 17.56
+    },
+    "copy following": {
+      "samples": 5,
+      "median_ms": 29.39,
+      "max_ms": 151.04
+    },
+    "check-only": {
+      "samples": 5,
+      "median_ms": 16.4,
+      "max_ms": 25.92
+    },
+    "copy activity": {
+      "samples": 5,
+      "median_ms": 32.8,
+      "max_ms": 146.15
+    },
+    "activity": {
+      "samples": 5,
+      "median_ms": 10.47,
+      "max_ms": 19.21
+    },
+    "copy history": {
+      "samples": 5,
+      "median_ms": 18.93,
+      "max_ms": 30.18
+    },
+    "permissions": {
+      "samples": 5,
+      "median_ms": 6.46,
+      "max_ms": 17.74
+    },
+    "mint history": {
+      "samples": 5,
+      "median_ms": 70.79,
+      "max_ms": 97.82
+    },
+    "wallet readiness": {
+      "samples": 5,
+      "median_ms": 1359.09,
+      "max_ms": 1483.76
+    }
+  },
+  "environments": {
+    "sqlite": {
+      "test_outcomes": {
+        "passed": 547,
+        "skipped": 2
+      },
+      "traced_requests": 2279,
+      "documented_routes_exercised": 86,
+      "documented_routes": 86,
+      "unexercised_routes": [],
+      "peak_overlapping_requests": 63,
+      "mixed_requests": 102,
+      "mixed_statuses": {
+        "200": 102
+      },
+      "mixed_routes": [
+        {
+          "surface": "api",
+          "method": "POST",
+          "route": "/api/auth/login",
+          "n": 8,
+          "median_ms": 31.402,
+          "max_ms": 626.992
+        },
+        {
+          "surface": "api",
+          "method": "POST",
+          "route": "/api/copy-mints/watches",
+          "n": 3,
+          "median_ms": 10.291,
+          "max_ms": 13.917
+        },
+        {
+          "surface": "signer",
+          "method": "POST",
+          "route": "/copy-rules/{rule_id}/register",
+          "n": 3,
+          "median_ms": 6.984,
+          "max_ms": 14.874
+        },
+        {
+          "surface": "api",
+          "method": "POST",
+          "route": "/api/copy-mints/watches/{watch_id}/rules",
+          "n": 3,
+          "median_ms": 30.388,
+          "max_ms": 41.958
+        },
+        {
+          "surface": "signer",
+          "method": "GET",
+          "route": "/policies/{grant_id}/ready",
+          "n": 1,
+          "median_ms": 15.986,
+          "max_ms": 15.986
+        },
+        {
+          "surface": "api",
+          "method": "POST",
+          "route": "/api/tasks/arm",
+          "n": 1,
+          "median_ms": 64.471,
+          "max_ms": 64.471
+        },
+        {
+          "surface": "api",
+          "method": "GET",
+          "route": "/healthz",
+          "n": 4,
+          "median_ms": 108.541,
+          "max_ms": 108.952
+        },
+        {
+          "surface": "api",
+          "method": "GET",
+          "route": "/api/auth/me",
+          "n": 4,
+          "median_ms": 128.987,
+          "max_ms": 171.592
+        },
+        {
+          "surface": "api",
+          "method": "GET",
+          "route": "/api/automatic/status",
+          "n": 4,
+          "median_ms": 143.207,
+          "max_ms": 168.76
+        },
+        {
+          "surface": "api",
+          "method": "GET",
+          "route": "/api/automatic/daily-limit",
+          "n": 4,
+          "median_ms": 161.808,
+          "max_ms": 175.631
+        },
+        {
+          "surface": "api",
+          "method": "GET",
+          "route": "/api/wallets",
+          "n": 4,
+          "median_ms": 180.483,
+          "max_ms": 182.942
+        },
+        {
+          "surface": "api",
+          "method": "GET",
+          "route": "/api/automatic/policies",
+          "n": 4,
+          "median_ms": 193.004,
+          "max_ms": 210.539
+        },
+        {
+          "surface": "api",
+          "method": "GET",
+          "route": "/api/mint-plans",
+          "n": 4,
+          "median_ms": 218.418,
+          "max_ms": 226.641
+        },
+        {
+          "surface": "api",
+          "method": "GET",
+          "route": "/api/mint-permissions",
+          "n": 4,
+          "median_ms": 230.439,
+          "max_ms": 246.524
+        },
+        {
+          "surface": "api",
+          "method": "GET",
+          "route": "/api/wallets/readiness",
+          "n": 4,
+          "median_ms": 259.738,
+          "max_ms": 278.695
+        },
+        {
+          "surface": "api",
+          "method": "GET",
+          "route": "/api/tasks/queue",
+          "n": 4,
+          "median_ms": 264.288,
+          "max_ms": 275.473
+        },
+        {
+          "surface": "api",
+          "method": "GET",
+          "route": "/api/copy-mints/check-results",
+          "n": 4,
+          "median_ms": 288.773,
+          "max_ms": 309.545
+        },
+        {
+          "surface": "api",
+          "method": "GET",
+          "route": "/api/notifications/recent",
+          "n": 4,
+          "median_ms": 306.971,
+          "max_ms": 315.653
+        },
+        {
+          "surface": "api",
+          "method": "GET",
+          "route": "/api/copy-mints",
+          "n": 4,
+          "median_ms": 311.899,
+          "max_ms": 319.919
+        },
+        {
+          "surface": "api",
+          "method": "GET",
+          "route": "/api/copy-mints/activity",
+          "n": 4,
+          "median_ms": 369.228,
+          "max_ms": 393.523
+        },
+        {
+          "surface": "api",
+          "method": "GET",
+          "route": "/api/source/status",
+          "n": 4,
+          "median_ms": 354.674,
+          "max_ms": 368.44
+        },
+        {
+          "surface": "api",
+          "method": "GET",
+          "route": "/api/activity",
+          "n": 4,
+          "median_ms": 365.785,
+          "max_ms": 366.655
+        },
+        {
+          "surface": "api",
+          "method": "GET",
+          "route": "/api/drops",
+          "n": 4,
+          "median_ms": 389.529,
+          "max_ms": 409.678
+        },
+        {
+          "surface": "api",
+          "method": "GET",
+          "route": "/api/history",
+          "n": 4,
+          "median_ms": 401.543,
+          "max_ms": 405.879
+        },
+        {
+          "surface": "api",
+          "method": "GET",
+          "route": "/api/artwork",
+          "n": 4,
+          "median_ms": 404.727,
+          "max_ms": 406.942
+        },
+        {
+          "surface": "signer",
+          "method": "POST",
+          "route": "/tasks/{task_id}/prepare",
+          "n": 4,
+          "median_ms": 716.457,
+          "max_ms": 905.148
+        },
+        {
+          "surface": "api",
+          "method": "POST",
+          "route": "/api/notifications/register",
+          "n": 1,
+          "median_ms": 630.625,
+          "max_ms": 630.625
+        },
+        {
+          "surface": "api",
+          "method": "POST",
+          "route": "/api/notifications/preferences",
+          "n": 1,
+          "median_ms": 40.052,
+          "max_ms": 40.052
+        },
+        {
+          "surface": "api",
+          "method": "POST",
+          "route": "/api/notifications/unregister",
+          "n": 1,
+          "median_ms": 239.3,
+          "max_ms": 239.3
+        }
+      ]
+    },
+    "postgres": {
+      "test_outcomes": {
+        "passed": 548,
+        "xfail": 1
+      },
+      "traced_requests": 2283,
+      "documented_routes_exercised": 86,
+      "documented_routes": 86,
+      "unexercised_routes": [],
+      "peak_overlapping_requests": 63,
+      "mixed_requests": 102,
+      "mixed_statuses": {
+        "200": 102
+      },
+      "mixed_routes": [
+        {
+          "surface": "api",
+          "method": "POST",
+          "route": "/api/auth/login",
+          "n": 8,
+          "median_ms": 32.149,
+          "max_ms": 713.687
+        },
+        {
+          "surface": "api",
+          "method": "POST",
+          "route": "/api/copy-mints/watches",
+          "n": 3,
+          "median_ms": 11.137,
+          "max_ms": 17.909
+        },
+        {
+          "surface": "signer",
+          "method": "POST",
+          "route": "/copy-rules/{rule_id}/register",
+          "n": 3,
+          "median_ms": 7.727,
+          "max_ms": 15.937
+        },
+        {
+          "surface": "api",
+          "method": "POST",
+          "route": "/api/copy-mints/watches/{watch_id}/rules",
+          "n": 3,
+          "median_ms": 30.544,
+          "max_ms": 50.424
+        },
+        {
+          "surface": "signer",
+          "method": "GET",
+          "route": "/policies/{grant_id}/ready",
+          "n": 1,
+          "median_ms": 42.581,
+          "max_ms": 42.581
+        },
+        {
+          "surface": "api",
+          "method": "POST",
+          "route": "/api/tasks/arm",
+          "n": 1,
+          "median_ms": 100.526,
+          "max_ms": 100.526
+        },
+        {
+          "surface": "api",
+          "method": "GET",
+          "route": "/healthz",
+          "n": 4,
+          "median_ms": 117.834,
+          "max_ms": 118.123
+        },
+        {
+          "surface": "api",
+          "method": "GET",
+          "route": "/api/auth/me",
+          "n": 4,
+          "median_ms": 409.376,
+          "max_ms": 465.982
+        },
+        {
+          "surface": "api",
+          "method": "GET",
+          "route": "/api/wallets",
+          "n": 4,
+          "median_ms": 466.815,
+          "max_ms": 484.367
+        },
+        {
+          "surface": "api",
+          "method": "GET",
+          "route": "/api/automatic/status",
+          "n": 4,
+          "median_ms": 460.231,
+          "max_ms": 463.495
+        },
+        {
+          "surface": "api",
+          "method": "GET",
+          "route": "/api/automatic/daily-limit",
+          "n": 4,
+          "median_ms": 475.159,
+          "max_ms": 496.988
+        },
+        {
+          "surface": "api",
+          "method": "GET",
+          "route": "/api/automatic/policies",
+          "n": 4,
+          "median_ms": 471.293,
+          "max_ms": 518.071
+        },
+        {
+          "surface": "api",
+          "method": "GET",
+          "route": "/api/mint-plans",
+          "n": 4,
+          "median_ms": 519.466,
+          "max_ms": 525.346
+        },
+        {
+          "surface": "api",
+          "method": "GET",
+          "route": "/api/wallets/readiness",
+          "n": 4,
+          "median_ms": 530.101,
+          "max_ms": 568.667
+        },
+        {
+          "surface": "api",
+          "method": "GET",
+          "route": "/api/mint-permissions",
+          "n": 4,
+          "median_ms": 530.038,
+          "max_ms": 531.624
+        },
+        {
+          "surface": "api",
+          "method": "GET",
+          "route": "/api/tasks/queue",
+          "n": 4,
+          "median_ms": 567.715,
+          "max_ms": 572.267
+        },
+        {
+          "surface": "api",
+          "method": "GET",
+          "route": "/api/copy-mints/check-results",
+          "n": 4,
+          "median_ms": 594.551,
+          "max_ms": 598.324
+        },
+        {
+          "surface": "api",
+          "method": "GET",
+          "route": "/api/copy-mints",
+          "n": 4,
+          "median_ms": 596.399,
+          "max_ms": 630.903
+        },
+        {
+          "surface": "api",
+          "method": "GET",
+          "route": "/api/notifications/recent",
+          "n": 4,
+          "median_ms": 611.355,
+          "max_ms": 616.167
+        },
+        {
+          "surface": "api",
+          "method": "GET",
+          "route": "/api/copy-mints/activity",
+          "n": 4,
+          "median_ms": 641.037,
+          "max_ms": 648.672
+        },
+        {
+          "surface": "api",
+          "method": "GET",
+          "route": "/api/history",
+          "n": 4,
+          "median_ms": 644.109,
+          "max_ms": 661.85
+        },
+        {
+          "surface": "api",
+          "method": "GET",
+          "route": "/api/activity",
+          "n": 4,
+          "median_ms": 651.013,
+          "max_ms": 657.687
+        },
+        {
+          "surface": "api",
+          "method": "GET",
+          "route": "/api/source/status",
+          "n": 4,
+          "median_ms": 657.328,
+          "max_ms": 661.862
+        },
+        {
+          "surface": "api",
+          "method": "GET",
+          "route": "/api/drops",
+          "n": 4,
+          "median_ms": 686.503,
+          "max_ms": 702.129
+        },
+        {
+          "surface": "api",
+          "method": "GET",
+          "route": "/api/artwork",
+          "n": 4,
+          "median_ms": 686.425,
+          "max_ms": 703.416
+        },
+        {
+          "surface": "api",
+          "method": "POST",
+          "route": "/api/notifications/register",
+          "n": 1,
+          "median_ms": 704.974,
+          "max_ms": 704.974
+        },
+        {
+          "surface": "api",
+          "method": "POST",
+          "route": "/api/notifications/preferences",
+          "n": 1,
+          "median_ms": 21.346,
+          "max_ms": 21.346
+        },
+        {
+          "surface": "api",
+          "method": "POST",
+          "route": "/api/notifications/unregister",
+          "n": 1,
+          "median_ms": 47.481,
+          "max_ms": 47.481
+        },
+        {
+          "surface": "signer",
+          "method": "POST",
+          "route": "/tasks/{task_id}/prepare",
+          "n": 4,
+          "median_ms": 1032.491,
+          "max_ms": 1160.484
+        }
+      ]
+    }
+  },
+  "widget_samples": [
+    {
+      "feature": "Mint plans",
+      "text_scale": 1.0,
+      "host_elapsed_ms": 230.357,
+      "settle_pumps": 8
+    },
+    {
+      "feature": "Plan details",
+      "text_scale": 1.0,
+      "host_elapsed_ms": 136.81,
+      "settle_pumps": 7
+    },
+    {
+      "feature": "Copy",
+      "text_scale": 1.0,
+      "host_elapsed_ms": 103.597,
+      "settle_pumps": 8
+    },
+    {
+      "feature": "Budget menu",
+      "text_scale": 1.0,
+      "host_elapsed_ms": 137.026,
+      "settle_pumps": 8
+    },
+    {
+      "feature": "Activity",
+      "text_scale": 1.0,
+      "host_elapsed_ms": 42.56,
+      "settle_pumps": 8
+    },
+    {
+      "feature": "Mint details",
+      "text_scale": 1.0,
+      "host_elapsed_ms": 105.046,
+      "settle_pumps": 7
+    },
+    {
+      "feature": "Wallet",
+      "text_scale": 1.0,
+      "host_elapsed_ms": 49.045,
+      "settle_pumps": 8
+    },
+    {
+      "feature": "Today",
+      "text_scale": 1.0,
+      "host_elapsed_ms": 24.412,
+      "settle_pumps": 8
+    },
+    {
+      "feature": "Mint plans",
+      "text_scale": 1.4,
+      "host_elapsed_ms": 50.404,
+      "settle_pumps": 8
+    },
+    {
+      "feature": "Plan details",
+      "text_scale": 1.4,
+      "host_elapsed_ms": 55.296,
+      "settle_pumps": 7
+    },
+    {
+      "feature": "Copy",
+      "text_scale": 1.4,
+      "host_elapsed_ms": 94.097,
+      "settle_pumps": 8
+    },
+    {
+      "feature": "Budget menu",
+      "text_scale": 1.4,
+      "host_elapsed_ms": 43.632,
+      "settle_pumps": 8
+    },
+    {
+      "feature": "Activity",
+      "text_scale": 1.4,
+      "host_elapsed_ms": 51.835,
+      "settle_pumps": 8
+    },
+    {
+      "feature": "Mint details",
+      "text_scale": 1.4,
+      "host_elapsed_ms": 55.575,
+      "settle_pumps": 7
+    },
+    {
+      "feature": "Wallet",
+      "text_scale": 1.4,
+      "host_elapsed_ms": 49.446,
+      "settle_pumps": 8
+    },
+    {
+      "feature": "Today",
+      "text_scale": 1.4,
+      "host_elapsed_ms": 22.712,
+      "settle_pumps": 8
+    }
+  ],
+  "cdn_probe": {
+    "mode": "Server public-CDN reads; no mint-provider request; no phone decode/render timing",
+    "cache_rows": 21,
+    "rows_with_image_url": 16,
+    "samples": [
+      {
+        "status": 200,
+        "ms": 156.85,
+        "bytes_read": 15103,
+        "content_type": "image/avif",
+        "outcome": "ok"
+      },
+      {
+        "status": 200,
+        "ms": 6.15,
+        "bytes_read": 32704,
+        "content_type": "image/webp",
+        "outcome": "ok"
+      },
+      {
+        "status": 200,
+        "ms": 5.97,
+        "bytes_read": 74050,
+        "content_type": "image/webp",
+        "outcome": "ok"
+      }
+    ]
+  },
+  "host_decoder_probe": {
+    "mode": "Windows Flutter host decode with actual CDN bytes; not Android device evidence",
+    "samples": [
+      {
+        "content_type": "image/avif",
+        "input_bytes": 15103,
+        "decoded_to_png": true,
+        "output_bytes": 97147,
+        "cold_host_ms": 1880.593,
+        "warm_host_ms": 28.357,
+        "downloads": 1
+      },
+      {
+        "content_type": "image/webp",
+        "input_bytes": 32704,
+        "decoded_to_png": true,
+        "output_bytes": 167034,
+        "cold_host_ms": 117.787,
+        "warm_host_ms": 21.485,
+        "downloads": 1
+      },
+      {
+        "content_type": "image/webp",
+        "input_bytes": 74050,
+        "decoded_to_png": true,
+        "output_bytes": 242194,
+        "cold_host_ms": 146.109,
+        "warm_host_ms": 27.216,
+        "downloads": 1
+      }
+    ]
+  }
+}
