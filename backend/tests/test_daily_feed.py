@@ -128,7 +128,7 @@ async def test_worker_progress_wallet_binding_and_provider_failure(test_db,monke
     users,wallets,drop=await fixtures(test_db,monkeypatch)
     monkeypatch.setattr('app.services.feed_checks.OpenSeaClient.get_drop',AsyncMock(return_value={
         'chain':'base','contract_address':'0x'+'a'*40}))
-    async def check(db,wallet,*args):
+    async def check(db,wallet,*args,**kwargs):
         return dict(wallet_id=wallet.id,address=wallet.address,stages=[stage('public',
             'eligible' if wallet.id=='w0' else 'not_eligible')]),[]
     monkeypatch.setattr('app.services.mint_stage_choice.wallet_stages',check)
@@ -186,3 +186,24 @@ async def test_zero_drop_reprocessing_shortened_links_and_unsupported_records(te
     assert stored.full_text==post['text'] and stored.parser_version==1 and stored.list_date==date(2026,10,13)
     assert len((await test_db.scalars(select(Drop))).all())==7
     assert any(d.chain_id==0 for d in (await test_db.scalars(select(Drop))).all())
+
+from test_automatic_evm import lab
+
+async def test_display_reads_verify_public_terms_with_execution_disabled(lab,monkeypatch):
+    from app.services.mint_stage_choice import wallet_stages
+    monkeypatch.setattr(settings,'ENABLE_CUSTODIAL_AUTOMATIC',False)
+    monkeypatch.setattr('app.services.automatic.provider_for',AsyncMock(side_effect=AssertionError('Execution provider must not be used by display discovery.')))
+    from app.services.opensea import CHAINS
+    monkeypatch.setitem(CHAINS,'local',(31337,'Local test'))
+    monkeypatch.setattr('app.services.opensea.OpenSeaClient.get_drop',AsyncMock(return_value={
+        'chain':'local','contract_address':lab.nft.address,'stages':[{'uuid':'public','label':'Public','stage_type':'public_sale',
+            'start_time':datetime.fromtimestamp(lab.start,timezone.utc).isoformat(),
+            'end_time':datetime.fromtimestamp(lab.end,timezone.utc).isoformat(),'price':'10','max_per_wallet':'20',
+            'price_currency_address':'0x'+'0'*40}]}))
+    async with lab.factory() as db:
+        wallet=await db.get(Wallet,lab.wallet.id)
+        result,_=await wallet_stages(db,wallet,'local-test',31337,lab.nft.address,read_only=True)
+        assert result['stages'][0]['eligibility']=='eligible' and result['stages'][0]['price_wei']=='10'
+        assert result['stages'][0]['remaining']==20
+        assert feed_checks.presentation(cached(result['stages']))['setup_enabled']
+        for model in (MintPlan,MintTask,MintPermission):assert await db.scalar(select(func.count()).select_from(model))==0
