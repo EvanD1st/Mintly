@@ -143,6 +143,22 @@ async def logout(
     return {"status": "ok"}
 
 
+@router.post('/sign-out')
+async def sign_out(
+    user: User = Depends(get_authenticated_user),
+    db: AsyncSession = Depends(get_db),
+    authorization: str = Header(),
+):
+    """Retire this bearer only; saved device families require explicit removal."""
+    await db.execute(select(User.id).where(User.id == user.id).with_for_update())
+    await db.execute(update(AuthSession).where(
+        AuthSession.user_id == user.id,
+        AuthSession.token_hash == token_digest(authorization[7:]),
+    ).values(revoked_at=datetime.now(timezone.utc)))
+    await db.commit()
+    return {'status': 'ok'}
+
+
 @router.post("/change-password")
 async def change_password(
     req: ChangePasswordRequest,

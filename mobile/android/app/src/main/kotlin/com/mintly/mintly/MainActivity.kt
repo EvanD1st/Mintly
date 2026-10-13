@@ -6,23 +6,35 @@ import io.flutter.plugin.common.MethodChannel
 import java.util.concurrent.Executors
 
 class MainActivity : FlutterActivity() {
+    private var authenticatedWindow = false
     private val sessionWorker = Executors.newSingleThreadExecutor()
     private val deviceUnlock by lazy { DeviceUnlock(this) }
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         val vault = SecureSessionVault(applicationContext)
         val accounts = ProtectedAccountsVault(applicationContext)
+        // UI preference only. All account identifiers and credentials stay in the
+        // authenticated vault; this flag cannot bypass device authentication.
+        val chooser = AccountChooserPreference(applicationContext)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "mintly/protected-accounts").setMethodCallHandler { call, result ->
             if (call.method == "capabilities") {
                 result.success(mapOf("version" to 2, "device_secure" to accounts.deviceSecure(), "has_accounts" to accounts.hasAccounts(),
-                    "has_legacy_session" to vault.hasSession()));return@setMethodCallHandler
+                    "has_legacy_session" to vault.hasSession(), "chooser_on_reopen" to
+                    chooser.show(call.argument<String>("origin") ?: "")));return@setMethodCallHandler
+            }
+            if (call.method == "account_chooser") {
+                val origin = call.argument<String>("origin") ?: ""
+                if (!origin.startsWith("https://")) { result.error("invalid_origin", "Secure server required.", null);return@setMethodCallHandler }
+                if (chooser.set(origin, call.argument<Boolean>("show") == true)) result.success(true)
+                else result.error("storage_unavailable", "Could not save account selection.", null)
+                return@setMethodCallHandler
             }
             if (call.method == "unlock") { deviceUnlock.request {
-                if (it) window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+                if (it) { authenticatedWindow = true;window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE) }
                 result.success(it)
             };return@setMethodCallHandler }
             if (call.method == "foreground_authenticated") {
-                window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE);result.success(true);return@setMethodCallHandler
+                authenticatedWindow = true;window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE);result.success(true);return@setMethodCallHandler
             }
             if (call.method !in setOf("accounts", "read", "save", "remove")) { result.notImplemented();return@setMethodCallHandler }
             if (!deviceUnlock.authorized()) { result.error("unlock_required", "Unlock your phone to access saved accounts.", null);return@setMethodCallHandler }
@@ -65,7 +77,7 @@ class MainActivity : FlutterActivity() {
     override fun onPause() { window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE);super.onPause() }
     override fun onResume() {
         super.onResume()
-        if (!(getSystemService(android.content.Context.KEYGUARD_SERVICE) as android.app.KeyguardManager).isDeviceSecure)
+        if (authenticatedWindow || !(getSystemService(android.content.Context.KEYGUARD_SERVICE) as android.app.KeyguardManager).isDeviceSecure)
             window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
     }
     override fun onDestroy() { deviceUnlock.close();sessionWorker.shutdown(); super.onDestroy() }

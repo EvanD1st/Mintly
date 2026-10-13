@@ -42,6 +42,29 @@ async def test_rotation_lost_response_same_request_and_reuse_revoke(client,test_
     assert (await client.get('/api/auth/me',headers={'Authorization':'Bearer '+first.json()['token']})).status_code==401
     assert (await client.post('/api/auth/device-refresh',json=request(first.json()))).status_code==401
 
+async def test_local_sign_out_retires_only_bearer_and_preserves_remembered_accounts(client,test_db):
+    saved=await remembered(client)
+    other=await remembered(client)
+    admin=await remembered(client,'admin')
+    auth={'Authorization':'Bearer '+saved['token']}
+    assert (await client.post('/api/auth/sign-out',json={},headers=auth)).status_code==200
+    assert (await client.get('/api/auth/me',headers=auth)).status_code==401
+    assert (await client.get('/api/auth/me',headers={'Authorization':'Bearer '+other['token']})).status_code==200
+    assert (await client.get('/api/auth/me',headers={'Authorization':'Bearer '+admin['token']})).status_code==200
+    assert not (await test_db.get(DeviceSession,saved['device_session_id'])).revoked_at
+    rotated=await client.post('/api/auth/device-refresh',json=request(saved))
+    assert rotated.status_code==200
+    # Explicit account-wide logout still revokes all remembered families.
+    assert (await client.post('/api/auth/logout',headers={'Authorization':'Bearer '+rotated.json()['token']})).status_code==200
+    assert (await client.post('/api/auth/device-refresh',json=request(other))).status_code==401
+
+async def test_local_sign_out_ordinary_and_unauthenticated(client):
+    login=await client.post('/api/auth/login',json={'username':'member','password':'Member test password 123'})
+    auth={'Authorization':'Bearer '+login.json()['token']}
+    assert (await client.post('/api/auth/sign-out',headers=auth)).status_code==200
+    assert (await client.get('/api/auth/me',headers=auth)).status_code==401
+    assert (await client.post('/api/auth/sign-out')).status_code==401
+
 async def test_recovery_window_exact_boundary_and_history_replays(client,test_db):
     data=await remembered(client);now=datetime.now(timezone.utc)
     one=await rotate(test_db,**dict(family_id=data['device_session_id'],refresh=data['refresh_token'],

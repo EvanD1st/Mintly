@@ -23,7 +23,10 @@ Android stores refresh credentials, origin/account binding, username and pending
 recovery IDs inside AES-256-GCM records in no-backup installation storage. The
 Android Keystore key requires strong biometric or device credential authentication
 with a 60-second cryptographic authorization window. A separate native gate asks
-for fingerprint/phone PIN on every protected reopening or account switch. Android
+for fingerprint/phone PIN on cold process reopening or account switch. Ordinary
+background/resume does not lock the active account or interrupt wallet handoffs.
+First saving or removing a protected record may also require authentication to
+operate the Keystore-bound vault. Android
 30+ offers biometric/PIN authentication; earlier supported Android versions use
 the system PIN, pattern or password prompt. Mintly never receives the phone PIN,
 and the vault accepts no passwords, bearer credentials or wallet secrets.
@@ -37,8 +40,8 @@ valid. Older APKs lack the version-2 channel and keep ordinary login behavior.
 
 Switch/add account clears account routes, selections, eligibility caches and
 approval drafts. Session generations reject late requests from earlier identities.
-Reopening the same account covers existing routes and blocks their pointer,
-keyboard and accessibility access until unlock, preserving pending wallet handoffs.
+Cold reopening authenticates before restoring an account. The existing explicit
+lock overlay still blocks pointer, keyboard and accessibility access when locked.
 Push retirement finishes before registering another identity. Registration uses
 atomic insert-on-conflict and an owner-locked row, including preferences and
 unregister operations; another account's active token cannot be reassigned.
@@ -58,3 +61,18 @@ Release only after the feed backend/OTA rollout is verified. This native vault
 and authentication support requires a new signed APK; do not patch it into older
 installed releases through OTA. Apply 026 and verify the backend before publishing
 the signed installer. Keep the X discovery session and all signer mounts unchanged.
+
+The account-picker follow-up replaces the standalone switching section with an
+animated username card. Names already unlocked in this process can be displayed
+without reopening the encrypted vault; switching still requires device unlock.
+Local Sign out calls `/auth/sign-out` to revoke just that bearer and retains saved
+refresh families. `/auth/logout` remains account-wide revocation; removing a saved
+account revokes its family. Offline sign-out clears local access but cannot
+guarantee immediate server revocation without a successful response.
+
+A server-origin-bound boolean navigation preference keeps the signed-out chooser
+across process restart, without storing identifiers or credentials outside the
+vault. This native addition requires a new signed APK. Existing 1.1.3+6 APKs can
+receive Dart layout updates, but their chooser choice persists only in memory;
+older ordinary-login APKs keep their password-login flow. No new DB migration.
+The 90-day inactivity expiry remains enforced; the login page omits that wording.

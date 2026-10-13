@@ -3,12 +3,13 @@ import 'package:flutter/foundation.dart';
 import 'dart:io';
 
 abstract class ProtectedAccounts {
-  Future<Map<String, dynamic>> capabilities();
+  Future<Map<String, dynamic>> capabilities({String? origin});
   Future<bool> unlock();
   Future<List<Map<String, dynamic>>> accounts(String origin);
   Future<Map<String, dynamic>?> read(String origin, String account);
   Future<void> save(Map<String, dynamic> record);
   Future<void> remove(String origin, String account);
+  Future<void> showChooserOnReopen(String origin, bool show);
 }
 
 class PlatformProtectedAccounts implements ProtectedAccounts {
@@ -25,10 +26,12 @@ class PlatformProtectedAccounts implements ProtectedAccounts {
   }
 
   @override
-  Future<Map<String, dynamic>> capabilities() async {
+  Future<Map<String, dynamic>> capabilities({String? origin}) async {
     if (kIsWeb || !Platform.isAndroid) return {};
     try {
-      return await _channel.invokeMapMethod<String, dynamic>('capabilities') ??
+      return await _channel.invokeMapMethod<String, dynamic>('capabilities', {
+            'origin': origin,
+          }) ??
           {};
     } on MissingPluginException {
       return {};
@@ -68,4 +71,16 @@ class PlatformProtectedAccounts implements ProtectedAccounts {
   @override
   Future<void> remove(String origin, String account) => _channel
       .invokeMethod<void>('remove', {'origin': origin, 'user_id': account});
+
+  @override
+  Future<void> showChooserOnReopen(String origin, bool show) async {
+    try {
+      await _channel.invokeMethod<void>('account_chooser', {
+        'origin': origin,
+        'show': show,
+      });
+    } on MissingPluginException {
+      // Older vault APKs support the chooser during this process only.
+    }
+  }
 }

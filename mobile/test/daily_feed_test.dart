@@ -48,7 +48,13 @@ void main() {
       expect(api.selectedFeedWallet, 'default');
     },
   );
-  for (final status in ['eligible', 'not_eligible', 'unverified', 'stale']) {
+  for (final status in [
+    'eligible',
+    'not_eligible',
+    'unverified',
+    'stale',
+    'refreshing_history',
+  ]) {
     testWidgets('Today selected wallet card has safe setup state: $status', (
       tester,
     ) async {
@@ -84,11 +90,25 @@ void main() {
                   'source_price_text': 'Free / 0.001 ETH',
                   'source_time_text': '2pm UTC',
                   'wallet_check': {
-                    'status': status == 'stale' ? 'eligible' : status,
+                    'status': status == 'stale'
+                        ? 'eligible'
+                        : status == 'refreshing_history'
+                        ? 'unverified'
+                        : status,
                     'checked_at': now
                         .subtract(Duration(seconds: status == 'stale' ? 90 : 0))
                         .toIso8601String(),
                     'setup_enabled': status == 'eligible' || status == 'stale',
+                    if (status == 'refreshing_history') ...{
+                      'last_status': 'eligible',
+                      'refreshing': true,
+                      'last_recommended_stage': {
+                        'id': 'public',
+                        'name': 'Public',
+                        'price_wei': '0',
+                        'starts_at': now.toIso8601String(),
+                      },
+                    },
                     'recommended_stage':
                         status == 'eligible' || status == 'stale'
                         ? {
@@ -138,9 +158,19 @@ void main() {
       if (status == 'stale' || status == 'unverified') {
         expect(find.text('Not verified'), findsOneWidget);
       }
-      if (status != 'eligible') {
+      if (status == 'refreshing_history') {
+        expect(find.text('Last checked: eligible'), findsOneWidget);
+        expect(find.textContaining('Refreshing eligibility'), findsOneWidget);
+        expect(find.text('Not verified'), findsNothing);
+      }
+      if (status != 'eligible' && status != 'refreshing_history') {
         expect(find.textContaining('Source price:'), findsOneWidget);
       }
+      final polls = calls.where((p) => p.endsWith('/wallet-checks')).length;
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      await tester.pump(const Duration(seconds: 30));
+      expect(calls.where((p) => p.endsWith('/wallet-checks')).length, polls);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
       expect(calls.where((p) => p.endsWith('/prepare-plan')), isEmpty);
       await tester.pumpWidget(const SizedBox.shrink());
       container.dispose();

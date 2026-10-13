@@ -10,7 +10,7 @@ import 'admin_screen.dart';
 import 'copy_mints_screen.dart';
 import 'history_screen.dart';
 import 'source_screen.dart';
-import 'saved_accounts_screen.dart';
+import '../widgets/account_picker_card.dart';
 
 class AccountSettingsScreen extends ConsumerStatefulWidget {
   const AccountSettingsScreen({super.key});
@@ -31,9 +31,9 @@ class _AccountSettingsState extends ConsumerState<AccountSettingsScreen> {
       // Local push state is cleared even when unregistering is unavailable.
     }
     try {
-      await api.logout();
+      await api.signOut();
     } catch (_) {
-      // logout clears local authentication in its finally block.
+      // Local sign-out keeps remembered identities, even while offline.
     }
     if (mounted) Navigator.of(context).popUntil((route) => route.isFirst);
   }
@@ -129,8 +129,6 @@ class _AccountSettingsState extends ConsumerState<AccountSettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final api = ref.watch(apiServiceProvider);
-    final colors = Theme.of(context).colorScheme;
-    final username = api.username;
     return Scaffold(
       appBar: AppBar(title: const Text('Account settings')),
       body: SafeArea(
@@ -138,79 +136,7 @@ class _AccountSettingsState extends ConsumerState<AccountSettingsScreen> {
         child: ListView(
           padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
           children: [
-            if (api.protectedAccountsAvailable)
-              _section('Accounts', [
-                _link(
-                  'Switch account',
-                  'Unlock another saved Mintly account',
-                  const Icon(Icons.switch_account_outlined),
-                  const SavedAccountsScreen(),
-                ),
-                ListTile(
-                  leading: const Icon(Icons.person_add_outlined),
-                  title: const Text('Add account'),
-                  onTap: () async {
-                    try {
-                      await PushService.instance.disconnect();
-                    } catch (_) {}
-                    api.lockSession();
-                    if (context.mounted) {
-                      Navigator.of(context).popUntil((route) => route.isFirst);
-                    }
-                  },
-                ),
-                _link(
-                  'Remove saved account',
-                  'Revoke remembered access on this phone',
-                  const Icon(Icons.person_remove_outlined),
-                  const SavedAccountsScreen(),
-                ),
-              ]),
-            Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: colors.primary.withValues(alpha: .08),
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Row(
-                children: [
-                  CircleAvatar(
-                    radius: 25,
-                    backgroundColor: colors.primary,
-                    foregroundColor: colors.onPrimary,
-                    child: Text(
-                      username.isEmpty
-                          ? '?'
-                          : username.substring(0, 1).toUpperCase(),
-                      style: const TextStyle(
-                        fontSize: 22,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          username,
-                          style: Theme.of(context).textTheme.titleLarge
-                              ?.copyWith(fontWeight: FontWeight.w700),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          api.isAdmin
-                              ? 'Administrator account'
-                              : 'Personal account',
-                          style: Theme.of(context).textTheme.bodyMedium,
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
+            const AccountPickerCard(),
             _section('Your activity', [
               _link(
                 'History',
