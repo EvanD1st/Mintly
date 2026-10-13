@@ -15,7 +15,7 @@ def aware(value: datetime | None) -> datetime | None:
     return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
 
 
-async def verified_stage_schedule(detail: dict, chain_id: int, contract: str) -> list[dict]:
+async def verified_stage_schedule(detail: dict, chain_id: int, contract: str, *, provider_factory=None) -> list[dict]:
     """Use SeaDrop's current public terms for personal-plan review.
 
     OpenSea can retain an earlier public schedule after the collection owner
@@ -33,7 +33,7 @@ async def verified_stage_schedule(detail: dict, chain_id: int, contract: str) ->
 
     web3 = None
     try:
-        web3 = await automatic.provider_for(chain_id)
+        web3 = await (provider_factory or automatic.provider_for)(chain_id)
         current = await public_stage(web3, contract)
     except Exception as error:
         raise OpenSeaUnavailable('Current public mint terms could not be verified on chain.', 503) from error
