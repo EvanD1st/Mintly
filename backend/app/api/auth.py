@@ -4,13 +4,13 @@ from datetime import datetime, timedelta, timezone
 import hashlib
 import re
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Header
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_authenticated_user, get_db, require_admin
-from app.models import ActivityEvent, AuthSession, LoginAttempt, NotificationDevice, User, WalletPairing
+from app.models import ActivityEvent, AuthSession, LoginAttempt, NotificationDevice, User, WalletPairing, DeviceSession
 from app.services.auth import (
     generate_temporary_password, hash_password, new_session_token,
     token_digest, verify_password,
@@ -48,13 +48,21 @@ def public_user(user: User) -> dict:
 
 
 async def revoke_sessions(db: AsyncSession, user_id: str) -> None:
+    await db.execute(select(User.id).where(User.id==user_id).with_for_update())
+    now=datetime.now(timezone.utc)
+    await db.execute(update(DeviceSession).where(DeviceSession.user_id==user_id,
+        DeviceSession.revoked_at.is_(None)).values(revoked_at=now))
     await db.execute(update(AuthSession).where(
         AuthSession.user_id == user_id, AuthSession.revoked_at.is_(None),
-    ).values(revoked_at=datetime.now(timezone.utc)))
+    ).values(revoked_at=now))
 
 
 @router.post("/login")
 async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
+    return await authenticate_password(req,db)
+
+
+async def authenticate_password(req,db,origin=None):
     username = req.username.strip().lower()
     name_hash = hashlib.sha256(username.encode()).hexdigest()
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=15)
@@ -64,18 +72,60 @@ async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
     ))).scalar_one()
     if attempts >= 5:
         raise HTTPException(status_code=429, detail="Too many sign-in attempts. Try again later.")
-    user = (await db.execute(select(User).where(User.username == username))).scalar_one_or_none()
+    user = (await db.execute(select(User).where(User.username == username).with_for_update()
+        .execution_options(populate_existing=True))).scalar_one_or_none()
     valid = verify_password(user.password_hash if user else None, req.password)
     if not valid or user is None or not user.is_active or user.deleted_at is not None:
         db.add(LoginAttempt(username_hash=name_hash))
         await db.commit()
         raise HTTPException(status_code=401, detail="Invalid username or password.")
     await db.execute(delete(LoginAttempt).where(LoginAttempt.username_hash == name_hash))
+    if origin is not None:
+        from app.services.device_sessions import issue
+        return await issue(db,user,origin)
     token = new_session_token()
     expires = datetime.now(timezone.utc) + timedelta(hours=12 if user.role == "admin" else 24 * 7)
     db.add(AuthSession(user_id=user.id, token_hash=token_digest(token), expires_at=expires))
     await db.commit()
     return {"token": token, "expires_at": expires, "user": public_user(user)}
+
+
+class DeviceLogin(LoginRequest):
+    origin: str = Field(max_length=250)
+    protocol: int = Field(default=2,ge=2,le=2)
+
+class DeviceRefresh(BaseModel):
+    device_session_id: str = Field(min_length=36,max_length=36)
+    refresh_token: str = Field(min_length=32,max_length=256)
+    request_id: str = Field(min_length=32,max_length=64)
+    origin: str = Field(max_length=250)
+
+class RememberDevice(BaseModel):
+    origin: str = Field(max_length=250)
+
+@router.post('/device-login')
+async def device_login(req:DeviceLogin,db:AsyncSession=Depends(get_db)):
+    return await authenticate_password(req,db,req.origin)
+
+@router.post('/device-remember')
+async def remember_device(req:RememberDevice,user:User=Depends(get_authenticated_user),db:AsyncSession=Depends(get_db),authorization:str=Header()):
+    from app.services.device_sessions import issue
+    user=await db.scalar(select(User).where(User.id==user.id).with_for_update().execution_options(populate_existing=True))
+    if not user.is_active or user.deleted_at:raise HTTPException(401,'Account unavailable.')
+    session=await db.scalar(select(AuthSession).where(AuthSession.token_hash==token_digest(authorization[7:]),
+        AuthSession.user_id==user.id,AuthSession.revoked_at.is_(None),AuthSession.expires_at>datetime.now(timezone.utc)))
+    if not session:raise HTTPException(401,'Session expired. Sign in again.')
+    return await issue(db,user,req.origin)
+
+@router.post('/device-refresh')
+async def device_refresh(req:DeviceRefresh,db:AsyncSession=Depends(get_db)):
+    from app.services.device_sessions import rotate
+    return await rotate(db,req.device_session_id,req.refresh_token,req.request_id,req.origin)
+
+@router.post('/device-revoke')
+async def device_revoke(req:DeviceRefresh,db:AsyncSession=Depends(get_db)):
+    from app.services.device_sessions import rotate
+    return await rotate(db,req.device_session_id,req.refresh_token,req.request_id,req.origin,revoke=True)
 
 
 @router.get("/me")
@@ -99,6 +149,7 @@ async def change_password(
     user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
+    user=await db.scalar(select(User).where(User.id==user.id).with_for_update().execution_options(populate_existing=True))
     if not verify_password(user.password_hash, req.current_password):
         raise HTTPException(status_code=400, detail="Current password is incorrect.")
     if req.current_password == req.new_password:
@@ -151,7 +202,7 @@ async def reset_password(
 ):
     if not verify_password(admin.password_hash, req.admin_password):
         raise HTTPException(status_code=403, detail="Admin password is incorrect.")
-    user = (await db.execute(select(User).where(User.id == user_id, User.deleted_at.is_(None)))).scalar_one_or_none()
+    user = (await db.execute(select(User).where(User.id == user_id, User.deleted_at.is_(None)).with_for_update())).scalar_one_or_none()
     if user is None or user.role == "admin":
         raise HTTPException(status_code=404, detail="Member account not found.")
     temporary_password = generate_temporary_password()
@@ -174,7 +225,7 @@ async def delete_user(
 ):
     if not verify_password(admin.password_hash, req.admin_password):
         raise HTTPException(status_code=403, detail="Admin password is incorrect.")
-    user = (await db.execute(select(User).where(User.id == user_id, User.deleted_at.is_(None)))).scalar_one_or_none()
+    user = (await db.execute(select(User).where(User.id == user_id, User.deleted_at.is_(None)).with_for_update())).scalar_one_or_none()
     if user is None or user.role == "admin":
         raise HTTPException(status_code=404, detail="Member account not found.")
     user.is_active = False

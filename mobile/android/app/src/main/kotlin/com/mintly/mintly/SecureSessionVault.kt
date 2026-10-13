@@ -18,6 +18,7 @@ class SecureSessionVault(context: Context) {
     private val file = AtomicFile(File(context.noBackupFilesDir, "mintly-session.enc"))
     private val alias = "mintly.session.aes.v1"
     private val aad = "com.mintly.mintly/session/v1".toByteArray(Charsets.UTF_8)
+    fun hasSession() = file.baseFile.exists()
 
     private fun key(create: Boolean): SecretKey? {
         val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }

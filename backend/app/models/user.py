@@ -34,6 +34,7 @@ class AuthSession(Base):
     token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    device_session_id: Mapped[Optional[str]] = mapped_column(String(36),ForeignKey('device_sessions.id'),index=True)
 
 
 class LoginAttempt(Base):

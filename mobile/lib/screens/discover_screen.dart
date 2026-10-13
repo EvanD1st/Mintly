@@ -12,6 +12,7 @@ import 'source_screen.dart';
 import '../widgets/delete_icon.dart';
 import 'dart:async';
 import 'saved_plan_screen.dart';
+import '../widgets/network_budget_card.dart' show formatNative;
 
 class DiscoverScreen extends ConsumerStatefulWidget {
   const DiscoverScreen({super.key});
@@ -91,22 +92,46 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
           ),
           const SizedBox(height: 18),
           if (api.feedWallets.isNotEmpty)
-            DropdownButtonFormField<String>(
-              initialValue: api.selectedFeedWallet,
-              key: ValueKey(api.selectedFeedWallet),
-              decoration: const InputDecoration(
-                labelText: 'Check eligibility for wallet',
-              ),
-              items: [
-                for (final wallet in api.feedWallets)
-                  DropdownMenuItem(
-                    value: wallet['id'] as String,
-                    child: Text(
-                      '${wallet['label']} · ${(wallet['address'] as String).substring(0, 8)}…',
+            Card(
+              child: ListTile(
+                leading: const Icon(Icons.account_balance_wallet_outlined),
+                title: const Text('Check eligibility for wallet'),
+                subtitle: Text(
+                  api.feedWallets.firstWhere(
+                        (w) => w['id'] == api.selectedFeedWallet,
+                        orElse: () => api.feedWallets.first,
+                      )['label']
+                      as String,
+                ),
+                trailing: const Icon(MintlyIcons.chevronRight),
+                onTap: () async {
+                  final chosen = await showModalBottomSheet<String>(
+                    context: context,
+                    builder: (context) => SafeArea(
+                      child: ListView(
+                        shrinkWrap: true,
+                        children: [
+                          for (final wallet in api.feedWallets)
+                            ListTile(
+                              title: Text(wallet['label'] as String),
+                              subtitle: Text(wallet['address'] as String),
+                              trailing: wallet['id'] == api.selectedFeedWallet
+                                  ? const Text('Selected')
+                                  : null,
+                              onTap: () => Navigator.pop(
+                                context,
+                                wallet['id'] as String,
+                              ),
+                            ),
+                        ],
+                      ),
                     ),
-                  ),
-              ],
-              onChanged: (id) => _refresh(walletId: id),
+                  );
+                  if (chosen != null && mounted) {
+                    await _refresh(walletId: chosen);
+                  }
+                },
+              ),
             ),
           const SizedBox(height: 12),
           if (api.isAdmin)
@@ -289,9 +314,7 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
             _ => 'Not verified',
           }
         : 'Not verified';
-    final price = stage?['price_wei'] == null
-        ? null
-        : double.tryParse('${stage!['price_wei']}');
+    final price = stage?['price_wei'] as String?;
     final starts = DateTime.tryParse(stage?['starts_at'] as String? ?? '');
     return Card(
       child: Padding(
@@ -325,7 +348,7 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
             const SizedBox(height: 12),
             if (stage != null && fresh)
               Text(
-                '${stage['name']} · ${price == 0 ? 'Free' : '${(price! / 1e18).toStringAsFixed(6)} ${drop.nativeCurrency}'}',
+                '${stage['name']} · ${price == '0' ? 'Free' : '${formatNative(price!)} ${drop.nativeCurrency}'}',
               ),
             if (starts != null && fresh) Text('Opens ${_wat(starts)} WAT'),
             if (!fresh || stage == null)

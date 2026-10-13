@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     X_DISCOVERY_INTERVAL_SECONDS: int = 300
     X_DISCOVERY_TIMEOUT_SECONDS: int = 45
     FEED_WALLET_CHECKS_ENABLED: bool = True
+    REMEMBERED_LOGIN_ISSUANCE_ENABLED: bool = True
 
     # Free OpenSea drop API key, rotated by the server before its 7-day expiry.
     OPENSEA_KEY_FILE: str = "./opensea-key.json"

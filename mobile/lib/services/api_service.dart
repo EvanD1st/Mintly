@@ -8,6 +8,9 @@ import '../models/mint_plan_model.dart';
 import '../widgets/mintly_notice.dart';
 import 'session_vault.dart';
 import 'dart:async';
+import 'dart:math';
+import 'protected_accounts.dart';
+import 'push_service.dart';
 
 class ApiException implements Exception {
   final String message;
@@ -23,6 +26,13 @@ class ApiService extends ChangeNotifier {
   );
   final http.Client _client;
   final SessionVault _vault;
+  final ProtectedAccounts _accounts;
+  bool protectedAccountsAvailable = false;
+  bool deviceLockConfigured = false;
+  bool unlockingAccounts = false;
+  bool screenLocked = false;
+  bool _accountTransition = false;
+  List<Map<String, dynamic>> savedAccounts = [];
   Future<void> _storage = Future<void>.value();
   Future<T> _store<T>(Future<T> Function() action) {
     final next = _storage.then((_) => action());
@@ -75,9 +85,13 @@ class ApiService extends ChangeNotifier {
 
   bool sessionRemembered = false;
   bool restoringSession = false;
-  ApiService({http.Client? client, SessionVault? vault})
-    : _client = client ?? http.Client(),
-      _vault = vault ?? PlatformSessionVault();
+  ApiService({
+    http.Client? client,
+    SessionVault? vault,
+    ProtectedAccounts? accounts,
+  }) : _client = client ?? http.Client(),
+       _vault = vault ?? PlatformSessionVault(),
+       _accounts = accounts ?? PlatformProtectedAccounts();
 
   bool get isLiveBackendConnected => _sessionToken.isNotEmpty;
   String get username => _user?['username'] as String? ?? '';
@@ -118,16 +132,66 @@ class ApiService extends ChangeNotifier {
     return data;
   }
 
-  Future<void> login(String username, String password) async {
+  Future<void> login(
+    String username,
+    String password, {
+    bool remember = true,
+  }) async {
+    if (_accountTransition || restoringSession) {
+      throw const ApiException('An account change is already in progress.');
+    }
+    _accountTransition = true;
+    try {
+      await _login(username, password, remember: remember);
+    } finally {
+      _accountTransition = false;
+    }
+  }
+
+  Future<void> _login(
+    String username,
+    String password, {
+    required bool remember,
+  }) async {
     _requireHttps();
-    final response = await _client
+    if (isLiveBackendConnected) {
+      try {
+        await PushService.instance.disconnect();
+      } catch (_) {}
+      lockSession();
+    }
+    final loginRevision = _sessionRevision;
+    await checkProtectedAccounts();
+    final protected =
+        remember && protectedAccountsAvailable && deviceLockConfigured;
+    var response = await _client
         .post(
-          Uri.parse('$baseUrl/auth/login'),
+          Uri.parse('$baseUrl/auth/${protected ? 'device-login' : 'login'}'),
           headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({'username': username.trim(), 'password': password}),
+          body: jsonEncode({
+            'username': username.trim(),
+            'password': password,
+            if (protected) 'origin': baseUrl,
+            if (protected) 'protocol': 2,
+          }),
         )
         .timeout(const Duration(seconds: 15));
+    if (protected && response.statusCode == 503) {
+      response = await _client
+          .post(
+            Uri.parse('$baseUrl/auth/login'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'username': username.trim(),
+              'password': password,
+            }),
+          )
+          .timeout(const Duration(seconds: 15));
+    }
     final result = _decode(response) as Map<String, dynamic>;
+    if (loginRevision != _sessionRevision) {
+      throw const ApiException('Sign-in was cancelled. Try again.');
+    }
     _sessionToken = result['token'] as String;
     _user = result['user'] as Map<String, dynamic>;
     _sessionRevision++;
@@ -136,8 +200,9 @@ class ApiService extends ChangeNotifier {
     final expiry = result['expires_at'];
     final revision = _sessionRevision;
     final token = _sessionToken;
-    final remembered =
+    var remembered =
         expiry is String &&
+        !protectedAccountsAvailable &&
         await _store(
           () => _vault.save({
             'token': token,
@@ -145,9 +210,51 @@ class ApiService extends ChangeNotifier {
             'origin': baseUrl,
           }),
         );
+    if (protectedAccountsAvailable) {
+      await _store(() => _vault.clear());
+      if (protected &&
+          result['refresh_token'] is String &&
+          await _unlockAccounts()) {
+        try {
+          await _saveDevice(result);
+          remembered = true;
+        } catch (_) {
+          remembered = false;
+        }
+      }
+      if (!remembered && result['refresh_token'] is String) {
+        // A cancelled/failed vault write must not leave an unrecorded refresh family.
+        try {
+          await _client
+              .post(
+                Uri.parse('$baseUrl/auth/device-revoke'),
+                headers: {'Content-Type': 'application/json'},
+                body: jsonEncode(_refreshBody(result, _requestId())),
+              )
+              .timeout(const Duration(seconds: 10));
+        } catch (_) {}
+        final ordinary = await _client
+            .post(
+              Uri.parse('$baseUrl/auth/login'),
+              headers: {'Content-Type': 'application/json'},
+              body: jsonEncode({
+                'username': username.trim(),
+                'password': password,
+              }),
+            )
+            .timeout(const Duration(seconds: 15));
+        final fallback = Map<String, dynamic>.from(_decode(ordinary));
+        if (revision != _sessionRevision) return;
+        _sessionToken = fallback['token'] as String;
+        _user = Map<String, dynamic>.from(fallback['user']);
+      }
+    }
     if (expiry is! String) unawaited(_store(() => _vault.clear()));
     if (revision != _sessionRevision) return;
     sessionRemembered = remembered;
+    screenLocked = false;
+    if (protectedAccountsAvailable)
+      unawaited(PlatformProtectedAccounts.authenticatedForeground());
     notifyListeners();
   }
 
@@ -168,6 +275,23 @@ class ApiService extends ChangeNotifier {
     final revision = _sessionRevision;
     try {
       _requireHttps();
+      final caps = await checkProtectedAccounts();
+      if (protectedAccountsAvailable) {
+        if (caps['has_accounts'] != true && caps['has_legacy_session'] != true)
+          return false;
+        if (!deviceLockConfigured || !await _unlockAccounts()) return false;
+        savedAccounts = await _accounts.accounts(baseUrl);
+        if (caps['has_accounts'] == true && savedAccounts.isNotEmpty) {
+          final chosen = savedAccounts.firstWhere(
+            (r) => r['active'] == true,
+            orElse: () => savedAccounts.first,
+          );
+          return await _activateSaved(
+            chosen['user_id'] as String,
+            alreadyUnlocked: true,
+          );
+        }
+      }
       final saved = await _store(() => _vault.read());
       if (revision != _sessionRevision) return false;
       if (saved == null) return false;
@@ -201,6 +325,18 @@ class ApiService extends ChangeNotifier {
       sessionRemembered = true;
       _resetMetadata();
       notifyListeners();
+      if (protectedAccountsAvailable && deviceLockConfigured) {
+        try {
+          final result = Map<String, dynamic>.from(
+            await _post('/auth/device-remember', {'origin': baseUrl}),
+          );
+          await _saveDevice(result);
+          _sessionToken = result['token'] as String;
+          await _store(() => _vault.clear());
+        } catch (_) {
+          /* Valid legacy bearer remains usable for its original lifetime. */
+        }
+      }
       return true;
     } catch (_) {
       return false;
@@ -218,8 +354,16 @@ class ApiService extends ChangeNotifier {
   }
 
   Future<void> logout() async {
+    final account = userId;
     try {
       if (isLiveBackendConnected) await _post('/auth/logout', {});
+      if (protectedAccountsAvailable &&
+          deviceLockConfigured &&
+          account.isNotEmpty &&
+          await _unlockAccounts()) {
+        await _accounts.remove(baseUrl, account);
+        savedAccounts = await _accounts.accounts(baseUrl);
+      }
     } finally {
       disconnectBackend();
     }
@@ -230,6 +374,7 @@ class ApiService extends ChangeNotifier {
     sessionRemembered = false;
     _sessionToken = '';
     _user = null;
+    screenLocked = false;
     _sessionRevision++;
     MintlyNotice.dismissAll();
     _resetMetadata();
@@ -237,10 +382,209 @@ class ApiService extends ChangeNotifier {
   }
 
   void _resetMetadata() {
+    clearFeedSelection();
     _artwork.clear();
     sourceStatusText = 'Waiting for live data';
     checkedWalletLabel = 'No wallet connected';
     lastCheckedText = 'Wallet-specific eligibility is unverified';
+  }
+
+  Future<Map<String, dynamic>> checkProtectedAccounts() async {
+    final caps = await _accounts.capabilities();
+    protectedAccountsAvailable = caps['version'] == 2;
+    deviceLockConfigured = caps['device_secure'] == true;
+    return caps;
+  }
+
+  Future<bool> _unlockAccounts() async {
+    unlockingAccounts = true;
+    try {
+      return await _accounts.unlock();
+    } finally {
+      unlockingAccounts = false;
+    }
+  }
+
+  String _requestId() => List.generate(
+    32,
+    (_) => Random.secure().nextInt(256).toRadixString(16).padLeft(2, '0'),
+  ).join();
+  Map<String, dynamic> _refreshBody(
+    Map<String, dynamic> record,
+    String request,
+  ) => {
+    'device_session_id': record['device_session_id'],
+    'refresh_token': record['refresh_token'],
+    'request_id': request,
+    'origin': baseUrl,
+  };
+
+  Future<void> _saveDevice(Map<String, dynamic> result) async {
+    final user = Map<String, dynamic>.from(result['user']);
+    await _accounts.save({
+      'origin': baseUrl,
+      'user_id': user['id'],
+      'username': user['username'],
+      'device_session_id': result['device_session_id'],
+      'refresh_token': result['refresh_token'],
+      'remembered_expires_at': result['remembered_expires_at'],
+    });
+    savedAccounts = await _accounts.accounts(baseUrl);
+  }
+
+  Future<void> loadSavedAccounts() async {
+    await checkProtectedAccounts();
+    if (!protectedAccountsAvailable ||
+        !deviceLockConfigured ||
+        !await _unlockAccounts()) {
+      return;
+    }
+    savedAccounts = await _accounts.accounts(baseUrl);
+    notifyListeners();
+  }
+
+  Future<bool> switchSavedAccount(String account) async {
+    if (_accountTransition || restoringSession) return false;
+    _accountTransition = true;
+    try {
+      return await _switchSaved(account);
+    } finally {
+      _accountTransition = false;
+    }
+  }
+
+  Future<bool> _switchSaved(String account) async {
+    if (!deviceLockConfigured || !await _unlockAccounts()) return false;
+    try {
+      await PushService.instance.disconnect();
+    } catch (_) {
+      /* Token retirement is attempted before identity changes. */
+    }
+    lockSession();
+    final activated = await _activateSaved(account, alreadyUnlocked: true);
+    if (activated) {
+      try {
+        await PushService.instance.connect(this);
+      } catch (_) {}
+    }
+    return activated;
+  }
+
+  Future<bool> _activateSaved(
+    String account, {
+    bool alreadyUnlocked = false,
+  }) async {
+    if (!alreadyUnlocked && !await _unlockAccounts()) return false;
+    final record = await _accounts.read(baseUrl, account);
+    if (record == null ||
+        record['origin'] != baseUrl ||
+        record['user_id'] != account) {
+      return false;
+    }
+    final expiry = DateTime.tryParse('${record['remembered_expires_at']}');
+    if (expiry == null || !expiry.toUtc().isAfter(DateTime.now().toUtc())) {
+      await _accounts.remove(baseUrl, account);
+      return false;
+    }
+    final request = record['pending_refresh_id'] as String? ?? _requestId();
+    await _accounts.save({
+      ...record,
+      'pending_refresh_id': request,
+    }); // Durable before network IO.
+    final revision = _sessionRevision;
+    http.Response response;
+    Future<http.Response> send() => _client
+        .post(
+          Uri.parse('$baseUrl/auth/device-refresh'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode(_refreshBody(record, request)),
+        )
+        .timeout(const Duration(seconds: 12));
+    try {
+      response = await send();
+    } on TimeoutException {
+      response = await send();
+    } on http.ClientException {
+      response = await send();
+    }
+    if (revision != _sessionRevision) return false;
+    if (response.statusCode == 401) {
+      await _accounts.remove(baseUrl, account);
+      savedAccounts = await _accounts.accounts(baseUrl);
+      throw const ApiException(
+        'Saved login expired. Sign in with your password.',
+      );
+    }
+    final result = Map<String, dynamic>.from(_decode(response));
+    if (result['user']?['id'] != account || result['origin'] != baseUrl) {
+      throw const ApiException('Saved account verification failed.');
+    }
+    await _saveDevice(result);
+    if (revision != _sessionRevision) return false;
+    _sessionToken = result['token'] as String;
+    _user = Map<String, dynamic>.from(result['user']);
+    screenLocked = false;
+    _sessionRevision++;
+    sessionRemembered = true;
+    _resetMetadata();
+    MintlyNotice.dismissAll();
+    notifyListeners();
+    return true;
+  }
+
+  Future<void> removeSavedAccount(String account) async {
+    if (!await _unlockAccounts()) return;
+    final record = await _accounts.read(baseUrl, account);
+    if (record == null) return;
+    final response = await _client
+        .post(
+          Uri.parse('$baseUrl/auth/device-revoke'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode(
+            _refreshBody(
+              record,
+              record['pending_refresh_id'] as String? ?? _requestId(),
+            ),
+          ),
+        )
+        .timeout(const Duration(seconds: 12));
+    if (response.statusCode != 401) _decode(response);
+    await _accounts.remove(baseUrl, account);
+    savedAccounts = await _accounts.accounts(baseUrl);
+    if (userId == account) {
+      try {
+        await PushService.instance.disconnect();
+      } catch (_) {}
+      lockSession();
+    }
+    notifyListeners();
+  }
+
+  void lockSession() {
+    _sessionToken = '';
+    _user = null;
+    screenLocked = false;
+    _sessionRevision++;
+    sessionRemembered = false;
+    _resetMetadata();
+    MintlyNotice.dismissAll();
+    notifyListeners();
+  }
+
+  void lockForReopen() {
+    if (protectedAccountsAvailable &&
+        deviceLockConfigured &&
+        isLiveBackendConnected) {
+      screenLocked = true;
+      notifyListeners();
+    }
+  }
+
+  Future<bool> unlockForReopen() async {
+    if (!await _unlockAccounts()) return false;
+    screenLocked = false;
+    notifyListeners();
+    return true;
   }
 
   void _checkSession(int revision) {

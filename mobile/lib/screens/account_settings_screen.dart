@@ -10,6 +10,7 @@ import 'admin_screen.dart';
 import 'copy_mints_screen.dart';
 import 'history_screen.dart';
 import 'source_screen.dart';
+import 'saved_accounts_screen.dart';
 
 class AccountSettingsScreen extends ConsumerStatefulWidget {
   const AccountSettingsScreen({super.key});
@@ -111,7 +112,8 @@ class _AccountSettingsState extends ConsumerState<AccountSettingsScreen> {
           );
         } catch (_) {
           if (context.mounted) {
-            MintlyNotice.show(context,
+            MintlyNotice.show(
+              context,
               const SnackBar(
                 content: Text(
                   'Could not update notifications. Allow notifications and retry.',
@@ -136,6 +138,34 @@ class _AccountSettingsState extends ConsumerState<AccountSettingsScreen> {
         child: ListView(
           padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
           children: [
+            if (api.protectedAccountsAvailable)
+              _section('Accounts', [
+                _link(
+                  'Switch account',
+                  'Unlock another saved Mintly account',
+                  const Icon(Icons.switch_account_outlined),
+                  const SavedAccountsScreen(),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.person_add_outlined),
+                  title: const Text('Add account'),
+                  onTap: () async {
+                    try {
+                      await PushService.instance.disconnect();
+                    } catch (_) {}
+                    api.lockSession();
+                    if (context.mounted) {
+                      Navigator.of(context).popUntil((route) => route.isFirst);
+                    }
+                  },
+                ),
+                _link(
+                  'Remove saved account',
+                  'Revoke remembered access on this phone',
+                  const Icon(Icons.person_remove_outlined),
+                  const SavedAccountsScreen(),
+                ),
+              ]),
             Container(
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
@@ -195,7 +225,10 @@ class _AccountSettingsState extends ConsumerState<AccountSettingsScreen> {
                 const CopyMintsScreen(),
               ),
             ]),
-            _section('Automation', [const AutomationControl(), const DailyBudgetControl()]),
+            _section('Automation', [
+              const AutomationControl(),
+              const DailyBudgetControl(),
+            ]),
             _section('Notifications', [
               _notification(true),
               _notification(false),
@@ -203,14 +236,21 @@ class _AccountSettingsState extends ConsumerState<AccountSettingsScreen> {
                 valueListenable: PushService.instance.preferences,
                 builder: (context, prefs, _) => SwitchListTile(
                   title: const Text('Gas and approval alerts'),
-                  subtitle: const Text('Funding needs and approvals ending soon.'),
+                  subtitle: const Text(
+                    'Funding needs and approvals ending soon.',
+                  ),
                   value: prefs.walletAlerts,
                   onChanged: (value) async {
                     try {
-                      await PushService.instance.setPreferences(walletAlerts: value);
+                      await PushService.instance.setPreferences(
+                        walletAlerts: value,
+                      );
                     } catch (error) {
                       if (context.mounted) {
-                        MintlyNotice.show(context, SnackBar(content: Text('$error')));
+                        MintlyNotice.show(
+                          context,
+                          SnackBar(content: Text('$error')),
+                        );
                       }
                     }
                   },

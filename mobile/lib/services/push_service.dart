@@ -8,7 +8,11 @@ import 'package:flutter/material.dart';
 import 'api_service.dart';
 
 class PushPreferences {
-  const PushPreferences({this.dailyList = true, this.mintStatus = true, this.walletAlerts = true});
+  const PushPreferences({
+    this.dailyList = true,
+    this.mintStatus = true,
+    this.walletAlerts = true,
+  });
   final bool dailyList;
   final bool mintStatus;
   final bool walletAlerts;
@@ -29,7 +33,10 @@ class PushService {
     final api = _api;
     if (api == null || !api.isLiveBackendConnected) return false;
     final owner = data['user_id'];
-    if (['mint_status', 'wallet_alerts'].contains(data['category']) && owner == null) return false;
+    if (['mint_status', 'wallet_alerts'].contains(data['category']) &&
+        owner == null) {
+      return false;
+    }
     if (owner != null && (api.userId.isEmpty || owner != api.userId)) {
       return false;
     }
@@ -89,6 +96,13 @@ class PushService {
   }
 
   Future<bool> connect(ApiService api) async {
+    if (_disconnecting != null) {
+      try {
+        await _disconnecting;
+      } catch (_) {
+        /* Registration still enforces token ownership. */
+      }
+    }
     final generation = ++_generation;
     final revision = api.sessionRevision;
     _api = api;
@@ -117,13 +131,25 @@ class PushService {
       preferences.value = PushPreferences(
         dailyList: saved['daily_list'] == true,
         mintStatus: saved['mint_status'] == true,
-        walletAlerts: saved['wallet_alerts'] == null ? saved['mint_status'] == true : saved['wallet_alerts'] == true,
+        walletAlerts: saved['wallet_alerts'] == null
+            ? saved['mint_status'] == true
+            : saved['wallet_alerts'] == true,
       );
     }
     return true;
   }
 
-  Future<void> disconnect() async {
+  Future<void>? _disconnecting;
+  Future<void> disconnect() {
+    if (_disconnecting != null) return _disconnecting!;
+    final pending = _disconnect();
+    _disconnecting = pending;
+    return pending.whenComplete(() {
+      if (identical(_disconnecting, pending)) _disconnecting = null;
+    });
+  }
+
+  Future<void> _disconnect() async {
     final api = _api;
     final token = _token;
     _generation++;
@@ -138,7 +164,11 @@ class PushService {
     }
   }
 
-  Future<void> setPreferences({bool? dailyList, bool? mintStatus, bool? walletAlerts}) async {
+  Future<void> setPreferences({
+    bool? dailyList,
+    bool? mintStatus,
+    bool? walletAlerts,
+  }) async {
     final generation = _generation;
     final api = _api;
     final revision = api?.sessionRevision;
