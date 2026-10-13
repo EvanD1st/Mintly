@@ -8,10 +8,6 @@ def certificate_hash(path):
         data=base64.b64decode(data.split(b'-----BEGIN CERTIFICATE-----',1)[1].split(b'-----END CERTIFICATE-----',1)[0])
     return hashlib.sha256(data).hexdigest()
 
-def signer_hashes(output):
-    return {match.group(1).replace(':','').lower() for line in output.splitlines()
-        if (match:=re.match(r'^Signer.*?\bcertificate SHA-256 digest:\s*([a-fA-F0-9:]+)\s*$',line.strip(),re.I))}
-
 def main():
     tools,cert,root,apk_dir,output=map(Path,sys.argv[1:])
     expected=certificate_hash(cert)
@@ -19,8 +15,8 @@ def main():
     version=re.search(r'^version:\s*(\S+)',(root/'mobile/pubspec.yaml').read_text(),re.M).group(1)
     name,code=version.split('+');reports=[]
     for apk in apk_dir.glob('*.apk'):
-        signature=subprocess.check_output([str(tools/'apksigner'),'verify','--print-certs',str(apk)],text=True)
-        actual=signer_hashes(signature)
+        actual=set(json.loads(subprocess.check_output(['java','-cp',str(tools/'lib/apksigner.jar'),
+            str(root/'deploy/InstallerCertificates.java'),str(apk)],text=True)))
         print(json.dumps({'configured_certificate':expected,'installed_certificate':installed,'apk_certificates':sorted(actual)}))
         assert actual=={expected} and expected==installed,'Installer signing identity differs'
         badging=subprocess.check_output([str(tools/'aapt'),'dump','badging',str(apk)],text=True)
