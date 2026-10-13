@@ -253,8 +253,9 @@ class ApiService extends ChangeNotifier {
     if (revision != _sessionRevision) return;
     sessionRemembered = remembered;
     screenLocked = false;
-    if (protectedAccountsAvailable)
+    if (protectedAccountsAvailable) {
       unawaited(PlatformProtectedAccounts.authenticatedForeground());
+    }
     notifyListeners();
   }
 
@@ -277,8 +278,9 @@ class ApiService extends ChangeNotifier {
       _requireHttps();
       final caps = await checkProtectedAccounts();
       if (protectedAccountsAvailable) {
-        if (caps['has_accounts'] != true && caps['has_legacy_session'] != true)
+        if (caps['has_accounts'] != true && caps['has_legacy_session'] != true) {
           return false;
+        }
         if (!deviceLockConfigured || !await _unlockAccounts()) return false;
         savedAccounts = await _accounts.accounts(baseUrl);
         if (caps['has_accounts'] == true && savedAccounts.isNotEmpty) {
