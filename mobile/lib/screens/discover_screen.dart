@@ -91,22 +91,46 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
           ),
           const SizedBox(height: 18),
           if (api.feedWallets.isNotEmpty)
-            DropdownButtonFormField<String>(
-              initialValue: api.selectedFeedWallet,
-              key: ValueKey(api.selectedFeedWallet),
-              decoration: const InputDecoration(
-                labelText: 'Check eligibility for wallet',
-              ),
-              items: [
-                for (final wallet in api.feedWallets)
-                  DropdownMenuItem(
-                    value: wallet['id'] as String,
-                    child: Text(
-                      '${wallet['label']} · ${(wallet['address'] as String).substring(0, 8)}…',
+            Card(
+              child: ListTile(
+                leading: const Icon(Icons.account_balance_wallet_outlined),
+                title: const Text('Check eligibility for wallet'),
+                subtitle: Text(
+                  api.feedWallets.firstWhere(
+                        (w) => w['id'] == api.selectedFeedWallet,
+                        orElse: () => api.feedWallets.first,
+                      )['label']
+                      as String,
+                ),
+                trailing: const Icon(MintlyIcons.chevronRight),
+                onTap: () async {
+                  final chosen = await showModalBottomSheet<String>(
+                    context: context,
+                    builder: (context) => SafeArea(
+                      child: ListView(
+                        shrinkWrap: true,
+                        children: [
+                          for (final wallet in api.feedWallets)
+                            ListTile(
+                              title: Text(wallet['label'] as String),
+                              subtitle: Text(wallet['address'] as String),
+                              trailing: wallet['id'] == api.selectedFeedWallet
+                                  ? const Icon(Icons.check)
+                                  : null,
+                              onTap: () => Navigator.pop(
+                                context,
+                                wallet['id'] as String,
+                              ),
+                            ),
+                        ],
+                      ),
                     ),
-                  ),
-              ],
-              onChanged: (id) => _refresh(walletId: id),
+                  );
+                  if (chosen != null && mounted) {
+                    await _refresh(walletId: chosen);
+                  }
+                },
+              ),
             ),
           const SizedBox(height: 12),
           if (api.isAdmin)

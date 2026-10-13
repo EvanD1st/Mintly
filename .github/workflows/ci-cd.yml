@@ -77,8 +77,11 @@ jobs:
         run: |
           # Official-image mirror avoids Docker Hub's shared-runner pull quota.
           docker tag public.ecr.aws/docker/library/postgres:16-alpine postgres:16-alpine
-          docker pull public.ecr.aws/docker/library/python:3.12-slim
-          docker tag public.ecr.aws/docker/library/python:3.12-slim python:3.12-slim
+          pulled=false
+          for image in public.ecr.aws/docker/library/python:3.12-slim mirror.gcr.io/library/python:3.12-slim python:3.12-slim; do
+            if docker pull "$image"; then docker tag "$image" python:3.12-slim; pulled=true; break; fi
+          done
+          test "$pulled" = true
           for script in deploy/*.sh; do bash -n "$script"; done
           APP_DIR="$RUNNER_TEMP/mintly" bash deploy/deploy-ubuntu.sh
           test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8095/api/wallets)" = 401
