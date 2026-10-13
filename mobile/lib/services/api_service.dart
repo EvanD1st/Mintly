@@ -14,7 +14,8 @@ import 'push_service.dart';
 
 class ApiException implements Exception {
   final String message;
-  const ApiException(this.message);
+  final int? statusCode;
+  const ApiException(this.message, {this.statusCode});
   @override
   String toString() => message;
 }
@@ -127,6 +128,7 @@ class ApiService extends ChangeNotifier {
         detail is String
             ? detail
             : 'Server request failed (${response.statusCode}).',
+        statusCode: response.statusCode,
       );
     }
     return data;
@@ -278,7 +280,8 @@ class ApiService extends ChangeNotifier {
       _requireHttps();
       final caps = await checkProtectedAccounts();
       if (protectedAccountsAvailable) {
-        if (caps['has_accounts'] != true && caps['has_legacy_session'] != true) {
+        if (caps['has_accounts'] != true &&
+            caps['has_legacy_session'] != true) {
           return false;
         }
         if (!deviceLockConfigured || !await _unlockAccounts()) return false;
@@ -657,11 +660,25 @@ class ApiService extends ChangeNotifier {
   Future<List<DropModel>> fetchDrops(String filter) async {
     final revision = ++_feedRevision;
     final wallet = selectedFeedWallet;
-    final data =
-        await _get(
-              '/drops?daily_only=true&filter_kind=$filter${wallet == null ? '' : '&wallet_id=${Uri.encodeQueryComponent(wallet)}'}',
-            )
-            as Map<String, dynamic>;
+    Map<String, dynamic> data;
+    try {
+      data =
+          await _get(
+                '/drops?daily_only=true&filter_kind=$filter${wallet == null ? '' : '&wallet_id=${Uri.encodeQueryComponent(wallet)}'}',
+              )
+              as Map<String, dynamic>;
+    } on ApiException catch (error) {
+      if (error.statusCode != 404 ||
+          wallet == null ||
+          revision != _feedRevision) {
+        rethrow;
+      }
+      // The selected wallet was removed. Let the server choose an owned default.
+      selectedFeedWallet = null;
+      data =
+          await _get('/drops?daily_only=true&filter_kind=$filter')
+              as Map<String, dynamic>;
+    }
     if (revision != _feedRevision) {
       throw const ApiException('Wallet selection changed.');
     }

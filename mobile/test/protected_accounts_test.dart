@@ -1,12 +1,16 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:mintly/services/api_service.dart';
 import 'package:mintly/services/protected_accounts.dart';
 import 'package:mintly/state/app_state.dart';
 import 'package:mintly/models/drop_model.dart';
+import 'package:mintly/main.dart';
+import 'package:mintly/widgets/mintly_notice.dart';
 import 'session_restore_test.dart' show MemoryVault;
 
 class Accounts implements ProtectedAccounts {
@@ -86,6 +90,57 @@ http.Response ok(dynamic data) => http.Response(jsonEncode(data), 200);
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  testWidgets(
+    'locked routes hide account data from accessibility and keyboard',
+    (tester) async {
+      final api = ApiService(
+        accounts: Accounts(),
+        client: MockClient((r) async => ok(result('alice'))),
+      );
+      await api.login('alice', 'password');
+      final focus = FocusNode();
+      final semantics = tester.ensureSemantics();
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [apiServiceProvider.overrideWith((ref) => api)],
+          child: const MintlyApp(),
+        ),
+      );
+      MintlyNotice.navigatorKey.currentState!.pushReplacement(
+        MaterialPageRoute<void>(
+          builder: (_) => Scaffold(
+            body: TextField(
+              focusNode: focus,
+              autofocus: true,
+              decoration: const InputDecoration(
+                labelText: 'Private approval draft',
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+      expect(focus.hasFocus, true);
+      api.lockForReopen();
+      await tester.pump();
+      expect(focus.hasFocus, false);
+      expect(
+        tester.binding.pipelineOwner.semanticsOwner!.rootSemanticsNode!
+            .toStringDeep(),
+        isNot(contains('Private approval draft')),
+      );
+      expect(find.text('Unlock account'), findsOneWidget);
+      await api.unlockForReopen();
+      await tester.pump();
+      expect(find.text('Unlock account'), findsNothing);
+      expect(find.byType(TextField), findsOneWidget);
+      await tester.pumpWidget(const SizedBox.shrink());
+      semantics.dispose();
+      focus.dispose();
+      expect(tester.takeException(), isNull);
+    },
+  );
   test(
     'reopening protects the screen without cancelling same-account wallet drafts',
     () async {

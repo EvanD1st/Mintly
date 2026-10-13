@@ -37,6 +37,8 @@ valid. Older APKs lack the version-2 channel and keep ordinary login behavior.
 
 Switch/add account clears account routes, selections, eligibility caches and
 approval drafts. Session generations reject late requests from earlier identities.
+Reopening the same account covers existing routes and blocks their pointer,
+keyboard and accessibility access until unlock, preserving pending wallet handoffs.
 Push retirement finishes before registering another identity. Registration uses
 atomic insert-on-conflict and an owner-locked row, including preferences and
 unregister operations; another account's active token cannot be reassigned.

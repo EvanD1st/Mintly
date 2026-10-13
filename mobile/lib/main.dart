@@ -35,7 +35,16 @@ class MintlyApp extends ConsumerWidget {
       themeMode: ThemeMode.dark,
       builder: (context, child) => Stack(
         children: [
-          child!,
+          ExcludeSemantics(
+            excluding: ref.watch(apiServiceProvider).screenLocked,
+            child: IgnorePointer(
+              ignoring: ref.watch(apiServiceProvider).screenLocked,
+              child: ExcludeFocus(
+                excluding: ref.watch(apiServiceProvider).screenLocked,
+                child: child!,
+              ),
+            ),
+          ),
           if (ref.watch(apiServiceProvider).screenLocked)
             const Positioned.fill(child: AccountUnlockScreen()),
         ],

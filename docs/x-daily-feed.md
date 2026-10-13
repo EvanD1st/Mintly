@@ -28,6 +28,9 @@ instructions. Three display-check attempts are permitted per queued refresh.
 `FEED_WALLET_CHECKS_ENABLED=false` pauses this queue without affecting approvals.
 
 Eligibility is wallet-specific, never stored in shared stage eligibility fields.
+Discovery uses a validated read-only RPC factory while transaction execution is
+disabled in that service. Network opt-ins, HTTPS and chain-ID checks still apply;
+the preparation and signer paths retain their existing execution checks.
 Verified open stages precede verified future stages. Rejected whitelist stages
 remain visible. Known exhausted allowances disable setup. Stale checks and
 provider failures show Not verified. Setup rechecks the selected stage and opens

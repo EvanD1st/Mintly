@@ -9,6 +9,45 @@ import 'package:mintly/services/api_service.dart';
 import 'package:mintly/state/app_state.dart';
 
 void main() {
+  test(
+    'an unavailable selected wallet falls back to the owned default',
+    () async {
+      final selections = <String?>[];
+      final api = ApiService(
+        client: MockClient((request) async {
+          if (request.url.path.endsWith('/auth/login')) {
+            return http.Response(
+              jsonEncode({
+                'token': 'test',
+                'user': {'id': 'owner', 'username': 'member', 'role': 'member'},
+              }),
+              200,
+            );
+          }
+          selections.add(request.url.queryParameters['wallet_id']);
+          if (request.url.queryParameters['wallet_id'] == 'archived') {
+            return http.Response(
+              jsonEncode({'detail': 'Wallet not found.'}),
+              404,
+            );
+          }
+          return http.Response(
+            jsonEncode({
+              'selected_wallet_id': 'default',
+              'wallets': [],
+              'drops': [],
+            }),
+            200,
+          );
+        }),
+      );
+      await api.login('member', 'password');
+      api.selectedFeedWallet = 'archived';
+      expect(await api.fetchDrops('all'), isEmpty);
+      expect(selections, ['archived', null]);
+      expect(api.selectedFeedWallet, 'default');
+    },
+  );
   for (final status in ['eligible', 'not_eligible', 'unverified', 'stale']) {
     testWidgets('Today selected wallet card has safe setup state: $status', (
       tester,
