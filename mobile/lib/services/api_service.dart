@@ -397,10 +397,15 @@ class ApiService extends ChangeNotifier {
   }
 
   Future<void> beginAddAccount() async {
+    if (_accountTransition || restoringSession) return;
     try {
       await PushService.instance.disconnect();
     } catch (_) {}
-    await signOut();
+    try {
+      await signOut();
+    } catch (_) {
+      // Sign-out already clears local access; password login remains available offline.
+    }
     addingAccount = true;
     notifyListeners();
   }

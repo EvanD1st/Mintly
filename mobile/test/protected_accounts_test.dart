@@ -98,6 +98,26 @@ Map<String, dynamic> stored(String account) => {
 http.Response ok(dynamic data) => http.Response(jsonEncode(data), 200);
 
 void main() {
+  test('Add account remains available after offline local sign-out', () async {
+    final vault = Accounts();
+    final api = ApiService(
+      vault: MemoryVault(),
+      accounts: vault,
+      client: MockClient((r) async {
+        if (r.url.path.endsWith('/device-login')) return ok(result('alice'));
+        throw http.ClientException('Offline');
+      }),
+    );
+    await api.login('alice', 'password');
+    api.selectedFeedWallet = 'previous-wallet';
+    await api.beginAddAccount();
+    expect(api.isLiveBackendConnected, false);
+    expect(api.addingAccount, true);
+    expect(api.selectedFeedWallet, isNull);
+    expect(vault.records.keys, ['alice']);
+    expect(vault.chooser, true);
+    api.dispose();
+  });
   test(
     'sign out retains saved identities without a phone prompt and cold reopening shows chooser',
     () async {
@@ -207,8 +227,9 @@ void main() {
           '/api/wallets',
           '/api/mint-permissions',
           '/api/activity',
-        ].contains(r.url.path))
+        ].contains(r.url.path)) {
           return ok([]);
+        }
         return ok({});
       }),
     );
