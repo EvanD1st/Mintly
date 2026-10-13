@@ -115,7 +115,7 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
                               title: Text(wallet['label'] as String),
                               subtitle: Text(wallet['address'] as String),
                               trailing: wallet['id'] == api.selectedFeedWallet
-                                  ? const Icon(Icons.check)
+                                  ? const Text('Selected')
                                   : null,
                               onTap: () => Navigator.pop(
                                 context,
