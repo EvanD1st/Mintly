@@ -72,7 +72,7 @@ class _PinnedResolver(aiohttp.abc.AbstractResolver):
         pass
 
 
-async def fetch_safe_url(url: str) -> str:
+async def fetch_safe_url(url: str, *, return_url: bool = False) -> str:
     current = url
     for redirect_count in range(MAX_REDIRECTS + 1):
         hostname, port, addresses = _validated_destination(current)
@@ -105,5 +105,8 @@ async def fetch_safe_url(url: str) -> str:
                     body.extend(chunk)
                     if len(body) > MAX_RESPONSE_BYTES:
                         raise URLSecurityError("Downloaded body exceeds maximum allowed size.")
-                return body.decode(response.charset or "utf-8", errors="replace")
+                return current if return_url else body.decode(response.charset or "utf-8", errors="replace")
     raise URLSecurityError("Redirect limit exceeded.")
+
+async def resolve_safe_url(url: str) -> str:
+    return await fetch_safe_url(url,return_url=True)

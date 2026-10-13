@@ -86,6 +86,10 @@ class DropPostParser:
         if not posted_at:
             posted_at = datetime.now(timezone.utc)
 
+        if re.search(r'(?mi)^\s*[-•*]?\s*(?:Chain|Network)\s+:',post_text):
+            from app.services.daily_list_parser import parse
+            return parse(post_text,posted_at)
+
         # Check if this post is a correction or daily list
         is_daily_list = any(kw in post_text.lower() for kw in ["daily", "drops", "today's drops", "mint list", "mints"])
         

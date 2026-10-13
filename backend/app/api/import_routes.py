@@ -81,6 +81,9 @@ async def import_drops_manually(
         is_daily_list=len(parsed) > 1,
         is_manual_import=True,
     )
+    from app.services.daily_list_parser import daily_date, VERSION
+    post.list_date=daily_date(req.raw_content,post.posted_at)
+    post.parser_version=VERSION
     db.add(post)
     await db.flush()
 

@@ -307,7 +307,15 @@ void main() {
         final container = ProviderContainer(
           overrides: [apiServiceProvider.overrideWith((ref) => api)],
         );
-        addTearDown(container.dispose);
+        var disposed = false;
+        void disposeContainer() {
+          if (!disposed) {
+            disposed = true;
+            container.dispose();
+          }
+        }
+
+        addTearDown(disposeContainer);
         await container.read(mintlyProvider.notifier).loadInitialData();
         final captureKey = GlobalKey();
         await tester.pumpWidget(
@@ -330,6 +338,21 @@ void main() {
           ),
         );
         await tester.pumpAndSettle();
+        final measurements = <Map<String, Object>>[];
+        Future<void> navigate(Finder target, String feature) async {
+          final timer = Stopwatch()..start();
+          await tester.tap(target);
+          final pumps = await tester.pumpAndSettle();
+          timer.stop();
+          expect(tester.takeException(), isNull);
+          measurements.add({
+            'feature': feature,
+            'text_scale': scale,
+            'host_elapsed_ms': timer.elapsedMicroseconds / 1000,
+            'settle_pumps': pumps,
+          });
+        }
+
         Future<void> capture(String name) async {
           expect(tester.takeException(), isNull);
           expect(find.text('Mintly'), findsNothing);
@@ -350,8 +373,7 @@ void main() {
           });
         }
 
-        await tester.tap(find.text('Mint plans').last);
-        await tester.pumpAndSettle();
+        await navigate(find.text('Mint plans').last, 'Mint plans');
         await capture('mint-plans');
         await tester.scrollUntilVisible(
           find.text('Review mint'),
@@ -364,8 +386,7 @@ void main() {
               .first,
         );
         await tester.pumpAndSettle();
-        await tester.tap(find.text('Review mint'));
-        await tester.pumpAndSettle();
+        await navigate(find.text('Review mint'), 'Plan details');
         expect(find.textContaining('0x123'), findsOneWidget);
         await capture('plan-details');
         await tester.pageBack();
@@ -386,15 +407,16 @@ void main() {
           findsAtLeastNWidgets(1),
         );
         armed = false;
-        await tester.tap(find.text('Copy').last);
-        await tester.pumpAndSettle();
+        await navigate(find.text('Copy').last, 'Copy');
         await capture('copy');
         final budget = tester.getSize(find.byType(NetworkBudgetCard).first);
         if (!defaultTestFont && font.existsSync()) {
           expect(budget.height, lessThan(scale == 1.0 ? 205 : 285));
         }
-        await tester.tap(find.byTooltip('Available budget by network'));
-        await tester.pumpAndSettle();
+        await navigate(
+          find.byTooltip('Available budget by network'),
+          'Budget menu',
+        );
         await capture('network-budgets');
         await tester.tap(find.text('Robinhood').last);
         await tester.pumpAndSettle();
@@ -410,15 +432,13 @@ void main() {
         await tester.tap(find.byTooltip('Refresh budget'));
         await tester.pumpAndSettle();
         expect(budgetReads, greaterThan(before));
-        await tester.tap(find.text('Activity').last);
-        await tester.pumpAndSettle();
+        await navigate(find.text('Activity').last, 'Activity');
         await capture('activity');
         expect(find.text('Total spent'), findsOneWidget);
         expect(find.textContaining('0xconfirmed'), findsNothing);
         await tester.ensureVisible(find.text('View details').first);
         await tester.pumpAndSettle();
-        await tester.tap(find.text('View details').first);
-        await tester.pumpAndSettle();
+        await navigate(find.text('View details').first, 'Mint details');
         await capture('mint-details');
         await tester.scrollUntilVisible(
           find.text('Approval & recovery history'),
@@ -445,10 +465,23 @@ void main() {
           findsOneWidget,
         );
         expect(find.text('Total spent'), findsNothing);
-        await tester.tap(find.text('Wallet').last);
-        await tester.pumpAndSettle();
+        await navigate(find.text('Wallet').last, 'Wallet');
         await capture('wallet');
+        await navigate(find.text('Today').last, 'Today');
+        final reportPath = Platform.environment['MINTLY_WIDGET_LATENCY_REPORT'];
+        if (reportPath != null) {
+          await tester.runAsync(() async {
+            final file = File(reportPath);
+            await file.parent.create(recursive: true);
+            await file.writeAsString(
+              '${jsonEncode({'mode': 'Host widget test with controlled API; excludes phone FPS and WAN', 'samples': measurements})}\n',
+              mode: FileMode.append,
+            );
+          });
+        }
         await tester.pumpWidget(const SizedBox());
+        disposeContainer();
+        await tester.pump();
       },
     );
   }

@@ -335,8 +335,7 @@ class MintlyWorker:
                     await process_one_permission(session)
 
                     # 3. Refresh the real feed roughly every five minutes.
-                    if iteration % 60 == 0:
-                        await self.run_discovery_poll(session)
+                    # Daily X discovery has its own worker and credential mount.
 
                     # Free OpenSea key: at most four timed wallet checks per minute.
                     if iteration % 3 == 0:

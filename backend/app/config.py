@@ -28,6 +28,11 @@ class Settings(BaseSettings):
     TWIKIT_PASSWORD: Optional[str] = None
     TWIKIT_COOKIES_FILE: str = "./cookies.json"
     X_MONITORED_USER: str = "lakzonevn"
+    X_DISCOVERY_ENABLED: bool = False
+    TWSCRAPE_ACCOUNTS_FILE: str = '/run/x-session/accounts.db'
+    X_DISCOVERY_INTERVAL_SECONDS: int = 300
+    X_DISCOVERY_TIMEOUT_SECONDS: int = 45
+    FEED_WALLET_CHECKS_ENABLED: bool = True
 
     # Free OpenSea drop API key, rotated by the server before its 7-day expiry.
     OPENSEA_KEY_FILE: str = "./opensea-key.json"

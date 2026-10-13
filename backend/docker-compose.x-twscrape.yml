@@ -1,0 +1,12 @@
+services:
+  discovery-worker:
+    user: "10001:10001"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=64m"]
+    environment:
+      X_DISCOVERY_ENABLED: ${X_DISCOVERY_ENABLED:-true}
+      TWSCRAPE_ACCOUNTS_FILE: /run/x-session/accounts.db
+    volumes:
+      - ${MINTLY_X_ACCOUNTS_DIR:?Set MINTLY_X_ACCOUNTS_DIR}:/run/x-session:rw

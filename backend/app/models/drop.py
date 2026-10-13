@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime
 from typing import Optional, List
-from sqlalchemy import String, Boolean, Integer, BigInteger, DateTime, ForeignKey, Text
+from sqlalchemy import String, Boolean, Integer, BigInteger, DateTime, ForeignKey, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
 
@@ -16,6 +16,7 @@ class DismissedDrop(Base):
 
 class Drop(Base):
     __tablename__ = "drops"
+    __table_args__ = (UniqueConstraint('source_post_id','source_entry_key',name='uq_drop_source_entry'),)
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
     source_post_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("source_posts.id"), nullable=True)
@@ -35,6 +36,9 @@ class Drop(Base):
     is_supported_integration: Mapped[bool] = mapped_column(Boolean, default=False)
     manual_notice: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     is_demo: Mapped[bool] = mapped_column(Boolean, default=False)
+    source_entry_key: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    source_price_text: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    source_time_text: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
 
     stages: Mapped[List["MintStage"]] = relationship("MintStage", back_populates="drop", cascade="all, delete-orphan", lazy="selectin")
 

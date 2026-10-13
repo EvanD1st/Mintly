@@ -67,5 +67,12 @@ services:
       backend:
         condition: service_healthy
 
+  discovery-worker:
+    <<: *app
+    command: python -m app.discovery_worker
+    depends_on:
+      backend:
+        condition: service_healthy
+
 volumes:
   postgres_data:

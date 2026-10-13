@@ -91,6 +91,7 @@ class MintlyState {
 class MintlyNotifier extends StateNotifier<MintlyState> {
   final ApiService _api;
   int _loadGeneration = 0;
+  int _feedGeneration = 0;
 
   MintlyNotifier(this._api)
     : super(
@@ -101,6 +102,8 @@ class MintlyNotifier extends StateNotifier<MintlyState> {
 
   void _accountChanged() {
     _loadGeneration++;
+    _feedGeneration++;
+    _api.clearFeedSelection();
     state = MintlyState(drops: [], queue: [], activities: []);
   }
 
@@ -182,6 +185,32 @@ class MintlyNotifier extends StateNotifier<MintlyState> {
   Future<void> setFilter(String filter) async {
     state = state.copyWith(filter: filter);
     await loadInitialData();
+  }
+
+  Future<void> refreshFeed({String? walletId}) async {
+    if (!_api.isLiveBackendConnected) return;
+    final generation = ++_feedGeneration;
+    final account = _api.sessionRevision;
+    final filter = state.filter;
+    if (walletId != null && walletId != _api.selectedFeedWallet) {
+      _api.selectedFeedWallet = walletId;
+      state = state.copyWith(drops: [], clearSelection: true);
+    }
+    final drops = await _api.fetchDrops(state.filter);
+    if (!mounted ||
+        generation != _feedGeneration ||
+        account != _api.sessionRevision ||
+        filter != state.filter ||
+        !_api.isLiveBackendConnected) {
+      return;
+    }
+    state = state.copyWith(
+      drops: drops,
+      sourceStatusText: _api.sourceStatusText,
+      checkedWalletLabel: _api.checkedWalletLabel,
+      lastCheckedText: _api.lastCheckedText,
+    );
+    await _api.queueFeedChecks(drops);
   }
 
   Future<void> removeDrop(String id) async {
