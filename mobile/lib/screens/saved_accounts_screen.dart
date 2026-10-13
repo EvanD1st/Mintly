@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../state/app_state.dart';
 import '../widgets/mintly_notice.dart';
-import '../services/push_service.dart';
+import '../theme/compatible_icons.dart';
 
 class SavedAccountsScreen extends ConsumerStatefulWidget {
   const SavedAccountsScreen({super.key});
@@ -13,14 +13,11 @@ class SavedAccountsScreen extends ConsumerStatefulWidget {
 class _SavedAccountsState extends ConsumerState<SavedAccountsScreen> {
   bool _busy = false;
   String? _error;
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _load());
-  }
-
   Future<void> _load() async {
-    setState(() => _busy = true);
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
     try {
       await ref.read(apiServiceProvider).loadSavedAccounts();
     } catch (_) {
@@ -38,6 +35,11 @@ class _SavedAccountsState extends ConsumerState<SavedAccountsScreen> {
   Future<void> _switch(String account) async {
     final api = ref.read(apiServiceProvider);
     final notifier = ref.read(mintlyProvider.notifier);
+    if (_busy) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
     // Dispose old account routes and approval drafts before installing another identity.
     Navigator.of(context).popUntil((route) => route.isFirst);
     try {
@@ -46,6 +48,8 @@ class _SavedAccountsState extends ConsumerState<SavedAccountsScreen> {
       }
     } catch (error) {
       MintlyNotice.showGlobal(SnackBar(content: Text('$error')));
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
   }
 
@@ -53,7 +57,10 @@ class _SavedAccountsState extends ConsumerState<SavedAccountsScreen> {
   Widget build(BuildContext context) {
     final api = ref.watch(apiServiceProvider);
     return Scaffold(
-      appBar: AppBar(title: const Text('Saved accounts')),
+      appBar: AppBar(
+        title: const Text('Choose an account'),
+        automaticallyImplyLeading: false,
+      ),
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
@@ -98,26 +105,21 @@ class _SavedAccountsState extends ConsumerState<SavedAccountsScreen> {
             ),
           if (!_busy && api.savedAccounts.isEmpty)
             const Text(
-              'No unlocked saved accounts. Password login remains available.',
+              'Your saved accounts are protected. Try again or add an account using your password.',
             ),
-          TextButton(
-            onPressed: _busy ? null : _load,
-            child: const Text('Unlock saved accounts'),
-          ),
+          if (!_busy && api.savedAccounts.isEmpty)
+            TextButton(onPressed: _load, child: const Text('Try again')),
           FilledButton.icon(
             onPressed: _busy
                 ? null
                 : () async {
                     final api = ref.read(apiServiceProvider);
-                    try {
-                      await PushService.instance.disconnect();
-                    } catch (_) {}
-                    api.lockSession();
+                    await api.beginAddAccount();
                     if (context.mounted) {
                       Navigator.of(context).popUntil((route) => route.isFirst);
                     }
                   },
-            icon: const Icon(Icons.person_add_outlined),
+            icon: const Icon(MintlyIcons.personAdd),
             label: const Text('Add account'),
           ),
         ],

@@ -33,6 +33,8 @@ class ApiService extends ChangeNotifier {
   bool unlockingAccounts = false;
   bool screenLocked = false;
   bool _accountTransition = false;
+  bool hasSavedAccounts = false;
+  bool addingAccount = false;
   List<Map<String, dynamic>> savedAccounts = [];
   Future<void> _storage = Future<void>.value();
   Future<T> _store<T>(Future<T> Function() action) {
@@ -254,6 +256,7 @@ class ApiService extends ChangeNotifier {
     if (expiry is! String) unawaited(_store(() => _vault.clear()));
     if (revision != _sessionRevision) return;
     sessionRemembered = remembered;
+    addingAccount = false;
     screenLocked = false;
     if (protectedAccountsAvailable) {
       unawaited(PlatformProtectedAccounts.authenticatedForeground());
@@ -287,6 +290,7 @@ class ApiService extends ChangeNotifier {
         if (!deviceLockConfigured || !await _unlockAccounts()) return false;
         savedAccounts = await _accounts.accounts(baseUrl);
         if (caps['has_accounts'] == true && savedAccounts.isNotEmpty) {
+          if (caps['chooser_on_reopen'] == true) return false;
           final chosen = savedAccounts.firstWhere(
             (r) => r['active'] == true,
             orElse: () => savedAccounts.first,
@@ -347,6 +351,7 @@ class ApiService extends ChangeNotifier {
       return false;
     } finally {
       restoringSession = false;
+      notifyListeners();
     }
   }
 
@@ -368,10 +373,46 @@ class ApiService extends ChangeNotifier {
           await _unlockAccounts()) {
         await _accounts.remove(baseUrl, account);
         savedAccounts = await _accounts.accounts(baseUrl);
+        hasSavedAccounts = savedAccounts.isNotEmpty;
       }
     } finally {
       disconnectBackend();
     }
+  }
+
+  Future<void> signOut() async {
+    if (_accountTransition || restoringSession) return;
+    _accountTransition = true;
+    try {
+      // Persist only a non-secret UI flag. No vault unlock is needed to sign out.
+      if (protectedAccountsAvailable) {
+        await _accounts.showChooserOnReopen(baseUrl, true);
+      }
+      if (isLiveBackendConnected) await _post('/auth/sign-out', {});
+    } finally {
+      addingAccount = false;
+      disconnectBackend();
+      _accountTransition = false;
+    }
+  }
+
+  Future<void> beginAddAccount() async {
+    if (_accountTransition || restoringSession) return;
+    try {
+      await PushService.instance.disconnect();
+    } catch (_) {}
+    try {
+      await signOut();
+    } catch (_) {
+      // Sign-out already clears local access; password login remains available offline.
+    }
+    addingAccount = true;
+    notifyListeners();
+  }
+
+  void showSavedAccountChooser() {
+    addingAccount = false;
+    notifyListeners();
   }
 
   void disconnectBackend() {
@@ -395,9 +436,10 @@ class ApiService extends ChangeNotifier {
   }
 
   Future<Map<String, dynamic>> checkProtectedAccounts() async {
-    final caps = await _accounts.capabilities();
+    final caps = await _accounts.capabilities(origin: baseUrl);
     protectedAccountsAvailable = caps['version'] == 2;
     deviceLockConfigured = caps['device_secure'] == true;
+    hasSavedAccounts = caps['has_accounts'] == true;
     return caps;
   }
 
@@ -435,9 +477,13 @@ class ApiService extends ChangeNotifier {
       'remembered_expires_at': result['remembered_expires_at'],
     });
     savedAccounts = await _accounts.accounts(baseUrl);
+    hasSavedAccounts = savedAccounts.isNotEmpty;
+    await _accounts.showChooserOnReopen(baseUrl, false);
   }
 
   Future<void> loadSavedAccounts() async {
+    // Names already unlocked in this process do not need another phone prompt.
+    if (savedAccounts.isNotEmpty) return;
     await checkProtectedAccounts();
     if (!protectedAccountsAvailable ||
         !deviceLockConfigured ||
@@ -445,6 +491,7 @@ class ApiService extends ChangeNotifier {
       return;
     }
     savedAccounts = await _accounts.accounts(baseUrl);
+    hasSavedAccounts = savedAccounts.isNotEmpty;
     notifyListeners();
   }
 
@@ -459,12 +506,14 @@ class ApiService extends ChangeNotifier {
   }
 
   Future<bool> _switchSaved(String account) async {
+    if (isLiveBackendConnected && userId == account) return true;
     if (!deviceLockConfigured || !await _unlockAccounts()) return false;
     try {
       await PushService.instance.disconnect();
     } catch (_) {
       /* Token retirement is attempted before identity changes. */
     }
+    MintlyNotice.navigatorKey.currentState?.popUntil((route) => route.isFirst);
     lockSession();
     final activated = await _activateSaved(account, alreadyUnlocked: true);
     if (activated) {
@@ -489,6 +538,9 @@ class ApiService extends ChangeNotifier {
     final expiry = DateTime.tryParse('${record['remembered_expires_at']}');
     if (expiry == null || !expiry.toUtc().isAfter(DateTime.now().toUtc())) {
       await _accounts.remove(baseUrl, account);
+      savedAccounts = await _accounts.accounts(baseUrl);
+      hasSavedAccounts = savedAccounts.isNotEmpty;
+      notifyListeners();
       return false;
     }
     final request = record['pending_refresh_id'] as String? ?? _requestId();
@@ -516,6 +568,8 @@ class ApiService extends ChangeNotifier {
     if (response.statusCode == 401) {
       await _accounts.remove(baseUrl, account);
       savedAccounts = await _accounts.accounts(baseUrl);
+      hasSavedAccounts = savedAccounts.isNotEmpty;
+      notifyListeners();
       throw const ApiException(
         'Saved login expired. Sign in with your password.',
       );
@@ -531,6 +585,7 @@ class ApiService extends ChangeNotifier {
     screenLocked = false;
     _sessionRevision++;
     sessionRemembered = true;
+    addingAccount = false;
     _resetMetadata();
     MintlyNotice.dismissAll();
     notifyListeners();
@@ -556,6 +611,7 @@ class ApiService extends ChangeNotifier {
     if (response.statusCode != 401) _decode(response);
     await _accounts.remove(baseUrl, account);
     savedAccounts = await _accounts.accounts(baseUrl);
+    hasSavedAccounts = savedAccounts.isNotEmpty;
     if (userId == account) {
       try {
         await PushService.instance.disconnect();

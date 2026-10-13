@@ -7,41 +7,18 @@ import '../services/push_service.dart';
 import 'main_shell.dart';
 import 'saved_accounts_screen.dart';
 
-class AuthGate extends ConsumerStatefulWidget {
+class AuthGate extends ConsumerWidget {
   const AuthGate({super.key});
   @override
-  ConsumerState<AuthGate> createState() => _AuthGateState();
-}
-
-class _AuthGateState extends ConsumerState<AuthGate>
-    with WidgetsBindingObserver {
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addObserver(this);
-  }
-
-  @override
-  void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    super.dispose();
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    final api = ref.read(apiServiceProvider);
-    if (state == AppLifecycleState.paused &&
-        api.protectedAccountsAvailable &&
-        !api.unlockingAccounts &&
-        api.isLiveBackendConnected) {
-      api.lockForReopen();
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final api = ref.watch(apiServiceProvider);
-    if (!api.isLiveBackendConnected) return const _LoginScreen();
+    if (!api.isLiveBackendConnected) {
+      if (!api.addingAccount &&
+          (api.hasSavedAccounts || api.savedAccounts.isNotEmpty)) {
+        return const SavedAccountsScreen();
+      }
+      return const _LoginScreen();
+    }
     if (api.mustChangePassword) return const _ChangePasswordScreen();
     return const MainShell();
   }
@@ -151,10 +128,12 @@ class _LoginScreenState extends ConsumerState<_LoginScreen> {
                         ref.watch(apiServiceProvider).deviceLockConfigured
                         ? (v) => setState(() => _remember = v ?? false)
                         : null,
-                    title: const Text('Remember this Mintly account'),
+                    contentPadding: EdgeInsets.zero,
+                    controlAffinity: ListTileControlAffinity.leading,
+                    title: const Text('Remember this account'),
                     subtitle: Text(
                       ref.watch(apiServiceProvider).deviceLockConfigured
-                          ? 'Fingerprint or phone PIN required. Expires after 90 days without use.'
+                          ? 'Use fingerprint or phone PIN when reopening the app or switching accounts.'
                           : 'Set a phone screen lock to enable protected saved accounts.',
                     ),
                   ),
@@ -162,18 +141,12 @@ class _LoginScreenState extends ConsumerState<_LoginScreen> {
                   onPressed: _busy ? null : _login,
                   child: Text(_busy ? 'Signing in…' : 'Sign in'),
                 ),
-                if (ref.watch(apiServiceProvider).protectedAccountsAvailable &&
-                    ref.watch(apiServiceProvider).deviceLockConfigured)
+                if (ref.watch(apiServiceProvider).savedAccounts.isNotEmpty)
                   TextButton(
                     onPressed: _busy
                         ? null
-                        : () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const SavedAccountsScreen(),
-                            ),
-                          ),
-                    child: const Text('Unlock saved accounts'),
+                        : ref.read(apiServiceProvider).showSavedAccountChooser,
+                    child: const Text('Back to saved accounts'),
                   ),
               ],
             ),

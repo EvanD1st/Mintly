@@ -99,6 +99,44 @@ def test_stale_results_cannot_claim_ineligibility_or_enable_setup():
     result=feed_checks.presentation(cached([stage('bad','not_eligible')],expires_at=datetime.now(timezone.utc)-timedelta(seconds=1)))
     assert result['status']=='unverified' and not result['setup_enabled']
 
+@pytest.mark.parametrize('status',['queued','checking'])
+def test_refresh_keeps_valid_result_until_expiry_then_labels_history(status):
+    now=datetime.now(timezone.utc)
+    row=cached([stage('public',offset=-1)],expires_at=now+timedelta(seconds=1));row.status=status
+    fresh=feed_checks.presentation(row,now)
+    assert fresh['status']=='eligible' and fresh['setup_enabled'] and fresh['refreshing']
+    stale=feed_checks.presentation(row,now+timedelta(seconds=2))
+    assert stale['status']=='unverified' and not stale['setup_enabled'] and stale['recommended_stage'] is None
+    assert stale['last_status']=='eligible' and stale['last_recommended_stage']['id']=='public'
+
+@pytest.mark.asyncio
+async def test_expired_refresh_preserves_history_and_backoff_without_extra_calls(test_db,monkeypatch):
+    users,wallets,drop=await fixtures(test_db,monkeypatch)
+    old=datetime.now(timezone.utc)-timedelta(minutes=2)
+    row=FeedWalletCheck(user_id=users[0].id,wallet_id=wallets[0].id,drop_id=drop.id,
+        status='complete',result={'stages':[stage('public',offset=-1)]},checked_at=old,
+        expires_at=old+timedelta(seconds=60),attempts=0)
+    test_db.add(row);await test_db.commit()
+    from app.services.opensea import OpenSeaUnavailable
+    calls=AsyncMock(side_effect=OpenSeaUnavailable('Provider down',retry_after_seconds=90))
+    monkeypatch.setattr('app.services.feed_checks.OpenSeaClient.get_drop',calls)
+    factory=async_sessionmaker(test_db.bind,expire_on_commit=False)
+    await feed_checks.queue_checks(test_db,users[0],wallets[0],[drop]);assert await feed_checks.step(factory)
+    await test_db.refresh(row)
+    assert row.checked_at.replace(tzinfo=timezone.utc)==old
+    display=feed_checks.presentation(row)
+    assert display['last_status']=='eligible' and display['status']=='unverified' and not display['setup_enabled']
+    due=row.next_attempt_at
+    for _ in range(5):
+        await feed_checks.queue_checks(test_db,users[0],wallets[0],[drop])
+        assert not await feed_checks.step(factory)
+    await test_db.refresh(row)
+    assert row.next_attempt_at==due and row.attempts==1 and calls.await_count==1
+    # Exhausted attempts also retain their delay rather than resetting on polling.
+    row.status='unverified';row.attempts=3;await test_db.commit()
+    await feed_checks.queue_checks(test_db,users[0],wallets[0],[drop]);await test_db.refresh(row)
+    assert row.status=='unverified' and row.attempts==3 and row.next_attempt_at==due
+
 async def fixtures(db,monkeypatch):
     monkeypatch.setattr(settings,'ENABLE_BASE_AUTOMATIC',True)
     users=(await db.scalars(select(User).order_by(User.username))).all()
@@ -189,20 +227,32 @@ async def test_zero_drop_reprocessing_shortened_links_and_unsupported_records(te
 
 from test_automatic_evm import lab
 
+async def test_preparation_still_fetches_metadata_even_when_display_detail_is_supplied(monkeypatch):
+    from app.services.mint_stage_choice import wallet_stages
+    class FetchRequired(Exception):pass
+    fetch=AsyncMock(side_effect=FetchRequired())
+    monkeypatch.setattr('app.services.opensea.OpenSeaClient.get_drop',fetch)
+    with pytest.raises(FetchRequired):
+        await wallet_stages(None,SimpleNamespace(user_id='owner'),'collection',8453,'0x'+'a'*40,detail={})
+    fetch.assert_awaited_once_with('collection')
+
 async def test_display_reads_verify_public_terms_with_execution_disabled(lab,monkeypatch):
     from app.services.mint_stage_choice import wallet_stages
     monkeypatch.setattr(settings,'ENABLE_CUSTODIAL_AUTOMATIC',False)
     monkeypatch.setattr('app.services.automatic.provider_for',AsyncMock(side_effect=AssertionError('Execution provider must not be used by display discovery.')))
     from app.services.opensea import CHAINS
     monkeypatch.setitem(CHAINS,'local',(31337,'Local test'))
-    monkeypatch.setattr('app.services.opensea.OpenSeaClient.get_drop',AsyncMock(return_value={
+    detail={
         'chain':'local','contract_address':lab.nft.address,'stages':[{'uuid':'public','label':'Public','stage_type':'public_sale',
             'start_time':datetime.fromtimestamp(lab.start,timezone.utc).isoformat(),
             'end_time':datetime.fromtimestamp(lab.end,timezone.utc).isoformat(),'price':'10','max_per_wallet':'20',
-            'price_currency_address':'0x'+'0'*40}]}))
+            'price_currency_address':'0x'+'0'*40}]}
+    fetch=AsyncMock(return_value=detail)
+    monkeypatch.setattr('app.services.opensea.OpenSeaClient.get_drop',fetch)
     async with lab.factory() as db:
         wallet=await db.get(Wallet,lab.wallet.id)
-        result,_=await wallet_stages(db,wallet,'local-test',31337,lab.nft.address,read_only=True)
+        result,_=await wallet_stages(db,wallet,'local-test',31337,lab.nft.address,read_only=True,detail=detail)
+        fetch.assert_not_awaited()
         assert result['stages'][0]['eligibility']=='eligible' and result['stages'][0]['price_wei']=='10'
         assert result['stages'][0]['remaining']==20
         assert feed_checks.presentation(cached(result['stages']))['setup_enabled']

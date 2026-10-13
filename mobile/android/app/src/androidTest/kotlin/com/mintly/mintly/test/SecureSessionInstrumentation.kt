@@ -6,6 +6,7 @@ import com.mintly.mintly.SecureSessionVault
 import java.io.File
 import android.content.Intent
 import com.mintly.mintly.ProtectedAccountsVault
+import com.mintly.mintly.AccountChooserPreference
 import com.mintly.mintly.UnlockTestActivity
 import android.security.keystore.KeyInfo
 import java.security.KeyStore
@@ -54,6 +55,16 @@ class SecureSessionInstrumentation : Instrumentation() {
     private fun protectedTest() {
         val vault=ProtectedAccountsVault(targetContext)
         check(vault.deviceSecure())
+        val chooser=AccountChooserPreference(targetContext)
+        val chooserOrigin="https://mintly.example/api"
+        if (phase == "protected-save") {
+            check(chooser.set(chooserOrigin,true))
+            check(!chooser.show("https://other.example/api"))
+        } else {
+            check(chooser.show(chooserOrigin)) // Survives actual process restart.
+            check(chooser.set(chooserOrigin,false))
+            check(!AccountChooserPreference(targetContext).show(chooserOrigin))
+        }
         val activity=startActivitySync(Intent(targetContext,UnlockTestActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as UnlockTestActivity
         check(!activity.unlock.authorized())
         if (phase == "protected-verify") {

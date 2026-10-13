@@ -10,6 +10,8 @@ import 'package:mintly/services/protected_accounts.dart';
 import 'package:mintly/state/app_state.dart';
 import 'package:mintly/models/drop_model.dart';
 import 'package:mintly/main.dart';
+import 'package:mintly/screens/auth_gate.dart';
+import 'package:mintly/widgets/account_picker_card.dart';
 import 'package:mintly/widgets/mintly_notice.dart';
 import 'session_restore_test.dart' show MemoryVault;
 
@@ -17,13 +19,20 @@ class Accounts implements ProtectedAccounts {
   bool secure = true, allow = true;
   int unlocks = 0, reads = 0;
   String? active;
+  bool chooser = false;
   final records = <String, Map<String, dynamic>>{};
   @override
-  Future<Map<String, dynamic>> capabilities() async => {
+  Future<Map<String, dynamic>> capabilities({String? origin}) async => {
     'version': 2,
     'device_secure': secure,
     'has_accounts': records.isNotEmpty,
+    'chooser_on_reopen': chooser,
   };
+  @override
+  Future<void> showChooserOnReopen(String origin, bool show) async {
+    chooser = show;
+  }
+
   @override
   Future<bool> unlock() async {
     unlocks++;
@@ -89,6 +98,169 @@ Map<String, dynamic> stored(String account) => {
 http.Response ok(dynamic data) => http.Response(jsonEncode(data), 200);
 
 void main() {
+  test('Add account remains available after offline local sign-out', () async {
+    final vault = Accounts();
+    final api = ApiService(
+      vault: MemoryVault(),
+      accounts: vault,
+      client: MockClient((r) async {
+        if (r.url.path.endsWith('/device-login')) return ok(result('alice'));
+        throw http.ClientException('Offline');
+      }),
+    );
+    await api.login('alice', 'password');
+    api.selectedFeedWallet = 'previous-wallet';
+    await api.beginAddAccount();
+    expect(api.isLiveBackendConnected, false);
+    expect(api.addingAccount, true);
+    expect(api.selectedFeedWallet, isNull);
+    expect(vault.records.keys, ['alice']);
+    expect(vault.chooser, true);
+    api.dispose();
+  });
+  test(
+    'sign out retains saved identities without a phone prompt and cold reopening shows chooser',
+    () async {
+      final vault = Accounts();
+      final paths = <String>[];
+      final client = MockClient((r) async {
+        paths.add(r.url.path);
+        if (r.url.path.endsWith('/device-login')) return ok(result('alice'));
+        if (r.url.path.endsWith('/device-refresh')) {
+          return ok(result('alice', refresh: 'rotated'));
+        }
+        return ok({});
+      });
+      final api = ApiService(accounts: vault, client: client);
+      await api.login('alice', 'password');
+      final prompts = vault.unlocks;
+      await api.signOut();
+      expect(vault.unlocks, prompts);
+      expect(vault.records.keys, ['alice']);
+      expect(api.isLiveBackendConnected, false);
+      expect(paths.where((p) => p.endsWith('/logout')), isEmpty);
+      expect(vault.chooser, true);
+      final reopened = ApiService(accounts: vault, client: client);
+      expect(await reopened.restoreSession(), false);
+      expect(vault.unlocks, prompts + 1);
+      expect(reopened.savedAccounts.single['username'], 'alice');
+      expect(paths.where((p) => p.endsWith('/device-refresh')), isEmpty);
+      await reopened.loadSavedAccounts();
+      expect(vault.unlocks, prompts + 1);
+      expect(await reopened.switchSavedAccount('alice'), true);
+      expect(vault.unlocks, prompts + 2);
+      expect(reopened.userId, 'alice');
+      expect(vault.chooser, false);
+    },
+  );
+
+  testWidgets(
+    'account card expands without unlocking; sign out shows chooser and Add account shows clean login',
+    (tester) async {
+      final vault = Accounts()..records['bob'] = stored('bob');
+      final api = ApiService(
+        vault: MemoryVault(),
+        accounts: vault,
+        client: MockClient((r) async {
+          if (r.url.path.endsWith('/device-login')) return ok(result('alice'));
+          return ok({});
+        }),
+      );
+      await api.login('alice', 'password');
+      final container = ProviderContainer(
+        overrides: [apiServiceProvider.overrideWith((ref) => api)],
+      );
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const MaterialApp(home: Scaffold(body: AccountPickerCard())),
+        ),
+      );
+      expect(find.text('Personal account'), findsOneWidget);
+      expect(find.text('bob'), findsNothing);
+      final prompts = vault.unlocks;
+      await tester.tap(find.text('alice'));
+      await tester.pumpAndSettle();
+      expect(find.text('bob'), findsOneWidget);
+      expect(find.text('Add account'), findsOneWidget);
+      expect(vault.unlocks, prompts);
+      await tester.tap(find.text('Personal account'));
+      await tester.pumpAndSettle();
+      expect(find.text('bob'), findsNothing);
+      await tester.runAsync(() => api.signOut());
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const MaterialApp(home: AuthGate()),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Choose an account'), findsOneWidget);
+      expect(find.text('bob'), findsOneWidget);
+      expect(find.text('Unlock saved accounts'), findsNothing);
+      expect(vault.unlocks, prompts);
+      await tester.tap(find.text('Add account'));
+      await tester.pumpAndSettle();
+      expect(find.text('Remember this account'), findsOneWidget);
+      expect(find.textContaining('Expires after'), findsNothing);
+      expect(find.text('Back to saved accounts'), findsOneWidget);
+      await tester.tap(find.text('Back to saved accounts'));
+      await tester.pumpAndSettle();
+      expect(find.text('Choose an account'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox.shrink());
+      container.dispose();
+    },
+  );
+
+  testWidgets('ordinary background resume leaves active account unlocked', (
+    tester,
+  ) async {
+    final vault = Accounts();
+    final api = ApiService(
+      vault: MemoryVault(),
+      accounts: vault,
+      client: MockClient((r) async {
+        if (r.url.path.endsWith('/device-login')) return ok(result('alice'));
+        if ([
+          '/api/automatic/policies',
+          '/api/mint-plans',
+          '/api/wallets',
+          '/api/mint-permissions',
+          '/api/activity',
+        ].contains(r.url.path)) {
+          return ok([]);
+        }
+        return ok({});
+      }),
+    );
+    await api.login('alice', 'password');
+    final container = ProviderContainer(
+      overrides: [apiServiceProvider.overrideWith((ref) => api)],
+    );
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(home: AuthGate()),
+      ),
+    );
+    await tester.pump();
+    final prompts = vault.unlocks;
+    for (final state in [
+      AppLifecycleState.inactive,
+      AppLifecycleState.hidden,
+      AppLifecycleState.paused,
+      AppLifecycleState.hidden,
+      AppLifecycleState.inactive,
+      AppLifecycleState.resumed,
+    ]) {
+      tester.binding.handleAppLifecycleStateChanged(state);
+    }
+    await tester.pump();
+    expect(api.screenLocked, false);
+    expect(vault.unlocks, prompts);
+    await tester.pumpWidget(const SizedBox.shrink());
+    container.dispose();
+  });
   TestWidgetsFlutterBinding.ensureInitialized();
   testWidgets(
     'locked routes hide account data from accessibility and keyboard',

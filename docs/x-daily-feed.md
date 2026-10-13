@@ -25,6 +25,12 @@ concurrent requests deduplicate by account, wallet and drop. A durable 90-second
 lease recovers abandoned checks. Stage verification is bounded to 60 seconds and
 provider failures use at least 60 seconds of backoff, respecting longer retry
 instructions. Three display-check attempts are permitted per queued refresh.
+The UI polls stored cards every ten seconds only while Today is visible and the
+app is resumed. Cache expiry does not erase the last successful check: cards label
+it "Last checked" while refreshing, with setup disabled until fresh verification.
+Failures invalidate freshness but retain that history and its original check time.
+Polling cannot bypass a pending retry or reset the three-attempt backoff. The
+60-second TTL and request pacing are unchanged; no early refresh is introduced.
 `FEED_WALLET_CHECKS_ENABLED=false` pauses this queue without affecting approvals.
 
 Eligibility is wallet-specific, never stored in shared stage eligibility fields.
@@ -55,3 +61,9 @@ production-style startup. Release results are recorded separately after CI.
 Release this additive backend migration and compatible Dart cards before the
 saved-account/native-vault release. Dart-only changes can use OTA; protected
 account switching requires a newly signed Android APK.
+
+Display eligibility uses OpenSea collection/eligibility reads, not mint-builder
+requests. Reads still consume the shared aggregate gate and provider cooldowns,
+so they have bounded background priority rather than a promise of zero impact.
+Display verification reuses its just-fetched collection response; the ordinary
+plan/arming stage path still fetches and validates its own response.

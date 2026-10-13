@@ -21,10 +21,12 @@ async def stages(db,plan,user_id):
     return await wallet_stages(db,wallet,plan.collection_slug,plan.chain_id,plan.contract_address,plan.selected_stage)
 
 
-async def wallet_stages(db,wallet,slug,chain_id,contract,selected_stage=None,*,read_only=False):
+async def wallet_stages(db,wallet,slug,chain_id,contract,selected_stage=None,*,read_only=False,detail=None):
     """Read-only discovery shared with Today; never creates/selects a personal plan."""
     user_id=wallet.user_id
-    client=OpenSeaClient();detail=await client.get_drop(slug)
+    client=OpenSeaClient()
+    # Only display discovery may reuse the collection response it just validated.
+    if detail is None or not read_only:detail=await client.get_drop(slug)
     from app.services.opensea import CHAINS
     if CHAINS[detail['chain']][0]!=chain_id or detail['contract_address'].lower()!=contract.lower():
         raise HTTPException(409,'The collection network or contract changed.')

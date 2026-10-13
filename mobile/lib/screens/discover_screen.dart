@@ -32,6 +32,7 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) => _refresh());
     _timer = Timer.periodic(const Duration(seconds: 10), (_) {
       if (mounted &&
+          WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed &&
           TickerMode.valuesOf(context).enabled &&
           ModalRoute.of(context)?.isCurrent == true) {
         _refresh();
@@ -297,7 +298,9 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
 
   Widget _verifiedCard(BuildContext context, DropModel drop) {
     final check = drop.walletCheck!;
-    final stage = check['recommended_stage'] as Map<String, dynamic>?;
+    final stage =
+        (check['recommended_stage'] ?? check['last_recommended_stage'])
+            as Map<String, dynamic>?;
     final checked = DateTime.tryParse(check['checked_at'] as String? ?? '');
     final fresh =
         checked != null &&
@@ -307,13 +310,18 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
         fresh &&
         check['setup_enabled'] == true &&
         !_preparing.contains(drop.id);
-    final status = fresh
+    final status = fresh && check['status'] != 'unverified'
         ? switch (check['status']) {
             'eligible' => 'Eligible',
             'not_eligible' => 'Not eligible',
             _ => 'Not verified',
           }
-        : 'Not verified';
+        : switch (check['last_status']) {
+            'eligible' => 'Last checked: eligible',
+            'not_eligible' => 'Last checked: not eligible',
+            _ => 'Not verified',
+          };
+    final verified = fresh && check['status'] != 'unverified';
     final price = stage?['price_wei'] as String?;
     final starts = DateTime.tryParse(stage?['starts_at'] as String? ?? '');
     return Card(
@@ -346,12 +354,16 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
               ],
             ),
             const SizedBox(height: 12),
-            if (stage != null && fresh)
+            if (stage != null &&
+                (verified || check['last_recommended_stage'] != null))
               Text(
-                '${stage['name']} · ${price == '0' ? 'Free' : '${formatNative(price!)} ${drop.nativeCurrency}'}',
+                '${verified ? '' : 'Last checked stage: '}${stage['name']} · ${price == '0' ? 'Free' : '${formatNative(price!)} ${drop.nativeCurrency}'}',
               ),
-            if (starts != null && fresh) Text('Opens ${_wat(starts)} WAT'),
-            if (!fresh || stage == null)
+            if (starts != null &&
+                (verified || check['last_recommended_stage'] != null))
+              Text('Opens ${_wat(starts)} WAT'),
+            if (stage == null ||
+                (!verified && check['last_recommended_stage'] == null))
               Text(
                 'Source price: ${drop.sourcePriceText ?? 'Not provided'}\nSource time: ${drop.sourceTimeText ?? 'Not provided'}',
               ),
@@ -360,7 +372,12 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
                 'Checked ${_wat(checked)} WAT',
                 style: Theme.of(context).textTheme.bodySmall,
               ),
-            if (check['note'] != null) Text('${check['note']}'),
+            if (!verified && check['refreshing'] == true)
+              const Text(
+                'Refreshing eligibility… Setup is available after verification.',
+              )
+            else if (check['note'] != null)
+              Text('${check['note']}'),
             const SizedBox(height: 10),
             FilledButton(
               onPressed: enabled
