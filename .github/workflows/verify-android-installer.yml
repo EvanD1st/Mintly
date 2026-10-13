@@ -1,0 +1,73 @@
+name: Mintly Verify Built Android Installer
+on:
+  workflow_dispatch:
+    inputs:
+      build_run_id:
+        description: Shorebird workflow run containing the built APK
+        required: true
+        type: string
+      source_commit:
+        description: Exact app commit built by that workflow
+        required: true
+        type: string
+permissions:
+  contents: read
+  actions: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    env:
+      BUILD_RUN: ${{ inputs.build_run_id }}
+      SOURCE_COMMIT: ${{ inputs.source_commit }}
+      GH_TOKEN: ${{ github.token }}
+      KEYSTORE_B64: ${{ secrets.MINTLY_ANDROID_KEYSTORE_B64 }}
+      MINTLY_KEYSTORE_PASSWORD: ${{ secrets.MINTLY_KEYSTORE_PASSWORD }}
+      MINTLY_KEY_ALIAS: ${{ secrets.MINTLY_KEY_ALIAS }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Require the exact completed build
+        run: |
+          python - <<'PY'
+          import json,os,urllib.request
+          root='https://api.github.com/repos/'+os.environ['GITHUB_REPOSITORY']
+          headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'}
+          def get(path):
+              with urllib.request.urlopen(urllib.request.Request(root+path,headers=headers)) as response:return json.load(response)
+          run=get('/actions/runs/'+os.environ['BUILD_RUN'])
+          assert run['head_sha']==os.environ['SOURCE_COMMIT'] and run['name']=='Mintly Android Shorebird' and run['status']=='completed'
+          jobs=get('/actions/runs/'+os.environ['BUILD_RUN']+'/jobs')['jobs']
+          assert any(s['name']=='Create signed Android release' and s['conclusion']=='success' for j in jobs for s in j['steps'])
+          PY
+      - uses: actions/download-artifact@v4
+        with:
+          name: mintly-shorebird-android
+          path: verified-installer
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.build_run_id }}
+      - name: Verify signature, installed identity, version and manifest
+        run: |
+          set -euo pipefail
+          install -m 700 -d "$RUNNER_TEMP/mintly-cert-check"
+          printf '%s' "$KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/mintly-cert-check/release.jks"
+          chmod 600 "$RUNNER_TEMP/mintly-cert-check/release.jks"
+          keytool -exportcert -keystore "$RUNNER_TEMP/mintly-cert-check/release.jks" -alias "$MINTLY_KEY_ALIAS" -storepass:env MINTLY_KEYSTORE_PASSWORD -file "$RUNNER_TEMP/mintly-cert-check/release-cert.der"
+          TOOLS="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
+          python -m unittest discover -s deploy -p test_verify_android_installer.py
+          python deploy/verify-android-installer.py "$TOOLS" "$RUNNER_TEMP/mintly-cert-check/release-cert.der" . verified-installer release-verification.json
+          python - <<'PY'
+          import json,os
+          from pathlib import Path
+          p=Path('release-verification.json');reports=json.loads(p.read_text())
+          for report in reports:report.update(source_commit=os.environ['SOURCE_COMMIT'],original_build_run=os.environ['BUILD_RUN'])
+          p.write_text(json.dumps(reports,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mintly-installer-verification
+          path: release-verification.json
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mintly-shorebird-android
+          path: verified-installer/*.apk
+          if-no-files-found: error
