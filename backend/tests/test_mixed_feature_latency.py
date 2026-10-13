@@ -86,3 +86,46 @@ async def test_mixed_feature_reads_and_writes_during_four_wallet_preparation(cop
         if not scenario.done():
             scenario.cancel()
             await asyncio.gather(scenario,return_exceptions=True)
+
+
+async def test_remaining_feature_contracts_and_session_revocation(lab,monkeypatch):
+    """Separate incompatible mutations from the mixed signer workload."""
+    import socket
+    original_dns=socket.getaddrinfo
+    def dns(host,*args,**kwargs):
+        if host=='opensea.io':
+            return [(socket.AF_INET,socket.SOCK_STREAM,6,'',('93.184.216.34',443))]
+        return original_dns(host,*args,**kwargs)
+    monkeypatch.setattr(socket,'getaddrinfo',dns)
+    login=await lab.client.post('/api/auth/login',json={'username':'admin','password':'Admin test password 123'})
+    admin={'Authorization':'Bearer '+login.json()['token']}
+    assert (await lab.client.get('/')).status_code==200
+    assert (await lab.signer_client.get('/readyz')).json()['status']=='ready'
+    assert (await lab.client.get(f'/api/wallets/{lab.wallet.id}/opensea-access')).json()['enabled'] is False
+    # The old web pairing feature is retired; polling must reject a missing record.
+    assert (await lab.client.get('/api/wallets/pairings/missing')).status_code==404
+    for expected in (False,True):
+        toggle=await lab.client.post('/api/source/toggle',headers=admin)
+        assert toggle.status_code==200 and toggle.json()['is_monitoring'] is expected
+    imported=await lab.client.post('/api/drops/import',headers=admin,json={
+        'raw_content':'https://opensea.io/collection/disposable-audit'})
+    assert imported.status_code==200,imported.text
+    drops=(await lab.client.get('/api/drops')).json()['drops']
+    assert len(drops)==1 and drops[0]['is_supported_integration'] is False
+    recheck=await lab.client.post(f"/api/drops/{drops[0]['id']}/recheck?wallet_id={lab.wallet.id}")
+    assert recheck.status_code==409 and 'cannot be verified' in recheck.json()['detail']
+    # Real broker transport/validation; its authenticated provider is controlled.
+    async def stages(db,wallet_id,operation,*,slug,key):
+        assert (wallet_id,operation,slug,key)==(lab.wallet.id,'stages','disposable-audit','disposable-audit-api-key')
+        return {'stages':[]}
+    monkeypatch.setattr('app.services.opensea_identity.connection',stages)
+    stage_response=await lab.signer_client.post(f'/opensea/{lab.wallet.id}/stages/disposable-audit',
+        json={'api_key':'disposable-audit-api-key'})
+    assert stage_response.status_code==200 and stage_response.json()=={'stages':[]}
+    assert (await lab.client.post('/api/auth/logout')).status_code==200
+    assert (await lab.client.get('/api/auth/me')).status_code==401
+    deleted=await lab.client.post(f'/api/admin/users/{lab.user.id}/delete',headers=admin,
+        json={'admin_password':'Admin test password 123'})
+    assert deleted.status_code==200
+    assert (await lab.client.post('/api/auth/login',json={
+        'username':'member','password':'Member test password 123'})).status_code==401
