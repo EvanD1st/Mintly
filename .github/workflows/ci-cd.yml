@@ -14,19 +14,25 @@ jobs:
   backend-tests:
     name: Backend tests and production smoke test
     runs-on: ubuntu-24.04
-    services:
-      postgres-tests:
-        image: public.ecr.aws/docker/library/postgres:16-alpine
-        env:
-          POSTGRES_USER: mintly_test
-          POSTGRES_PASSWORD: disposable-ci-only
-          POSTGRES_DB: mintly_test
-        ports: ['15432:5432']
-        options: >-
-          --health-cmd "pg_isready -U mintly_test -d mintly_test"
-          --health-interval 5s --health-timeout 5s --health-retries 12
     steps:
       - uses: actions/checkout@v5
+      - name: Start disposable PostgreSQL with official mirror fallback
+        run: |
+          set -euo pipefail
+          pulled=false
+          for image in postgres:16-alpine mirror.gcr.io/library/postgres:16-alpine public.ecr.aws/docker/library/postgres:16-alpine; do
+            if docker pull "$image"; then docker tag "$image" postgres:16-alpine; pulled=true; break; fi
+          done
+          test "$pulled" = true
+          docker run -d --name mintly-postgres-tests -p 127.0.0.1:15432:5432 \
+            -e POSTGRES_USER=mintly_test -e POSTGRES_PASSWORD=disposable-ci-only -e POSTGRES_DB=mintly_test \
+            --health-cmd 'pg_isready -U mintly_test -d mintly_test' --health-interval 5s \
+            --health-timeout 5s --health-retries 12 postgres:16-alpine
+          for attempt in $(seq 1 60); do
+            if docker exec mintly-postgres-tests pg_isready -U mintly_test -d mintly_test; then exit 0; fi
+            sleep 1
+          done
+          exit 1
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
@@ -76,7 +82,6 @@ jobs:
       - name: Check shell syntax and clean production startup
         run: |
           # Official-image mirror avoids Docker Hub's shared-runner pull quota.
-          docker tag public.ecr.aws/docker/library/postgres:16-alpine postgres:16-alpine
           pulled=false
           for image in public.ecr.aws/docker/library/python:3.12-slim mirror.gcr.io/library/python:3.12-slim python:3.12-slim; do
             if docker pull "$image"; then docker tag "$image" python:3.12-slim; pulled=true; break; fi

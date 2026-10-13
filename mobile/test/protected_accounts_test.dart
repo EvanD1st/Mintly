@@ -94,6 +94,7 @@ void main() {
     'locked routes hide account data from accessibility and keyboard',
     (tester) async {
       final api = ApiService(
+        vault: MemoryVault(),
         accounts: Accounts(),
         client: MockClient((r) async => ok(result('alice'))),
       );
@@ -126,7 +127,13 @@ void main() {
       await tester.pump();
       expect(focus.hasFocus, false);
       expect(
-        tester.binding.pipelineOwner.semanticsOwner!.rootSemanticsNode!
+        tester
+            .binding
+            .renderViews
+            .first
+            .owner!
+            .semanticsOwner!
+            .rootSemanticsNode!
             .toStringDeep(),
         isNot(contains('Private approval draft')),
       );

@@ -137,3 +137,43 @@ jobs:
           path: mobile/build/app/outputs/flutter-apk/*.apk
           if-no-files-found: error
           retention-days: 14
+      - name: Verify signed installer identity
+        if: steps.scope.outputs.skip != 'true' && inputs.operation == 'release'
+        working-directory: mobile
+        run: |
+          set -euo pipefail
+          TOOLS="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
+          export MINTLY_RELEASE_TOOLS="$TOOLS"
+          keytool -exportcert -keystore "$MINTLY_KEYSTORE_PATH" -alias "$MINTLY_KEY_ALIAS" -storepass:env MINTLY_KEYSTORE_PASSWORD -file "$RUNNER_TEMP/mintly-release-cert.der"
+          export MINTLY_RELEASE_CERT="$RUNNER_TEMP/mintly-release-cert.der"
+          python - <<'PY'
+          import glob,hashlib,json,os,re,subprocess
+          from pathlib import Path
+          tools=Path(os.environ['MINTLY_RELEASE_TOOLS'])
+          expected=hashlib.sha256(Path(os.environ['MINTLY_RELEASE_CERT']).read_bytes()).hexdigest()
+          version=re.search(r'^version:\s*(\S+)',Path('pubspec.yaml').read_text(),re.M).group(1)
+          name,code=version.split('+')
+          reports=[]
+          for apk in glob.glob('build/app/outputs/flutter-apk/*.apk'):
+              signature=subprocess.check_output([str(tools/'apksigner'),'verify','--print-certs',apk],text=True)
+              assert 'Signer #1 certificate SHA-256 digest: '+expected in signature, 'Installer signing identity differs'
+              badging=subprocess.check_output([str(tools/'aapt'),'dump','badging',apk],text=True)
+              assert "name='com.mintly.mintly'" in badging.splitlines()[0]
+              assert "versionCode='"+code+"'" in badging.splitlines()[0]
+              assert "versionName='"+name+"'" in badging.splitlines()[0]
+              manifest=subprocess.check_output([str(tools/'aapt'),'dump','xmltree',apk,'AndroidManifest.xml'],text=True)
+              assert 'UnlockTestActivity' not in manifest, 'Debug test activity shipped'
+              assert not re.search(r'android:debuggable[^\n]*0xffffffff',manifest), 'Installer is debuggable'
+              reports.append({'file':Path(apk).name,'version':version,'package':'com.mintly.mintly','certificate_sha256':expected,'sha256':hashlib.sha256(Path(apk).read_bytes()).hexdigest()})
+          assert reports, 'Signed installer missing'
+          Path('build/release-verification.json').write_text(json.dumps(reports,indent=2))
+          print(json.dumps(reports))
+          PY
+      - name: Upload installer verification
+        if: steps.scope.outputs.skip != 'true' && inputs.operation == 'release'
+        uses: actions/upload-artifact@v4
+        with:
+          name: mintly-installer-verification
+          path: mobile/build/release-verification.json
+          if-no-files-found: error
+          retention-days: 30
