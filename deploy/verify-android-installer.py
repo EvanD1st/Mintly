@@ -19,8 +19,8 @@ def main():
     version=re.search(r'^version:\s*(\S+)',(root/'mobile/pubspec.yaml').read_text(),re.M).group(1)
     name,code=version.split('+');reports=[]
     for apk in apk_dir.glob('*.apk'):
-        signature=subprocess.check_output([str(tools/'apksigner'),'verify','--print-certs',str(apk)],text=True)
-        actual=signer_hashes(signature)
+        actual=set(json.loads(subprocess.check_output(['java','-cp',str(tools/'lib/apksigner.jar'),
+            str(root/'deploy/InstallerCertificates.java'),str(apk)],text=True)))
         print(json.dumps({'configured_certificate':expected,'installed_certificate':installed,'apk_certificates':sorted(actual)}))
         assert actual=={expected} and expected==installed,'Installer signing identity differs'
         badging=subprocess.check_output([str(tools/'aapt'),'dump','badging',str(apk)],text=True)
