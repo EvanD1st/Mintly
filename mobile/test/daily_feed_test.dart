@@ -167,9 +167,13 @@ void main() {
         expect(find.textContaining('Source price:'), findsOneWidget);
       }
       final polls = calls.where((p) => p.endsWith('/wallet-checks')).length;
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
       await tester.pump(const Duration(seconds: 30));
       expect(calls.where((p) => p.endsWith('/wallet-checks')).length, polls);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
       expect(calls.where((p) => p.endsWith('/prepare-plan')), isEmpty);
       await tester.pumpWidget(const SizedBox.shrink());

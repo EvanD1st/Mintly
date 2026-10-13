@@ -201,6 +201,14 @@ void main() {
       accounts: vault,
       client: MockClient((r) async {
         if (r.url.path.endsWith('/device-login')) return ok(result('alice'));
+        if ([
+          '/api/automatic/policies',
+          '/api/mint-plans',
+          '/api/wallets',
+          '/api/mint-permissions',
+          '/api/activity',
+        ].contains(r.url.path))
+          return ok([]);
         return ok({});
       }),
     );
@@ -216,8 +224,16 @@ void main() {
     );
     await tester.pump();
     final prompts = vault.unlocks;
-    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
-    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    for (final state in [
+      AppLifecycleState.inactive,
+      AppLifecycleState.hidden,
+      AppLifecycleState.paused,
+      AppLifecycleState.hidden,
+      AppLifecycleState.inactive,
+      AppLifecycleState.resumed,
+    ]) {
+      tester.binding.handleAppLifecycleStateChanged(state);
+    }
     await tester.pump();
     expect(api.screenLocked, false);
     expect(vault.unlocks, prompts);
