@@ -21,7 +21,7 @@ async def stages(db,plan,user_id):
     return await wallet_stages(db,wallet,plan.collection_slug,plan.chain_id,plan.contract_address,plan.selected_stage)
 
 
-async def wallet_stages(db,wallet,slug,chain_id,contract,selected_stage=None):
+async def wallet_stages(db,wallet,slug,chain_id,contract,selected_stage=None,*,read_only=False):
     """Read-only discovery shared with Today; never creates/selects a personal plan."""
     user_id=wallet.user_id
     client=OpenSeaClient();detail=await client.get_drop(slug)
@@ -29,8 +29,12 @@ async def wallet_stages(db,wallet,slug,chain_id,contract,selected_stage=None):
     if CHAINS[detail['chain']][0]!=chain_id or detail['contract_address'].lower()!=contract.lower():
         raise HTTPException(409,'The collection network or contract changed.')
     public_verified=True
+    provider_factory=automatic.provider_for
+    if read_only:
+        from app.services.network_reads import provider_for
+        provider_factory=provider_for
     try:
-        schedule=await verified_stage_schedule(detail,chain_id,contract)
+        schedule=await verified_stage_schedule(detail,chain_id,contract,provider_factory=provider_factory) if read_only else await verified_stage_schedule(detail,chain_id,contract)
     except OpenSeaUnavailable as error:
         if error.status != 503:raise
         schedule=stage_schedule(detail)
@@ -56,7 +60,7 @@ async def wallet_stages(db,wallet,slug,chain_id,contract,selected_stage=None):
     try:
         from eth_abi import encode,decode
         from eth_utils import keccak,to_checksum_address
-        web3=await automatic.provider_for(chain_id)
+        web3=await provider_factory(chain_id)
         try:
             try:
                 minted,supply,maximum=decode(['uint256']*3,await web3.eth.call({'to':to_checksum_address(contract),

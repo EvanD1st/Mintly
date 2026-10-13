@@ -76,7 +76,7 @@ async def step(factory):
                 if chain!=drop.chain_id:raise ValueError('Source network does not match the verified collection.')
                 if drop.contract_address and drop.contract_address.lower()!=detail['contract_address'].lower():raise ValueError('Collection contract changed.')
                 from app.services.mint_stage_choice import wallet_stages
-                result,_=await asyncio.wait_for(wallet_stages(db,wallet,slug,chain,detail['contract_address']),60)
+                result,_=await asyncio.wait_for(wallet_stages(db,wallet,slug,chain,detail['contract_address'],read_only=True),60)
                 result.update(collection_slug=slug,contract_address=detail['contract_address'])
                 drop.contract_address=detail['contract_address'];drop.is_supported_integration=True
         except OpenSeaUnavailable as e:error=e
