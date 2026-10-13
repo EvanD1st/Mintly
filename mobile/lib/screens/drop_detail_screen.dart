@@ -8,6 +8,7 @@ import '../models/drop_model.dart';
 import '../state/app_state.dart';
 import 'automatic_review_screen.dart';
 import '../widgets/collection_thumbnail.dart';
+import '../widgets/network_budget_card.dart' show formatNative;
 
 class DropDetailScreen extends ConsumerWidget {
   final DropModel drop;
@@ -98,7 +99,7 @@ class DropDetailScreen extends ConsumerWidget {
                   trailing: Text(
                     raw['price_wei'] == null
                         ? 'Price not verified'
-                        : '${(double.parse('${raw['price_wei']}') / 1e18).toStringAsFixed(6)} ${drop.nativeCurrency}',
+                        : '${formatNative('${raw['price_wei']}')} ${drop.nativeCurrency}',
                   ),
                 ),
               ),

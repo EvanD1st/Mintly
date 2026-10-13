@@ -92,15 +92,19 @@ class MintlyNotifier extends StateNotifier<MintlyState> {
   final ApiService _api;
   int _loadGeneration = 0;
   int _feedGeneration = 0;
+  int _accountRevision = -1;
 
   MintlyNotifier(this._api)
     : super(
         MintlyState(drops: [], queue: [], activities: [], isLoading: false),
       ) {
+    _accountRevision = _api.sessionRevision;
     _api.addListener(_accountChanged);
   }
 
   void _accountChanged() {
+    if (_accountRevision == _api.sessionRevision) return;
+    _accountRevision = _api.sessionRevision;
     _loadGeneration++;
     _feedGeneration++;
     _api.clearFeedSelection();

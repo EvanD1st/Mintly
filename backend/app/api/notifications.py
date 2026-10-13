@@ -4,6 +4,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from datetime import datetime,timezone
+import uuid
 
 from app.api.deps import get_db, get_current_user, require_admin
 from app.models import User
@@ -29,9 +31,17 @@ class DevicePreferencesRequest(BaseModel):
 @router.post("/register")
 async def register_device_token(req: DeviceRegisterRequest, db: AsyncSession = Depends(get_db),
                                 user: User = Depends(get_current_user)):
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+    from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+    insert=pg_insert if db.bind.dialect.name=='postgresql' else sqlite_insert
+    now=datetime.now(timezone.utc)
+    await db.execute(insert(NotificationDevice).values(id=str(uuid.uuid4()),user_id=user.id,
+        device_token=req.token,platform=req.platform,is_active=True,
+        preferences={"daily_list":True,"mint_status":True,"source_health":True},created_at=now,updated_at=now)
+        .on_conflict_do_nothing(index_elements=['device_token']))
     device = (await db.execute(select(NotificationDevice).where(
         NotificationDevice.device_token == req.token
-    ))).scalar_one_or_none()
+    ).with_for_update().execution_options(populate_existing=True))).scalar_one_or_none()
     if device is None:
         device = NotificationDevice(
             user_id=user.id, device_token=req.token, platform=req.platform, is_active=True,
@@ -56,7 +66,7 @@ async def update_device_preferences(req: DevicePreferencesRequest, db: AsyncSess
     device = (await db.execute(select(NotificationDevice).where(
         NotificationDevice.device_token == req.token,
         NotificationDevice.is_active.is_(True), NotificationDevice.user_id == user.id,
-    ))).scalar_one_or_none()
+    ).with_for_update().execution_options(populate_existing=True))).scalar_one_or_none()
     if device is None:
         raise HTTPException(status_code=404, detail="Device is not registered.")
     preferences=req.model_dump(exclude={"token","wallet_alerts"})
@@ -74,7 +84,7 @@ async def unregister_device_token(req: DeviceRegisterRequest, db: AsyncSession =
                                   user: User = Depends(get_current_user)):
     device = (await db.execute(select(NotificationDevice).where(
         NotificationDevice.device_token == req.token, NotificationDevice.user_id == user.id,
-    ))).scalar_one_or_none()
+    ).with_for_update().execution_options(populate_existing=True))).scalar_one_or_none()
     if device:
         device.is_active = False
         await db.commit()

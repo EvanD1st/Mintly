@@ -1,6 +1,6 @@
 """Database and mandatory per-user authorization dependencies."""
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from fastapi import Depends, Header, HTTPException
 from sqlalchemy import select
@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import AsyncSessionLocal
 from app.models.user import AuthSession, User
+from app.models.device_session import DeviceSession
 from app.services.auth import token_digest
 
 
@@ -39,6 +40,20 @@ async def get_authenticated_user(
     user = (await db.execute(select(User).where(User.id == session.user_id))).scalar_one_or_none()
     if user is None or not user.is_active or user.deleted_at is not None:
         raise HTTPException(status_code=401, detail="Account unavailable.")
+    if session.device_session_id:
+        from app.services.mint_plans import aware
+        family=await db.get(DeviceSession,session.device_session_id)
+        now=datetime.now(timezone.utc)
+        if not family or family.user_id!=user.id or family.revoked_at or aware(family.expires_at)<=now:
+            raise HTTPException(401,'Remembered session expired. Sign in again.')
+        if aware(family.last_used_at)<now-timedelta(hours=1):
+            # Finish these short locks before any endpoint takes the execution lock.
+            user=await db.scalar(select(User).where(User.id==user.id).with_for_update().execution_options(populate_existing=True))
+            family=await db.scalar(select(DeviceSession).where(DeviceSession.id==family.id).with_for_update().execution_options(populate_existing=True))
+            if not user.is_active or user.deleted_at or family.revoked_at or aware(family.expires_at)<=now:
+                raise HTTPException(401,'Remembered session expired. Sign in again.')
+            family.last_used_at=now;family.expires_at=now+timedelta(days=90)
+            await db.commit()
     return user
 
 
