@@ -12,7 +12,7 @@ jobs:
   simulation:
     name: Simulation (${{ matrix.database }})
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -78,6 +78,19 @@ jobs:
           MINTLY_SCALE_PRODUCTION_KDF: '1'
           MINTLY_SCALE_REPORT: ../audit/scale-${{ matrix.database }}-production-kdf.jsonl
           MINTLY_LATENCY_REPORT: ../audit/scale-${{ matrix.database }}-production-kdf-http.json
+      - name: Cold full daily list and fresh automatic mints with real request pacing
+        working-directory: backend
+        run: python -m pytest tests/test_full_daily_list_simulation.py -p tests.latency_trace -q -s --durations=5
+        env:
+          APP_ENV: development
+          ALLOW_LIVE_BROADCAST: 'false'
+          SIGNER_MODE: demo
+          DATABASE_URL: sqlite+aiosqlite:///./scale-app-disposable.db
+          MINTLY_TEST_DATABASE_URL: ${{ matrix.database == 'postgres' && 'postgresql+asyncpg://mintly_test:disposable-ci-only@127.0.0.1:15432/mintly_test_scale' || 'sqlite+aiosqlite:///./scale-test-disposable.db' }}
+          MINTLY_TEST_RPC: http://127.0.0.1:18545
+          MINTLY_SCALE_PRODUCTION_KDF: '1'
+          MINTLY_SCALE_REPORT: ../audit/scale-${{ matrix.database }}-full-list.jsonl
+          MINTLY_LATENCY_REPORT: ../audit/scale-${{ matrix.database }}-full-list-http.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:

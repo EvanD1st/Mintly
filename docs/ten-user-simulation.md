@@ -13,3 +13,35 @@ Reports include scan completion, preparation response latency, execution-lock wa
 Set `MINTLY_SCALE_REPORT` to append credential-free JSONL reports. The normal fixture uses scrypt N=1024 for disposable keys. `MINTLY_SCALE_PRODUCTION_KDF=1` re-encrypts all benchmark wallets with production N=262144 before the measured phase, so signing timings include the larger decryption cost. Provisioning/encryption itself is excluded. Both modes preserve the current global execution lock and 2/20/8-second request settings with a 40-attempt preparation limit.
 
 These in-process ASGI and local-EVM runs exclude WAN latency, real OpenSea calls/quota/cooldowns, public-chain congestion/finality and phone rendering. Production KDF cost is measured on the runner hardware, not the production server. The current four real accounts are untouched. The simulation evaluates the existing architecture; it does not implement account-scoped execution locks or authorize a production scaling rollout.
+
+## Cold full-list workload
+
+`test_full_daily_list_simulation.py` adds a smoke cohort and ten accounts each
+opening the current WAT day's eight supported, distinct local SeaDrop collections.
+Duplicate API submissions must create exactly 80 wallet-check records. Five
+followers copy a real public source mint while five other accounts prepare fresh
+signed whitelist instructions and run through the real automatic scheduler,
+signer, broadcast, receipt tracking and reservation settlement.
+
+The provider transport is controlled; successful replies take 350ms for shared
+metadata/artwork, 600ms for wallet eligibility, 2.4s for mint builders, with
+periodic 2.2s read responses. These assumptions represent a plausible latency
+range, not measured OpenSea guarantees. SDK parsing, in-process caches, shared
+database arbitration, 2s aggregate pacing, 20s mint pacing, 8s queue waits and
+durable retries run unchanged in real wall-clock time. All cohort keys use
+production scrypt cost in CI. Only the disposable EVM's scheduler clock is aligned
+with its deliberately advanced stage time; rate-gate time is not accelerated.
+
+The actual display-check worker processes one item at a time with its existing
+one-second cadence. Wallet eligibility responses use controlled warm identity
+consent, with mixed whitelist outcomes to test account isolation. Real login/PAT
+refresh traffic is excluded. Background requests that cannot get capacity must
+remain unverified rather than invent eligibility. Reports distinguish processed
+checks from verified whitelist results, cache freshness at queue completion,
+provider requests, queue deferrals, Today API timing and mint completion.
+
+The test creates a stored daily list and exercises Today/card API reads; it does
+not log in to X or fetch live posts. Artwork metadata goes through the existing
+cache; phone image downloading/decoding is excluded. This is a cold burst without
+continuous requeueing of already-expired cards, so it is not a steady-state load
+test or certification of production capacity.

@@ -25,7 +25,7 @@ from app.models import User,Wallet,AutomaticGrant,AutomaticNonce,CopyWatch,CopyE
 from app.services import automatic,copy_mints,feed_checks,mint_instruction_cache as cache
 from app.services.custody import CustodyVault,private_write
 from app.services.mint_plans import aware
-from app.services.opensea import OpenSeaClient
+from app.services.opensea import OpenSeaClient,OpenSeaUnavailable
 from test_automatic_evm import lab
 from test_copy_mints import copying
 from test_opensea_multiwallet import six_wallets,concurrent_prepare,assert_approvals_unchanged
@@ -107,11 +107,10 @@ async def background(lab,items,monkeypatch):
     return dict(screen_http=summary(latencies),feed_checks=len(items),artwork_fetches=len(calls))
 
 
-@pytest.mark.parametrize('count',[4,10])
-async def test_mixed_accounts_copy_automatic_and_background(copying,monkeypatch,count):
+async def provision_mixed(copying,monkeypatch,count,*,copy_count=None,automatic_kind='public'):
     c=copying;lab=c['lab'];engine,timeout=sqlite_timeout(lab)
     assert (settings.OPENSEA_GLOBAL_REQUEST_SECONDS,settings.OPENSEA_MINT_REQUEST_SECONDS)==(2,20)
-    copy_count=count-1
+    copy_count=count-1 if copy_count is None else copy_count
     items=[SimpleNamespace(user=lab.user,wallet=lab.wallet,grant=lab.grant,owner=lab.owner,headers=dict(lab.client.headers))]
     watches=[c['watch_id']];await c['approve']()
     async with lab.factory() as db:
@@ -125,7 +124,8 @@ async def test_mixed_accounts_copy_automatic_and_background(copying,monkeypatch,
             private_write(lab.tmp/f'{key_id}.keystore.json',json.dumps(Account.encrypt(owner.key,
                 (lab.tmp/'password').read_text(),kdf='scrypt',iterations=1024)))
             policy=dict(grant_id=gid,key_id=key_id,user_id=user.id,wallet_id=wallet.id,account=owner.address,
-                chain_id=31337,contracts=[lab.nft.address],mint_kinds=['public'],budget_wei=10**16,
+                chain_id=31337,contracts=[lab.nft.address],
+                mint_kinds=['public'] if automatic_kind=='public' else ['public','signed'],budget_wei=10**16,
                 max_task_wei=10**15,expires_at=lab.end)
             private_write(lab.tmp/f'{gid}.policy.json',json.dumps(policy))
             grant=AutomaticGrant(id=gid,user_id=user.id,wallet_id=wallet.id,chain_id=31337,account=owner.address,
@@ -147,10 +147,22 @@ async def test_mixed_accounts_copy_automatic_and_background(copying,monkeypatch,
                 json={**c['request'],'request_id':str(uuid.uuid4()),'grant_id':item.grant.id})
             assert approved.status_code==200,approved.text
         else:
-            plan=await lab.client.post('/api/tasks/arm',headers=item.headers,json={**lab.request,
-                'wallet_id':item.wallet.id,'grant_id':item.grant.id,'quantity':1})
+            body={**lab.request,'wallet_id':item.wallet.id,'grant_id':item.grant.id,'quantity':1,
+                'idempotency_key':f'scale-automatic-{i}','mint_kind':automatic_kind}
+            if automatic_kind=='signed':body.update(onchain_stage_index=1,conditional_eligibility=True)
+            with monkeypatch.context() as patch:
+                if automatic_kind=='signed':patch.setattr(OpenSeaClient,'build_mint',AsyncMock(side_effect=
+                    OpenSeaUnavailable('Controlled future stage',503,mint_reason='stage_not_active')))
+                plan=await lab.client.post('/api/tasks/arm',headers=item.headers,json=body)
             assert plan.status_code==200,plan.text
             item.task_id=plan.json()['id']
+    return SimpleNamespace(c=c,lab=lab,engine=engine,timeout=timeout,items=items,watches=watches,copy_count=copy_count)
+
+
+@pytest.mark.parametrize('count',[4,10])
+async def test_mixed_accounts_copy_automatic_and_background(copying,monkeypatch,count):
+    case=await provision_mixed(copying,monkeypatch,count)
+    c,lab,engine,timeout,items,watches,copy_count=(case.c,case.lab,case.engine,case.timeout,case.items,case.watches,case.copy_count)
     try:
         iterations=production_keys(lab,items)
         await c['mint'](1)
