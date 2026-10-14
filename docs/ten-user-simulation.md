@@ -45,3 +45,11 @@ not log in to X or fetch live posts. Artwork metadata goes through the existing
 cache; phone image downloading/decoding is excluded. This is a cold burst without
 continuous requeueing of already-expired cards, so it is not a steady-state load
 test or certification of production capacity.
+
+The fresh-builder workload requires PostgreSQL, which production uses. SQLite's
+execution writer locks the entire database while the signer calls the independent
+rate-gate session, so that second writer cannot progress. The full EVM workload is
+explicitly skipped on SQLite; a bounded database regression reproduces the lock
+and verifies that the gate proceeds after the execution transaction releases it.
+Earlier cached/on-chain-only SQLite cohorts do not exercise this coordination
+edge. This simulation documents the limitation without changing runtime locks.
