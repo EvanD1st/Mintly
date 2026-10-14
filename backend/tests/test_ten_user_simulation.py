@@ -40,7 +40,8 @@ def summary(values):
 def save_report(report):
     target=os.environ.get('MINTLY_SCALE_REPORT')
     if target:
-        with Path(target).open('a',encoding='utf-8') as f:f.write(json.dumps(report)+'\n')
+        path=Path(target);path.parent.mkdir(parents=True,exist_ok=True)
+        with path.open('a',encoding='utf-8') as f:f.write(json.dumps(report)+'\n')
 
 
 def sqlite_timeout(lab):
@@ -56,8 +57,13 @@ def production_keys(lab,items):
     if iterations==262144:
         for item in items:
             policy=json.loads((lab.tmp/f'{item.grant.id}.policy.json').read_text())
-            private_write(lab.tmp/f"{policy['key_id']}.keystore.json",json.dumps(Account.encrypt(
-                item.owner.key,(lab.tmp/'password').read_text(),kdf='scrypt',iterations=iterations)))
+            # Test-only rewrite of the same disposable key, preserving its identity
+            # and policy. Production provisioning remains write-once.
+            target=lab.tmp/f"{policy['key_id']}.keystore.json"
+            staged=lab.tmp/f"{policy['key_id']}.profile.json"
+            private_write(staged,json.dumps(Account.encrypt(item.owner.key,
+                (lab.tmp/'password').read_text(),kdf='scrypt',iterations=iterations)))
+            os.replace(staged,target)
     return iterations
 
 
