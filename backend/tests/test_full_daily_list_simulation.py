@@ -132,6 +132,9 @@ def controlled_provider(lab,items,details,monkeypatch):
     monkeypatch.setattr(settings,'OPENSEA_COORDINATE_REQUESTS',True)
     monkeypatch.setattr(opensea_limits,'AsyncSessionLocal',lab.factory)
     monkeypatch.setattr(feed_checks,'supported',lambda d:d.chain_id==31337)
+    # The API imports this predicate directly, so its test-local binding must
+    # advertise the disposable chain as well as the background worker's binding.
+    monkeypatch.setattr('app.api.drops.supported',lambda d:d.chain_id==31337)
     monkeypatch.setitem(opensea.CHAINS,'local',(31337,'Local test'))
     async def broker(wallet_id,operation,*,slug=None,key=None):
         assert operation=='stages'
