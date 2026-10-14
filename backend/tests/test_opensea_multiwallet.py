@@ -28,7 +28,8 @@ from test_automatic_evm import lab
 
 
 @pytest.fixture
-async def six_wallets(lab, monkeypatch):
+async def six_wallets(lab, monkeypatch, request):
+    count=getattr(request,'param',6)
     # Give simultaneous test clients time to wait for the unchanged real lock
     # on slower developer machines. PostgreSQL uses its normal row locking.
     def busy_timeout(connection, *_):
@@ -51,12 +52,20 @@ async def six_wallets(lab, monkeypatch):
     login=await lab.client.post('/api/auth/login',json={'username':'admin','password':'Admin test password 123'})
     assert login.status_code==200,login.text
     headers={'Authorization':'Bearer '+login.json()['token']}
+    member_headers=dict(lab.client.headers)
     password=(lab.tmp/'password').read_text()
     wallets=[]
     async with lab.factory() as db:
         admin=await db.scalar(select(User).where(User.username=='admin'))
-        for i in range(6):
-            user=lab.user if i<3 else admin
+        for i in range(count):
+            if count==6:
+                user=lab.user if i<3 else admin
+            elif i==0:
+                user=lab.user
+            else:
+                user=User(id=str(uuid.uuid4()),username=f'presale-scale-{i}',
+                    password_hash=lab.user.password_hash,role='member',is_active=True,must_change_password=False)
+                db.add(user);await db.flush()
             if i==0:
                 owner,wallet,grant=lab.owner,lab.wallet,lab.grant
             else:
@@ -78,7 +87,17 @@ async def six_wallets(lab, monkeypatch):
         await db.commit()
     try:
         for i,item in enumerate(wallets):
-            response=await lab.client.post('/api/tasks/arm',headers=headers if i>=3 else {},json={**lab.request,
+            if count==6:
+                owner_headers=headers if i>=3 else member_headers
+            elif i==0:
+                owner_headers=member_headers
+            else:
+                login=await lab.client.post('/api/auth/login',json={
+                    'username':item.user.username,'password':'Member test password 123'})
+                assert login.status_code==200,login.text
+                owner_headers={'Authorization':'Bearer '+login.json()['token']}
+            item.headers=owner_headers
+            response=await lab.client.post('/api/tasks/arm',headers=owner_headers,json={**lab.request,
                 'wallet_id':item.wallet.id,'grant_id':item.grant.id,'quantity':item.quantity,
                 'mint_kind':'signed','onchain_stage_index':1,'conditional_eligibility':True,
                 'idempotency_key':f'six-wallet-consent-{i}'})
@@ -91,8 +110,8 @@ async def six_wallets(lab, monkeypatch):
                 item.snapshot=json.loads(json.dumps(auth.snapshot))
                 item.intent=signer.intent_for(auth.snapshot,item.grant)
                 item.deadline=aware(task.expires_at_utc)
-        assert len(calls)==6 and len({x.owner.address for x in wallets})==6
-        assert len({x.user.id for x in wallets})==2
+        assert len(calls)==count and len({x.owner.address for x in wallets})==count
+        assert len({x.user.id for x in wallets})==(2 if count==6 else count)
         available=True;calls.clear()
         # These are actual signer advance checks which validate upstream
         # calldata against SeaDrop, then persist private encrypted instructions.

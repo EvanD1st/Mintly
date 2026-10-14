@@ -65,6 +65,10 @@ tests. The present change does not weaken those safety checks.
 
 No new migration or configuration change is required by this follow-up.
 Existing installations must already have migration `022` (the gate/waiter
-owner fields) from the completed rollout. Defaults remain 6/20/8 seconds and
+owner fields) from the completed rollout. Current defaults are 2/20/8 seconds and
 40 preparation attempts; copy observation/retry behavior and server-only
 credential provisioning are unchanged. Production deployment is separate.
+
+The separate [ten-account simulation](ten-user-simulation.md) compares four
+and ten distinct accounts under the unchanged execution lock. Its controlled
+provider and local chain results do not establish production mint quota.
