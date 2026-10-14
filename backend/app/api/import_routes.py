@@ -138,13 +138,7 @@ async def import_drops_manually(
     ))
     await db.commit()
 
-    # Dispatch notification
-    await NotificationService.send_notification(
-        title="New Drops Imported",
-        body=f"Imported {len(saved_drops)} new drops for review.",
-        category="daily_list",
-        deep_link="mintly://drops",
-    )
+    # The durable daily-list notifier announces only lists visible on Today.
 
     # Re-fetch drops with stages
     from sqlalchemy import select

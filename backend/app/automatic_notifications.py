@@ -35,11 +35,15 @@ async def deliver_one():
 
 async def run():
     from app.services import wallet_alerts
+    from app.services import daily_notices
     import time
     last_alert_check=-1000
     while True:
         try:
             await deliver_one()
+            await daily_notices.poll()
+            for _ in range(5):
+                if not await daily_notices.deliver():break
             if time.monotonic()-last_alert_check>=60:
                 await wallet_alerts.poll()
                 last_alert_check=time.monotonic()

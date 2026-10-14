@@ -269,14 +269,7 @@ class MintlyWorker:
     async def run_discovery_poll(self, session):
         """Import only @lakzonevn drops; announce persisted records once."""
         try:
-            added = await sync_x_drops(session)
-            if added:
-                await NotificationService.send_notification(
-                    title="New drops from @lakzonevn",
-                    body=f"{added} new drops are available to review.",
-                    category="daily_list",
-                    deep_link="mintly://drops",
-                )
+            await sync_x_drops(session)
         except Exception as e:
             logger.warning(f"Discovery poll failed: {e}")
 

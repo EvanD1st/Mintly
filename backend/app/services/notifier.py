@@ -45,9 +45,10 @@ class NotificationService:
         deep_link: Optional[str] = None,
         data: Optional[Dict[str, str]] = None,
         user_id: Optional[str] = None,
+        device_id: Optional[str] = None,
     ) -> bool:
         """Send to opted-in devices; return True only if FCM accepted a message."""
-        if category in ('mint_status','wallet_alerts') and not user_id:
+        if (category in ('mint_status','wallet_alerts') or device_id) and not user_id:
             logger.warning('Mint-status delivery requires an account owner.')
             return False
         payload = {
@@ -78,6 +79,7 @@ class NotificationService:
                     NotificationDevice.is_active.is_(True), User.is_active.is_(True),
                     User.deleted_at.is_(None),
                     *((NotificationDevice.user_id == user_id,) if user_id else ()),
+                    *((NotificationDevice.id == device_id,) if device_id else ()),
                     *((User.role == 'admin',) if category == 'source_health' else ()),
                 )
             )).scalars().all()
@@ -90,7 +92,8 @@ class NotificationService:
                     notification=messaging.Notification(title=title, body=body),
                     data={**(data or {}), "category": category, "deep_link": deep_link or "",
                           "user_id": device.user_id},
-                    android=messaging.AndroidConfig(priority="high"),
+                    android=messaging.AndroidConfig(priority="high",notification=messaging.AndroidNotification(
+                        tag=(data or {}).get('notification_id'))),
                 )
                 try:
                     await asyncio.to_thread(messaging.send, message, app=app)
