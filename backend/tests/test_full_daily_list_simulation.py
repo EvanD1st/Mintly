@@ -24,6 +24,7 @@ from app.config import settings
 from app.services import automatic,copy_mints,feed_checks,opensea,opensea_limits,mint_diagnostics
 from app.services.custody import CustodyVault
 from app.services.mint_plans import aware
+from app.services.phase_identity import stage_kind
 from app.services.signer.base import SEADROP_V1_ADDRESS
 from app.automatic_worker import step as execution_step
 from test_automatic_evm import lab
@@ -257,7 +258,7 @@ async def test_full_daily_list_with_copy_and_fresh_automatic(copying,monkeypatch
                 if row.result.get('address'):assert row.result['address'].lower()==expected[row.user_id]
                 slug=opensea.collection_slug(next(drop.mint_page_url for drop in drops if drop.id==row.drop_id))
                 i=next(i for i,item in enumerate(items) if item.user.id==row.user_id);j=list(details).index(slug)
-                whitelist=next((s for s in row.result.get('stages',[]) if s['type']=='signed_sale'),None)
+                whitelist=next((s for s in row.result.get('stages',[]) if stage_kind(s['type'])=='signed'),None)
                 if not whitelist or whitelist['eligibility']=='unverified':
                     unverified_whitelist+=1
                     assert row.result.get('note')
