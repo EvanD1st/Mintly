@@ -32,6 +32,22 @@ NATIVE_BASELINES = {
        for version in ('1.1.1+4', '1.1.0+3', '1.0.1+2', '1.0.0+1')},
 }
 
+LEGACY_ICON_VERSIONS = frozenset(('1.0.0+1', '1.0.1+2'))
+# Releases 6 and 7 also predate the account chooser's shield glyph. Use the
+# already tested release-5 fallback, whose required icons are installed in all
+# three versions. The per-release font audit still verifies every glyph.
+RELEASE_5_ICON_VERSIONS = frozenset(('1.1.2+5', '1.1.3+6', '1.1.4+7'))
+
+
+def patch_command(version, track):
+    command = ["shorebird", "--json", "patch", "android", "--release-version",
+               version, "--track", track]
+    if version in LEGACY_ICON_VERSIONS:
+        command.append("--dart-define=MINTLY_LEGACY_ICONS=true")
+    if version in RELEASE_5_ICON_VERSIONS:
+        command.append("--dart-define=MINTLY_RELEASE_5_ICONS=true")
+    return command
+
 
 @contextmanager
 def installed_native_sources(version):
@@ -150,13 +166,8 @@ def installed_launcher_icons(version, release_archive):
 
 
 def patch_release(version, track, audit_only):
-    command = ["shorebird", "--json", "patch", "android", "--release-version",
-               version, "--track", track]
-    legacy_icons = version in {"1.0.0+1", "1.0.1+2"}
-    if legacy_icons:
-        command.append("--dart-define=MINTLY_LEGACY_ICONS=true")
-    if version == "1.1.2+5":
-        command.append("--dart-define=MINTLY_RELEASE_5_ICONS=true")
+    command = patch_command(version, track)
+    legacy_icons = version in LEGACY_ICON_VERSIONS
     # Isolate Shorebird downloads so the archive audited is the exact release
     # selected by the CLI, rather than a guessed or stale release artifact.
     with installed_native_sources(version), installed_plugin_graph(legacy_icons), tempfile.TemporaryDirectory(prefix="mintly-ota-") as scratch:
@@ -176,7 +187,7 @@ def patch_release(version, track, audit_only):
                 subprocess.run(command + ["--dry-run", "--allow-asset-diffs"], env=env, check=True)
             result = audit(candidates[0], built)
             result.update(release_version=version, track=track, legacy_icons=legacy_icons,
-                          release_5_icons=version == "1.1.2+5",
+                          release_5_icons=version in RELEASE_5_ICON_VERSIONS,
                           browser_links="copy and paste" if legacy_icons else "native launcher",
                           preserved_installed_launcher=preserved_launcher,
                           native_checks="Shorebird enabled; no override")
