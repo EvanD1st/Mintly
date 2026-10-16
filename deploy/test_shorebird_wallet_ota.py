@@ -44,6 +44,21 @@ def font(codepoints=(65, 66), width=600):
 
 
 class AssetGuardTests(unittest.TestCase):
+    def test_every_installer_gets_its_tested_icon_variant_without_native_override(self):
+        expected = {
+            '1.1.4+7': ['--dart-define=MINTLY_RELEASE_5_ICONS=true'],
+            '1.1.3+6': ['--dart-define=MINTLY_RELEASE_5_ICONS=true'],
+            '1.1.2+5': ['--dart-define=MINTLY_RELEASE_5_ICONS=true'],
+            '1.1.1+4': [], '1.1.0+3': [],
+            '1.0.1+2': ['--dart-define=MINTLY_LEGACY_ICONS=true'],
+            '1.0.0+1': ['--dart-define=MINTLY_LEGACY_ICONS=true'],
+        }
+        for version, defines in expected.items():
+            with self.subTest(version=version):
+                self.assertEqual(ota.patch_command(version, 'stable'),
+                    ['shorebird', '--json', 'patch', 'android', '--release-version',
+                     version, '--track', 'stable', *defines])
+
     def test_each_older_installer_restores_native_sources_even_after_failure(self):
         for version, baseline in ota.NATIVE_BASELINES.items():
             with self.subTest(version=version), patch.object(ota.subprocess, 'run') as run:
