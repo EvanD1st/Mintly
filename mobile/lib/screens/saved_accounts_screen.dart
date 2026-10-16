@@ -73,7 +73,7 @@ class _SavedAccountsState extends ConsumerState<SavedAccountsScreen> {
           for (final account in api.savedAccounts)
             Card(
               child: ListTile(
-                leading: const Icon(Icons.person_outline),
+                leading: const Icon(MintlyIcons.verifiedUser),
                 title: Text('${account['username']}'),
                 subtitle: Text(
                   account['user_id'] == api.userId

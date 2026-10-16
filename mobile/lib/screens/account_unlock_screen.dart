@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../state/app_state.dart';
 import '../services/push_service.dart';
+import '../theme/compatible_icons.dart';
 
 /// Covers every route while preserving an in-flight same-account wallet handoff.
 class AccountUnlockScreen extends ConsumerStatefulWidget {
@@ -23,7 +24,7 @@ class _AccountUnlockState extends ConsumerState<AccountUnlockScreen> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.lock_outline, size: 48),
+                const Icon(MintlyIcons.lockOutline, size: 48),
                 const SizedBox(height: 16),
                 Text(
                   'Unlock account',
