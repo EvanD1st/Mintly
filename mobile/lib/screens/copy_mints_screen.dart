@@ -2051,6 +2051,7 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
                           ),
                         ),
                         DropdownButtonFormField<int>(
+                          isExpanded: true,
                           icon: const CopyGlyph('down'),
                           initialValue: _days,
                           decoration: const InputDecoration(

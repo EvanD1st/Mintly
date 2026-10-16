@@ -79,6 +79,7 @@ class CheckRequest(BaseModel):
     free_only:bool=False
     paid_only:bool=Field(default=False,strict=True)
     include_presales:bool=False
+    any_eligible_free_phase:bool=Field(default=False,strict=True)
     native_symbol:Literal['ETH','HYPE','APE']='ETH'
     expires_at:datetime
 
