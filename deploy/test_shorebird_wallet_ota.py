@@ -44,6 +44,25 @@ def font(codepoints=(65, 66), width=600):
 
 
 class AssetGuardTests(unittest.TestCase):
+    def test_each_older_installer_restores_native_sources_even_after_failure(self):
+        for version, baseline in ota.NATIVE_BASELINES.items():
+            with self.subTest(version=version), patch.object(ota.subprocess, 'run') as run:
+                with self.assertRaisesRegex(RuntimeError, 'build failed'):
+                    with ota.installed_native_sources(version):
+                        raise RuntimeError('build failed')
+                self.assertEqual(run.call_args_list[0].args[0],
+                    ['git', 'fetch', '--depth=1', 'origin', baseline])
+                self.assertEqual(run.call_args_list[1].args[0],
+                    ['git', 'restore', '--source='+baseline, '--worktree', '--', 'android'])
+                self.assertEqual(run.call_args_list[-1].args[0],
+                    ['git', 'restore', '--source=HEAD', '--worktree', '--', 'android'])
+
+    def test_current_installer_uses_current_native_sources(self):
+        with patch.object(ota.subprocess, 'run') as run:
+            with ota.installed_native_sources('1.1.4+7'):
+                pass
+            run.assert_not_called()
+
     def check_archives(self, changes=None, additions=None, removals=()):
         old = {ota.FONT: font(), ota.NOTICES: b"old notices",
                "base/assets/logo.png": b"logo", "base/lib/arm64-v8a/plugin.so": b"native"}

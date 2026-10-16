@@ -91,7 +91,7 @@ class _AccountPickerCardState extends ConsumerState<AccountPickerCard> {
                       const Divider(height: 1, indent: 20, endIndent: 20),
                       for (final account in api.savedAccounts)
                         ListTile(
-                          leading: const Icon(Icons.person_outline),
+                          leading: const Icon(MintlyIcons.verifiedUser),
                           title: Text('${account['username']}'),
                           subtitle: Text(
                             account['user_id'] == api.userId

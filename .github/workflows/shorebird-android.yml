@@ -51,8 +51,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           python - <<'PY'
-          import json, os, time, urllib.request
+          import json, os, subprocess, time, urllib.request
           sha = os.environ['GITHUB_SHA']
+          if os.environ['GITHUB_REF'] != 'refs/heads/main':
+              # Publisher-only repairs may reuse a verified deployment, but
+              # cannot ship different application, native, dependency or DB code.
+              subprocess.run(['git', 'fetch', '--depth=1', 'origin', 'main'], check=True)
+              subprocess.run(['git', 'diff', '--exit-code', 'HEAD', 'FETCH_HEAD', '--', 'backend', 'mobile'], check=True)
+              sha = subprocess.check_output(['git', 'rev-parse', 'FETCH_HEAD'], text=True).strip()
+              print('Publisher checkout matches deployed application revision:', sha)
           url = ('https://api.github.com/repos/' + os.environ['GITHUB_REPOSITORY']
               + '/actions/workflows/ci-cd.yml/runs?head_sha=' + sha + '&event=push&per_page=10')
           for attempt in range(90):
