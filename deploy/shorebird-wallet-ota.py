@@ -23,14 +23,23 @@ from fontTools.ttLib import TTFont
 NOTICES = "base/assets/flutter_assets/NOTICES.Z"
 FONT = "base/assets/flutter_assets/fonts/MaterialIcons-Regular.otf"
 
+# Exact source revisions used by the installed release builds. Native checks
+# remain enabled; the new Dart code must work with each installer's own APIs.
+NATIVE_BASELINES = {
+    '1.1.3+6': '75b4117648a1f77a23e6cf3a9a467fba8c292ef9',
+    '1.1.2+5': 'f18096a13caf05a53bb85d2344734c5c8487c457',
+    **{version: '6c9c5a83cff9fb35ca0bbef8c4ad2c2fb43ae235'
+       for version in ('1.1.1+4', '1.1.0+3', '1.0.1+2', '1.0.0+1')},
+}
+
 
 @contextmanager
 def installed_native_sources(version):
     """Old installers get Dart fallback only; never replace their native secure store."""
-    if version not in {'1.1.1+4','1.1.0+3','1.0.1+2','1.0.0+1'}:
+    baseline = NATIVE_BASELINES.get(version)
+    if baseline is None:
         yield
         return
-    baseline='6c9c5a83cff9fb35ca0bbef8c4ad2c2fb43ae235'
     subprocess.run(['git','fetch','--depth=1','origin',baseline],check=True)
     try:
         subprocess.run(['git','restore','--source='+baseline,'--worktree','--','android'],check=True)
