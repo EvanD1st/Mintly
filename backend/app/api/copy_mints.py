@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field, ConfigDict
 from sqlalchemy import select, func
 from app.api.deps import get_db, get_current_user
 from app.config import settings
-from app.models import CopyWatch, CopyRule, CopyEvent, MintTask, MintAuthorization, ActivityEvent, CopyCheck, CopyCheckResult, Wallet
+from app.models import CopyWatch, CopyRule, CopyEvent, MintTask, MintAuthorization, ActivityEvent, CopyCheck, CopyCheckResult, Wallet, User
 from app.services import automatic, copy_mints as copying
 from app.services.mint_plans import aware
 from app.schemas.drop import DropSchema
@@ -39,6 +39,7 @@ class RuleRequest(BaseModel):
     free_only: bool = False
     paid_only: bool = Field(default=False,strict=True)
     include_presales: bool = False
+    any_eligible_free_phase: bool = Field(default=False, strict=True)
     expires_at: datetime
     consent: bool
     native_symbol: Literal['ETH','HYPE','APE'] | None = None
@@ -56,6 +57,7 @@ class WalletRuleRequest(BaseModel):
     free_only: bool = False
     paid_only: bool = Field(default=False,strict=True)
     include_presales: bool = False
+    any_eligible_free_phase: bool = Field(default=False, strict=True)
     expires_at: datetime
     consent: bool
     native_symbol: Literal['ETH','HYPE','APE'] | None = None
@@ -77,6 +79,7 @@ class CheckRequest(BaseModel):
     free_only:bool=False
     paid_only:bool=Field(default=False,strict=True)
     include_presales:bool=False
+    any_eligible_free_phase:bool=Field(default=False,strict=True)
     native_symbol:Literal['ETH','HYPE','APE']='ETH'
     expires_at:datetime
 
@@ -84,6 +87,8 @@ class CheckRequest(BaseModel):
 @router.post('/watches/{watch_id}/checks')
 async def start_checks(watch_id:str,req:CheckRequest,user=Depends(get_current_user),db=Depends(get_db)):
     copying.enabled()
+    if req.any_eligible_free_phase:
+        raise HTTPException(422, 'Copy any eligible free phase requires a signing approval; check-only mode does not enable it.')
     await automatic.lock_execution(db)
     watch=await own_watch(db,user,watch_id)
     wallet=await db.get(Wallet,req.wallet_id)
@@ -97,6 +102,8 @@ async def start_checks(watch_id:str,req:CheckRequest,user=Depends(get_current_us
     chains=[c for c in watch.chains if symbol(c)==req.native_symbol]
     if not chains: raise HTTPException(422,'No followed network uses this native currency.')
     budget=automatic.budget_wei(req.budget_eth,chains[0])
+    if req.any_eligible_free_phase and (not req.free_only or not req.include_presales or req.paid_only):
+        raise HTTPException(422, 'Copy any eligible free phase requires free mints only and eligible whitelist copying.')
     if req.free_only and req.paid_only:
         raise HTTPException(422,'Choose free mints only or paid mints.')
     if req.paid_only and price<=0:
@@ -176,6 +183,7 @@ def public_rule(rule):
     return {'id': rule.id, 'watch_id': rule.watch_id, 'chain_id': rule.chain_id, 'native_symbol':symbol(rule.chain_id),
         'status': 'expired' if aware(rule.expires_at) <= datetime.now(timezone.utc) else rule.status,
         'expires_at': rule.expires_at, 'snapshot': snapshot,
+        'saved_budget_wei': str((rule.snapshot.get('budget_group') or {}).get('budget_wei', rule.budget_wei)),
         'budget_wei': str(rule.budget_wei), 'spent_wei': str(rule.spent_wei), 'reserved_wei': str(rule.reserved_wei),
         'remaining_wei': str(max(0, rule.budget_wei - rule.spent_wei - rule.reserved_wei))}
 
@@ -213,9 +221,10 @@ async def overview(user=Depends(get_current_user), db=Depends(get_db), native_cu
         'watches': [{'id': w.id, 'address': w.address, 'label': w.label, 'chains': [c for c in w.chains if native_currencies or symbol(c)=='ETH'],
             'preferences': w.preferences or {},
             'cursors': w.cursors, 'recent_mints': counts.get(w.id, 0),
+            'check_settings': next(({'snapshot': {k: str(v) if k in ('price_cap_wei','fee_cap_wei','budget_wei','total_cap_wei') else v for k,v in c.snapshot.items()}, 'expires_at': c.expires_at} for c in checks if c.watch_id == w.id and c.active), None),
             'check_only':any(c.watch_id==w.id and c.active and aware(c.expires_at)>datetime.now(timezone.utc) for c in checks),
             'rules': [public_rule(r) for r in rules if r.watch_id == w.id and (native_currencies or symbol(r.chain_id)=='ETH')]} for w in watches],
-        'scope': 'Direct SeaDrop public mints; eligible allowlist/signed stages require explicit opt-in. No public copy after a whitelist copy.'}
+        'scope': 'Same-phase SeaDrop copies by default. Copy any eligible free phase requires a new explicit free-only approval; one mint per collection.'}
 
 
 @router.post('/watches')
@@ -367,6 +376,8 @@ async def save_rule(watch_id, req, user, db, *, group=None):
     require_currency(grant.chain_id,req.native_symbol)
     price, fee = map(automatic.wei, (req.price_cap_eth, req.fee_cap_eth))
     budget = automatic.budget_wei(req.budget_eth,grant.chain_id)
+    if req.any_eligible_free_phase and (not req.free_only or not req.include_presales or req.paid_only):
+        raise HTTPException(422, 'Copy any eligible free phase requires free mints only and eligible whitelist copying.')
     if req.free_only and req.paid_only:
         raise HTTPException(422,'Choose free mints only or paid mints.')
     if req.paid_only and price<=0:
@@ -387,6 +398,7 @@ async def save_rule(watch_id, req, user, db, *, group=None):
         price_cap_wei=price, fee_cap_wei=fee, total_cap_wei=total, budget_wei=budget,
         free_only=req.free_only, expiry=int(expiry.timestamp()))
     if req.paid_only:request['paid_only']=True
+    if req.any_eligible_free_phase:request['any_eligible_free_phase']=True
     if group is not None:
         request['budget_group'] = group
     if req.include_presales:
@@ -397,6 +409,7 @@ async def save_rule(watch_id, req, user, db, *, group=None):
     if old:
         if (old.snapshot.get('mint_kinds', ['public']) != request.get('mint_kinds', ['public'])
                 or old.snapshot.get('paid_only',False)!=req.paid_only
+                or old.snapshot.get('any_eligible_free_phase',False)!=req.any_eligible_free_phase
                 or old.snapshot.get('budget_group') != group or old.snapshot.get('quantity_mode', 'fixed') != req.quantity_mode
                 or any(old.snapshot.get(k) != v for k, v in request.items())):
             raise HTTPException(409, 'Approval request changed. Open a new review.')
@@ -482,6 +495,9 @@ async def activity(watch_id: str | None = None, offset: int = Query(0, ge=0), li
     for event in events:
         task = await db.get(MintTask, event.task_id) if event.task_id else None
         watch = await db.get(CopyWatch, event.watch_id)
+        auth = await db.get(MintAuthorization, task.authorization_id) if task else None
+        copied_phase = ({'name': auth.snapshot['stage_name'], 'kind': auth.snapshot['mint_kind'],
+            'price_wei': str(auth.snapshot['price_wei'])} if auth and auth.snapshot.get('copy_any_free_phase') else None)
         o = dict(event.observation)
         o['price_wei'] = str(o['price_wei'])
         note = task.failure_reason if task else event.note
@@ -495,14 +511,14 @@ async def activity(watch_id: str | None = None, offset: int = Query(0, ge=0), li
             'observed_at': event.created_at, 'observation': o,
             'status': 'skipped' if funding and unsigned else (task.status if task else event.status),
             'note': note, 'task_id': event.task_id,
+            'phase_plan':event.phase_plan, 'copied_phase':copied_phase,
             'next_attempt_at':event.next_attempt_at,'last_checked_at':event.last_checked_at,
             'last_error_category':event.last_error_category,'last_upstream_status':event.last_upstream_status,
             'upstream_events':event.upstream_events or [],'preparation_attempts':event.preparation_attempts,
             'retryable': funding and unsigned and (task is None or task.status == 'failed') and not watch.archived_at
                 and o.get('end', 0) > int(datetime.now(timezone.utc).timestamp()),
             'transaction_hash': task.transaction_hash if task else None,
-            'quantity': (await db.get(MintAuthorization,
-                task.authorization_id)).quantity if task else None,
+            'quantity': auth.quantity if auth else None,
             'actual_cost_wei': str(task.actual_total_cost_wei) if task and task.actual_total_cost_wei is not None else None})
     return {'events': entries, 'total': total, 'next_offset': offset + len(events) if offset + len(events) < total else None,
         'copied_mints': sum(t.status == 'confirmed' for t in tasks),
@@ -592,3 +608,17 @@ async def context(event_id: str, user=Depends(get_current_user), db=Depends(get_
         return {'drop': DropSchema.model_validate(drop), 'copy_event_id': event.id}
     finally:
         await web3.provider.disconnect()
+
+
+@router.get('/update-notice')
+async def update_notice(user=Depends(get_current_user)):
+    return {'show': not (user.feature_notices or {}).get('free_phase_copy_v1', False)}
+
+
+@router.post('/update-notice/seen')
+async def notice_seen(user=Depends(get_current_user), db=Depends(get_db)):
+    await db.execute(select(User.id).where(User.id == user.id).with_for_update())
+    await db.refresh(user)
+    user.feature_notices = {**(user.feature_notices or {}), 'free_phase_copy_v1': True}
+    await db.commit()
+    return {'seen': True}

@@ -19,6 +19,7 @@ from test_automatic_evm import lab
     ('Quantity exceeds the wallet limit','wallet_limit'),
     ('Quantity exceeds the remaining supply','supply_exhausted'),
     ('Paid stage has no creator payout address','creator_payout_missing'),
+    ('This wallet cannot mint any more from this drop: it has reached its limit for the active stage, or the drop is minted out','allowance_or_supply_exhausted'),
     ('Unexpected error containing secret-token','precondition_unknown'),
 ])
 def test_only_allowlisted_reasons_survive_body_classification(message,reason):

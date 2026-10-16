@@ -214,11 +214,14 @@ async def prepare_task(db, task_id, vault=None):
                 func.lower(CopyWatch.address)==source['source_address'].lower()))
             if active_check:
                 raise ValueError('Check-only mode cannot sign copied mints')
-            if (task.copy_stage_key != copy_key or s['mint_kind'] != source.get('mint_kind', 'public')
+            any_free = s.get('copy_any_free_phase', False)
+            if any_free and (any_free is not True or not task.copy_rule_id or s['price_wei'] != 0 or s['price_cap_wei'] != 0):
+                raise ValueError('Free-phase copy lacks explicit free-only approval')
+            if (task.copy_stage_key != copy_key or (not any_free and s['mint_kind'] != source.get('mint_kind', 'public'))
                     or source['chain_id'] != s['chain_id'] or source['contract'].lower() != s['contract'].lower()
-                    or any(source[k] != s[k] for k in ('start','end'))
-                    or (s['mint_kind'] == 'public' and source['price_wei'] != s['price_wei'])
-                    or (s['mint_kind'] != 'public' and source['onchain_stage_index'] != s.get('onchain_stage_index'))):
+                    or (not any_free and any(source[k] != s[k] for k in ('start','end')))
+                    or (not any_free and s['mint_kind'] == 'public' and source['price_wei'] != s['price_wei'])
+                    or (not any_free and s['mint_kind'] != 'public' and source['onchain_stage_index'] != s.get('onchain_stage_index'))):
                 raise ValueError('Copy source differs from the authorized public stage')
             await copy_mints.verify_source(web3, source)
             if task.copy_rule_id:
@@ -230,6 +233,14 @@ async def prepare_task(db, task_id, vault=None):
                 if not rule or rule.status != 'active' or not pin or pin['intent'] != rule.context_hash:
                     raise ValueError('Copy approval is paused or not independently registered')
                 r = json.loads(pin['snapshot'])
+                from app.services import free_copy
+                if any_free != free_copy.enabled(r):
+                    raise ValueError('Free-phase scope differs from independent approval')
+                if any_free:
+                    try:
+                        await free_copy.require_unminted(web3, s['contract'], s['account'])
+                    except HTTPException as error:
+                        raise OpenSeaUnavailable(error.detail, 409, mint_reason='wallet_limit') from None
                 mode = copy_mints.quantity_mode(r)
                 group = copy_mints.budget_group(r)
                 if group is not None:
@@ -369,7 +380,7 @@ async def prepare_task(db, task_id, vault=None):
             if copy_key:
                 journal.execute('INSERT INTO copy_signed(task,rule,stage) VALUES(?,?,?)', (task.id, task.copy_rule_id, copy_key))
                 journal.execute('INSERT INTO copy_collections(task,address,chain,contract,kind) VALUES(?,?,?,?,?)',
-                    (task.id, address.lower(), s['chain_id'], s['contract'].lower(), s['mint_kind']))
+                    (task.id, address.lower(), s['chain_id'], s['contract'].lower(), 'any_free' if s.get('copy_any_free_phase') else s['mint_kind']))
             journal.commit()  # fsync BEFORE returning or persisting anything broadcastable to the worker
         reservation = await db.get(AutomaticNonce, task.id)
         if not reservation:
@@ -490,6 +501,8 @@ async def register_copy_rule(rule_id: str, db=Depends(get_db)):
     policy = vault.policy(grant)
     r = rule.snapshot
     try:
+        from app.services import free_copy
+        free_copy.enabled(r)
         copy_mints.quantity_mode(r)
         group = copy_mints.budget_group(r)
         if group is not None and rule.id not in group['members']:
@@ -565,9 +578,9 @@ def verify_collection_copy_journal(journal, snapshot, task_id):
     from app.services.seadrop_mint import decode_mint
     from eth_utils import keccak
     address, chain, contract = snapshot['account'].lower(), snapshot['chain_id'], snapshot['contract'].lower()
-    entries = journal.execute('SELECT s.* FROM signed s JOIN copy_signed c ON c.task=s.task '
-        'LEFT JOIN copy_collections n ON n.task=s.task WHERE s.address=? AND s.chain=? AND n.task IS NULL',
-        (address, chain)).fetchall()
+    entries = journal.execute('SELECT s.*, c.task AS copy_task FROM signed s LEFT JOIN copy_signed c ON c.task=s.task '
+        'LEFT JOIN copy_collections n ON n.task=s.task WHERE s.address=? AND s.chain=? AND n.task IS NULL '
+        + ('' if snapshot.get('copy_any_free_phase') else 'AND c.task IS NOT NULL'), (address, chain)).fetchall()
     for entry in entries:
         raw = bytes.fromhex(entry['raw'].removeprefix('0x'))
         tx = Transaction.from_bytes(raw)
@@ -578,9 +591,10 @@ def verify_collection_copy_journal(journal, snapshot, task_id):
         count = int.from_bytes(tx.data[100:132], 'big')
         mint = decode_mint({'to': '0x' + tx.to.hex(), 'data': '0x' + tx.data.hex(), 'value': str(tx.value)}, nft, address, count)
         journal.execute('INSERT INTO copy_collections(task,address,chain,contract,kind) VALUES(?,?,?,?,?)',
-            (entry['task'], address, chain, nft.lower(), mint['kind']))
+            (entry['task'], address, chain, nft.lower(), mint['kind'] if entry['copy_task'] else 'regular'))
     journal.commit()
-    opposite = ('allowlist','signed') if snapshot['mint_kind'] == 'public' else ('public',)
+    opposite = ('public','allowlist','signed','any_free','regular') if snapshot.get('copy_any_free_phase') else (
+        ('allowlist','signed','any_free') if snapshot['mint_kind'] == 'public' else ('public','any_free'))
     marks = ','.join('?' for _ in opposite)
     if journal.execute('SELECT task FROM copy_collections WHERE address=? AND chain=? AND contract=? '
             f'AND task<>? AND kind IN ({marks}) LIMIT 1', (address, chain, contract, task_id, *opposite)).fetchone():

@@ -9,6 +9,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:mintly/screens/copy_mints_screen.dart';
+import 'package:mintly/screens/main_shell.dart';
 import 'package:mintly/services/api_service.dart';
 import 'package:mintly/state/app_state.dart';
 import 'package:mintly/theme/app_theme.dart';
@@ -38,7 +39,9 @@ Future<ApiService> apiFor({
   void Function(Map<String, dynamic>)? approved,
   bool populated = true,
   bool active = false,
+  bool notice = false,
 }) async {
+  var noticeSeen = false;
   final api = ApiService(
     client: MockClient((r) async {
       if (r.url.path.endsWith('/auth/login')) {
@@ -49,11 +52,26 @@ Future<ApiService> apiFor({
       }
       expect(r.headers['Authorization'], 'Bearer test');
       dynamic data;
-      if (r.url.path.endsWith('/copy-mints')) {
+      if (r.url.path.endsWith('/copy-mints/update-notice')) {
+        data = {'show': notice && !noticeSeen};
+      } else if (r.url.path.endsWith('/copy-mints/update-notice/seen')) {
+        noticeSeen = true;
+        data = {'seen': true};
+      } else if (r.url.path.endsWith('/copy-mints')) {
         data = {
           'enabled': true,
           'networks': networks,
-          'watches': populated ? [{...watch, if(active) 'rules':[{'status':'active'}]}] : [],
+          'watches': populated
+              ? [
+                  {
+                    ...watch,
+                    if (active)
+                      'rules': [
+                        {'status': 'active'},
+                      ],
+                  },
+                ]
+              : [],
         };
       } else if (r.url.path.endsWith('/copy-mints/activity')) {
         data = {
@@ -106,13 +124,26 @@ Future<ApiService> apiFor({
             },
         ];
       } else if (r.url.path.endsWith('/wallets')) {
-        data = [{'id': 'receiving', 'label': 'Everyday wallet'}];
+        data = [
+          {
+            'id': 'receiving',
+            'label': 'Everyday wallet',
+            'address': '0x2222222222222222222222222222222222222222',
+          },
+        ];
       } else if (r.url.path.endsWith('/wallet-rules')) {
         approved?.call(jsonDecode(r.body) as Map<String, dynamic>);
         final sent = jsonDecode(r.body) as Map<String, dynamic>;
-        data = {'id': sent['request_id'], 'status': 'active', 'rules': [
-          for (final id in sent['grant_ids'] as List) {'snapshot': {'grant_id': id}},
-        ]};
+        data = {
+          'id': sent['request_id'],
+          'status': 'active',
+          'rules': [
+            for (final id in sent['grant_ids'] as List)
+              {
+                'snapshot': {'grant_id': id},
+              },
+          ],
+        };
       } else {
         data = <String, dynamic>{};
       }
@@ -197,7 +228,11 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Enable copy minting'));
       await tester.pumpAndSettle();
-      expect((approved?['grant_ids'] as List).toSet(), {'policy1', 'policy8453', 'policy4663'});
+      expect((approved?['grant_ids'] as List).toSet(), {
+        'policy1',
+        'policy8453',
+        'policy4663',
+      });
       expect(approved?['quantity'], 1);
       expect(approved?['quantity_mode'], 'fixed');
       expect(approved?['price_cap_eth'], '0.00001');
@@ -213,7 +248,11 @@ void main() {
     },
   );
 
-  for (final (keepFree, paidMax) in [(true,false), (false,false), (false,true)]) {
+  for (final (keepFree, paidMax) in [
+    (true, false),
+    (false, false),
+    (false, true),
+  ]) {
     testWidgets(
       'Free mints only approves max; toggling off restores fixed quantity: $keepFree / paid maximum $paidMax',
       (tester) async {
@@ -237,11 +276,19 @@ void main() {
         await tester.pumpAndSettle();
         await tester.tap(find.textContaining('Everyday wallet ·').last);
         await tester.pumpAndSettle();
-        await tester.ensureVisible(find.text('Custom'));
+        await tester.scrollUntilVisible(
+          find.text('Custom'),
+          180,
+          scrollable: find.byType(Scrollable).last,
+        );
         await tester.pumpAndSettle();
         await tester.tap(find.text('Custom'));
         await tester.pumpAndSettle();
-        final custom = find.byWidgetPredicate((w) => w is TextField && w.decoration?.labelText == 'Custom NFT quantity');
+        final custom = find.byWidgetPredicate(
+          (w) =>
+              w is TextField &&
+              w.decoration?.labelText == 'Custom NFT quantity',
+        );
         await tester.ensureVisible(custom);
         await tester.pumpAndSettle();
         await tester.enterText(custom, '2');
@@ -277,8 +324,18 @@ void main() {
         await tester.pumpAndSettle();
         await tester.tap(find.text('Free mints only'));
         await tester.pumpAndSettle();
-        await reveal(find.text('Free mints use the maximum available for your wallet, within your limits (up to 100 NFTs).'), up: true);
-        expect(find.text('Free mints use the maximum available for your wallet, within your limits (up to 100 NFTs).'), findsOneWidget);
+        await reveal(
+          find.text(
+            'Free mints use the maximum available for your wallet, within your limits (up to 100 NFTs).',
+          ),
+          up: true,
+        );
+        expect(
+          find.text(
+            'Free mints use the maximum available for your wallet, within your limits (up to 100 NFTs).',
+          ),
+          findsOneWidget,
+        );
         expect(find.text('Custom'), findsNothing);
         await reveal(find.byType(CheckboxListTile));
         expect(
@@ -289,18 +346,34 @@ void main() {
           await reveal(find.text('Free mints only'), up: true);
           await tester.tap(find.text('Paid mints'));
           await tester.pumpAndSettle();
-          expect(find.text('Free mints use the maximum available for your wallet, within your limits (up to 100 NFTs).'), findsNothing);
+          expect(
+            find.text(
+              'Free mints use the maximum available for your wallet, within your limits (up to 100 NFTs).',
+            ),
+            findsNothing,
+          );
           await reveal(find.text('Custom'), up: true);
           expect(find.text('Custom'), findsOneWidget);
           await enter('Max mint price per NFT', '0.00001');
-          if (paidMax) { await reveal(find.text('Max mint'),up:true); await tester.tap(find.text('Max mint')); await tester.pumpAndSettle(); }
+          if (paidMax) {
+            await reveal(find.text('Max mint'), up: true);
+            await tester.tap(find.text('Max mint'));
+            await tester.pumpAndSettle();
+          }
         }
         await reveal(find.byType(CheckboxListTile));
         await tester.tap(find.byType(CheckboxListTile));
         await reveal(find.text('Enable copy minting'));
         await tester.tap(find.text('Enable copy minting'));
         await tester.pumpAndSettle();
-        expect(approved?['quantity_mode'], keepFree ? 'max_free' : paidMax ? 'max_available' : 'fixed');
+        expect(
+          approved?['quantity_mode'],
+          keepFree
+              ? 'max_free'
+              : paidMax
+              ? 'max_available'
+              : 'fixed',
+        );
         expect(approved?['quantity'], keepFree || paidMax ? 100 : 2);
         expect(approved?['price_cap_eth'], keepFree ? '0' : '0.00001');
         expect(approved?['free_only'], keepFree);
@@ -406,22 +479,34 @@ void main() {
         await tester.tap(find.text('Following').last);
         await tester.pumpAndSettle();
         await tester.ensureVisible(find.text('Set up copy'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Set up copy'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Set up copy'));
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);
         await capture('settings');
-        final settingsScroll = find.descendant(
-          of: find.byKey(const ValueKey('copy-settings-scroll')),
-          matching: find.byType(Scrollable),
-        ).first;
-        await tester.scrollUntilVisible(find.text('Free mints only'), 200, scrollable: settingsScroll);
+        final settingsScroll = find
+            .descendant(
+              of: find.byKey(const ValueKey('copy-settings-scroll')),
+              matching: find.byType(Scrollable),
+            )
+            .first;
+        await tester.scrollUntilVisible(
+          find.text('Free mints only'),
+          200,
+          scrollable: settingsScroll,
+        );
         await tester.pumpAndSettle();
         await tester.ensureVisible(find.text('Free mints only'));
         await tester.pumpAndSettle();
         await tester.tap(find.text('Free mints only'));
         await tester.pumpAndSettle();
-        await tester.scrollUntilVisible(find.text('Free mints use the maximum available for your wallet, within your limits (up to 100 NFTs).'), -200, scrollable: settingsScroll);
+        await tester.scrollUntilVisible(
+          find.text(
+            'Free mints use the maximum available for your wallet, within your limits (up to 100 NFTs).',
+          ),
+          -200,
+          scrollable: settingsScroll,
+        );
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);
         await capture('max-free-settings');
@@ -430,23 +515,32 @@ void main() {
     );
   }
 
-  testWidgets('active copying is clearly labelled and opens management', (tester) async {
-    tester.view.physicalSize = const Size(390,844);
+  testWidgets('active copying is clearly labelled and opens management', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 844);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
-    final api = await apiFor(active:true);
-    await tester.pumpWidget(ProviderScope(overrides:[apiServiceProvider.overrideWith((ref)=>api)],
-      child:MaterialApp(theme:MintlyTheme.light(),home:const CopyMintsScreen())));
+    final api = await apiFor(active: true);
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [apiServiceProvider.overrideWith((ref) => api)],
+        child: MaterialApp(
+          theme: MintlyTheme.light(),
+          home: const CopyMintsScreen(),
+        ),
+      ),
+    );
     await tester.pumpAndSettle();
-    expect(find.text('Set up copy'),findsNothing);
-    expect(find.text('Manage'),findsOneWidget);
+    expect(find.text('Set up copy'), findsNothing);
+    expect(find.text('Manage'), findsOneWidget);
     await tester.ensureVisible(find.text('Manage'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Manage'));
     await tester.pumpAndSettle();
-    expect(find.text('Copy settings'),findsOneWidget);
-    expect(tester.takeException(),isNull);
+    expect(find.text('Copy settings'), findsOneWidget);
+    expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
   });
 
@@ -467,6 +561,128 @@ void main() {
       expect(find.text('0 wallets followed'), findsOneWidget);
       expect(find.text('mintly.'), findsNothing);
       expect(find.text('Moon scout'), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+  testWidgets(
+    'Manage restores saved limits and only enables free-phase scope after consent',
+    (tester) async {
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      Map<String, dynamic>? approved;
+      final api = await apiFor(approved: (r) => approved = r);
+      final expiry = DateTime.now()
+          .toUtc()
+          .add(const Duration(days: 3))
+          .toIso8601String();
+      final saved = {
+        ...watch,
+        'rules': [
+          {
+            'id': 'saved-rule',
+            'status': 'active',
+            'chain_id': 4663,
+            'expires_at': expiry,
+            'snapshot': {
+              'wallet_id': 'receiving',
+              'quantity': 100,
+              'quantity_mode': 'max_free',
+              'free_only': true,
+              'price_cap_wei': '0',
+              'fee_cap_wei': '100000000000000',
+              'budget_wei': '1000000000000000',
+              'mint_kinds': ['public', 'allowlist', 'signed'],
+            },
+          },
+        ],
+      };
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [apiServiceProvider.overrideWith((ref) => api)],
+          child: MaterialApp(
+            theme: MintlyTheme.light(),
+            home: CopySettingsScreen(watch: saved),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.textContaining('Your saved settings are loaded'),
+        findsOneWidget,
+      );
+      expect(approved, isNull);
+      Future<void> reveal(Finder target) async {
+        await tester.scrollUntilVisible(
+          target,
+          180,
+          scrollable: find.byType(Scrollable).last,
+        );
+        await tester.pumpAndSettle();
+      }
+
+      final option = find.byKey(const ValueKey('any-free-phase'));
+      await reveal(option);
+      expect(tester.widget<SwitchListTile>(option).value, false);
+      await tester.tap(option);
+      await tester.pumpAndSettle();
+      expect(tester.widget<SwitchListTile>(option).value, true);
+      final gas = find.byWidgetPredicate(
+        (w) =>
+            w is TextField && w.decoration?.labelText == 'Gas spending limit',
+      );
+      await reveal(gas);
+      expect(tester.widget<TextField>(gas).controller!.text, '0.0001');
+      final budget = find.byWidgetPredicate(
+        (w) => w is TextField && w.decoration?.labelText == 'Total copy budget',
+      );
+      await reveal(budget);
+      expect(tester.widget<TextField>(budget).controller!.text, '0.001');
+      await reveal(find.byType(CheckboxListTile));
+      expect(approved, isNull);
+      await tester.tap(find.byType(CheckboxListTile));
+      await tester.pumpAndSettle();
+      await reveal(find.text('Enable copy minting'));
+      await tester.tap(find.text('Enable copy minting'));
+      await tester.pumpAndSettle();
+      expect(approved?['any_eligible_free_phase'], true);
+      expect(approved?['grant_ids'], ['policy4663']);
+      expect(approved?['expires_at'], expiry);
+      expect(approved?['price_cap_eth'], '0');
+      expect(approved?['fee_cap_eth'], '0.0001');
+      expect(approved?['budget_eth'], '0.001');
+      expect(approved?['quantity_mode'], 'max_free');
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+  testWidgets(
+    'Update popup directs user to Copy and stays dismissed on reopening',
+    (tester) async {
+      final api = await apiFor(notice: true);
+      final container = ProviderContainer(
+        overrides: [apiServiceProvider.overrideWith((ref) => api)],
+      );
+      addTearDown(container.dispose);
+      Widget shell() => UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(theme: MintlyTheme.light(), home: const MainShell()),
+      );
+      await tester.pumpWidget(shell());
+      await tester.pumpAndSettle();
+      expect(find.text('New: copy any eligible free phase'), findsOneWidget);
+      expect(find.textContaining('tap Manage'), findsOneWidget);
+      await tester.tap(find.text('Go to Copy'));
+      await tester.pumpAndSettle();
+      expect(find.text('New: copy any eligible free phase'), findsNothing);
+      expect(find.text('Following'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpAndSettle();
+      await tester.pumpWidget(shell());
+      await tester.pumpAndSettle();
+      expect(find.text('New: copy any eligible free phase'), findsNothing);
+      expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
     },
   );

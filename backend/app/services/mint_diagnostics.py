@@ -25,11 +25,12 @@ PREPARATION_REASONS={
     'wallet_limit':'This mint exceeds the receiving wallet’s remaining allowance.',
     'supply_exhausted':'This mint exceeds the remaining collection or stage supply.',
     'creator_payout_missing':'The creator has not configured the payout address required for this paid mint.',
+    'allowance_or_supply_exhausted':'OpenSea reports that this wallet has reached its active-stage mint limit or the stage is sold out.',
     'precondition_unknown':'OpenSea rejected a mint precondition; the specific reason could not be verified.',
 }
 # Preserve the existing copy-event terminal-reason contract.
 MINT_REASONS={key:PREPARATION_REASONS[key] for key in ('wallet_not_allowlisted','insufficient_funds',
-    'wallet_limit','supply_exhausted','creator_payout_missing','precondition_unknown')}
+    'wallet_limit','supply_exhausted','creator_payout_missing','allowance_or_supply_exhausted','precondition_unknown')}
 PROVIDER_CODES={'STAGE_NOT_ACTIVE':'stage_not_active','MINT_NOT_ACTIVE':'stage_not_active',
     'INVALID_PROOF':'invalid_proof','INVALID_SIGNATURE':'invalid_proof','INSUFFICIENT_FUNDS':'insufficient_funds',
     'WALLET_LIMIT_EXCEEDED':'wallet_limit','MAX_SUPPLY_EXCEEDED':'supply_exhausted','SOLD_OUT':'supply_exhausted',
@@ -59,6 +60,8 @@ def mint_rejection_reason(body):
         values=[v.get('message') if isinstance(v,dict) else v for v in values[:8]]
         parts.extend(v.lower() for v in values[:8] if isinstance(v,str) and len(v)<=2000)
     message=' '.join(parts)
+    if 'this wallet cannot mint any more from this drop' in message:
+        return 'allowance_or_supply_exhausted'
     if any(x in message for x in ('stage not active','stage is not active','stage is inactive','not yet active','has not started','not started yet','mint not active','no active stage')):return 'stage_not_active'
     if any(x in message for x in ('invalid proof','invalid signature','proof is invalid','signature is invalid')):return 'invalid_proof'
     if any(x in message for x in ('insufficient funds','insufficient native balance','insufficient balance','cannot afford','cannot pay')):return 'insufficient_funds'

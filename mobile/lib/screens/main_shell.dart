@@ -25,6 +25,42 @@ class _MainShellState extends ConsumerState<MainShell>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _showCopyUpdate());
+  }
+
+  Future<void> _showCopyUpdate() async {
+    final api = ref.read(apiServiceProvider);
+    try {
+      if (!await api.showFreePhaseNotice() || !mounted) return;
+      final openCopy = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => PopScope(
+          canPop: false,
+          child: AlertDialog(
+            title: const Text('New: copy any eligible free phase'),
+            content: const Text(
+              'A followed wallet minted in a phase you cannot join? Mintly can now try another free phase you qualify for in the same collection.\n\nGo to Copy, tap Manage for the wallet you follow, select Free mints only, then enable Copy any eligible free phase and approve your settings.\n\nYour saved settings will already be filled in. Gas limits still apply, and FCFS supply is not guaranteed.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Got it'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Go to Copy'),
+              ),
+            ],
+          ),
+        ),
+      );
+      if (!mounted) return;
+      if (openCopy == true) _selectTab(2);
+      await api.markFreePhaseNoticeSeen();
+    } catch (_) {
+      // Retry a failed notice check on the next authenticated opening.
+    }
   }
 
   @override

@@ -1003,6 +1003,10 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
                           ? '${o['source_quantity']} NFT(s) minted by followed wallet'
                           : '${event['quantity']} NFT(s) copied',
                     ),
+                    if (event['copied_phase'] is Map)
+                      Text(
+                        'Copy phase: ${event['copied_phase']['name']} - free mint',
+                      ),
                     Text(
                       event['actual_cost_wei'] == null
                           ? 'Source price ${copyEth(o['price_wei'])} ${nativeSymbol(o['chain_id'])} / NFT'
@@ -1178,10 +1182,24 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(children:[CollectionThumbnail(name:'${(check['observation'] as Map)['name']}',
-                    reference:check['event_id']==null?'':'copy:${check['event_id']}',size:44),
-                    const SizedBox(width:10),Expanded(child:Text('${(check['observation'] as Map)['name']}',
-                      style:const TextStyle(fontWeight:FontWeight.w700)))]),
+                  Row(
+                    children: [
+                      CollectionThumbnail(
+                        name: '${(check['observation'] as Map)['name']}',
+                        reference: check['event_id'] == null
+                            ? ''
+                            : 'copy:${check['event_id']}',
+                        size: 44,
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          '${(check['observation'] as Map)['name']}',
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                    ],
+                  ),
                   Text(
                     check['status'] == 'would_copy'
                         ? 'Would copy'
@@ -1345,6 +1363,11 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
   DateTime? _expiry;
   bool _free = false, _consent = false, _busy = false;
   bool _includePresales = true, _checkOnly = false;
+  bool _anyFreePhase = false,
+      _restored = false,
+      _freeMaximum = true,
+      _paidOnly = true;
+  bool _initialSettingsLoaded = false;
   String _quantityChoice = 'one';
   int _days = 7;
   String _currency = 'ETH';
@@ -1365,7 +1388,69 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
     };
     _consent = false;
     _pending = null;
+    _restoreSettings(wallet);
     _setExpiry();
+  }
+
+  void _restoreSettings(Map<String, dynamic> wallet) {
+    final rules = (widget.watch['rules'] as List? ?? [])
+        .cast<Map<String, dynamic>>();
+    final saved = rules
+        .where(
+          (r) =>
+              nativeSymbol(r['chain_id']) == _currency &&
+              (r['snapshot'] as Map?)?['wallet_id'] == wallet['id'],
+        )
+        .firstOrNull;
+    final checks = widget.watch['check_settings'] as Map?;
+    final data =
+        _checkOnly &&
+            (checks?['snapshot'] as Map?)?['wallet_id'] == wallet['id']
+        ? checks
+        : saved;
+    if (data == null) {
+      _anyFreePhase = false;
+      _restored = false;
+      if (_days == 0) _days = 7;
+      return;
+    }
+    final snapshot = data['snapshot'] as Map;
+    if (!_checkOnly && saved != null) {
+      final members =
+          (snapshot['budget_group'] as Map?)?['members'] as List? ??
+          [saved['id']];
+      final chains = rules
+          .where((r) => members.contains(r['id']))
+          .map((r) => r['chain_id'])
+          .toSet();
+      _policy!['policies'] = _currencyPolicies(
+        wallet,
+      ).where((p) => chains.contains(p['chain_id'])).toList();
+    }
+    _free = snapshot['free_only'] == true;
+    _paidOnly = snapshot['paid_only'] == true;
+    _includePresales = (snapshot['mint_kinds'] as List? ?? ['public']).contains(
+      'signed',
+    );
+    _anyFreePhase = snapshot['any_eligible_free_phase'] == true;
+    _quantity.text = '${snapshot['quantity']}';
+    _freeMaximum = snapshot['quantity_mode'] == 'max_free';
+    _quantityChoice = snapshot['quantity_mode'] == 'max_available'
+        ? 'max'
+        : snapshot['quantity'] == 1
+        ? 'one'
+        : 'custom';
+    _price.text = copyEth(snapshot['price_cap_wei']);
+    _gas.text = copyEth(snapshot['fee_cap_wei']);
+    final group = snapshot['budget_group'] as Map?;
+    _budget.text = copyEth(
+      data['saved_budget_wei'] ??
+          group?['budget_wei'] ??
+          snapshot['budget_wei'],
+    );
+    _expiry = DateTime.parse('${data['expires_at']}').toUtc();
+    _days = 0;
+    _restored = true;
   }
 
   String? _error;
@@ -1378,6 +1463,10 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
         .map(nativeSymbol)
         .toSet();
     _currency = currencies.contains('ETH') ? 'ETH' : currencies.first;
+    final savedRules = widget.watch['rules'] as List? ?? [];
+    if (savedRules.isNotEmpty) {
+      _currency = nativeSymbol(savedRules.first['chain_id']);
+    }
     _policies = _loadPolicies();
   }
 
@@ -1429,7 +1518,23 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
         policies[index] = policy;
       }
     }
-    return wallets.values.toList();
+    final result = wallets.values.toList();
+    if (!_initialSettingsLoaded && mounted) {
+      _initialSettingsLoaded = true;
+      final rules = widget.watch['rules'] as List? ?? [];
+      dynamic savedId;
+      if (_checkOnly) {
+        final checks = widget.watch['check_settings'] as Map?;
+        final saved = checks?['snapshot'] as Map?;
+        savedId = saved?['wallet_id'];
+      } else if (rules.isNotEmpty) {
+        final saved = rules.first['snapshot'] as Map?;
+        savedId = saved?['wallet_id'];
+      }
+      final selected = result.where((w) => w['id'] == savedId).firstOrNull;
+      if (selected != null) _chooseWallet(selected);
+    }
+    return result;
   }
 
   @override
@@ -1445,10 +1550,14 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
       (_policy == null ||
           (_policy!['policies'] as List).isEmpty ||
           (_policy!['policies'] as List).any(
-            (p) => !{'public', 'allowlist', 'signed'}.every(
-              (kind) =>
-                  ((p['scope'] as Map)['mint_kinds'] as List).contains(kind),
-            ),
+            (p) =>
+                !(_includePresales
+                        ? {'public', 'allowlist', 'signed'}
+                        : {'public'})
+                    .every(
+                      (kind) => ((p['scope'] as Map)['mint_kinds'] as List)
+                          .contains(kind),
+                    ),
           ));
 
   Future<void> _setupWallet() async {
@@ -1482,6 +1591,7 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
   }
 
   void _setExpiry() {
+    if (_days == 0 && _expiry != null) return;
     final policies = _policy!['policies'] as List<Map<String, dynamic>>;
     if (_checkOnly || policies.isEmpty) {
       _expiry = DateTime.now().toUtc().add(Duration(days: _days));
@@ -1526,10 +1636,10 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
           for (final p in _policy!['policies'] as List<Map<String, dynamic>>)
             p['id'],
         ],
-      'quantity': _free || _quantityChoice == 'max'
+      'quantity': (_free && _freeMaximum) || _quantityChoice == 'max'
           ? 100
           : int.parse(_quantity.text.trim()),
-      'quantity_mode': _free
+      'quantity_mode': _free && _freeMaximum
           ? 'max_free'
           : _quantityChoice == 'max'
           ? 'max_available'
@@ -1539,8 +1649,9 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
       'fee_cap_eth': _gas.text.trim(),
       'budget_eth': _budget.text.trim(),
       'free_only': _free,
-      'paid_only': !_free,
+      'paid_only': !_free && _paidOnly,
       'include_presales': _includePresales,
+      if (!_checkOnly) 'any_eligible_free_phase': _anyFreePhase,
       'expires_at': _expiry!.toIso8601String(),
       if (!_checkOnly) 'consent': true,
     };
@@ -1667,7 +1778,15 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
                     ],
                   ),
                 if (policies.isNotEmpty) ...[
+                  if (_restored)
+                    const _Panel(
+                      child: Text(
+                        'Your saved settings are loaded below. Review changes and approve to save them.',
+                      ),
+                    ),
                   DropdownButtonFormField<String>(
+                    key: ValueKey('receiving-${_policy?['id']}'),
+                    initialValue: _policy?['id'] as String?,
                     icon: const CopyGlyph('down'),
                     decoration: const InputDecoration(
                       labelText: 'Receiving wallet',
@@ -1691,7 +1810,6 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
                             _chooseWallet(
                               policies.firstWhere((p) => p['id'] == id),
                             );
-                            _includePresales = true;
                             _consent = false;
                             _setExpiry();
                           }),
@@ -1745,7 +1863,7 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
                                   (p) => p['chain_id'] == chain,
                                 ))
                                 ? _network(chain)
-                                : '${_network(chain)} · ${_checkOnly ? 'Check only' : 'Not approved'}',
+                                : '${_network(chain)} · ${_checkOnly ? 'Check only' : 'Not selected'}',
                           ),
                       ],
                     ),
@@ -1785,6 +1903,9 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
                               ? null
                               : () => setState(() {
                                   _free = choice.$1;
+                                  _paidOnly = !_free;
+                                  _freeMaximum = true;
+                                  if (!_free) _anyFreePhase = false;
                                   _consent = false;
                                   if (_free) _price.text = '0';
                                 }),
@@ -1805,8 +1926,40 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
                         : 'Copies paid public and whitelist stages you qualify for, within your limits. Gas fees may apply.',
                     style: const TextStyle(fontSize: 12),
                   ),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Include eligible whitelist phases'),
+                    value: _includePresales,
+                    onChanged: locked
+                        ? null
+                        : (value) => setState(() {
+                            _includePresales = value;
+                            if (!value) _anyFreePhase = false;
+                            _consent = false;
+                          }),
+                  ),
+                  SwitchListTile(
+                    key: const ValueKey('any-free-phase'),
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Copy any eligible free phase'),
+                    subtitle: const Text(
+                      'When a followed wallet mints, try a free phase your wallet qualifies for in the same collection. Wait for later free phases if needed. Gas and budget limits still apply. FCFS supply is not guaranteed.',
+                    ),
+                    value: _anyFreePhase,
+                    onChanged: locked || !_free || _checkOnly
+                        ? null
+                        : (value) => setState(() {
+                            _anyFreePhase = value;
+                            if (value) _includePresales = true;
+                            _consent = false;
+                          }),
+                  ),
+                  if (!_free)
+                    const Text(
+                      'Choose Free mints only to enable copying across free phases.',
+                    ),
                   const SizedBox(height: 14),
-                  if (_free)
+                  if (_free && _freeMaximum)
                     const _Panel(
                       child: Text(
                         'Free mints use the maximum available for your wallet, within your limits (up to 100 NFTs).',
@@ -1918,12 +2071,18 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
                           ),
                         ),
                         DropdownButtonFormField<int>(
+                          isExpanded: true,
                           icon: const CopyGlyph('down'),
                           initialValue: _days,
                           decoration: const InputDecoration(
                             labelText: 'Copy permission duration',
                           ),
                           items: [
+                            if (_days == 0)
+                              const DropdownMenuItem(
+                                value: 0,
+                                child: Text('Keep current expiry'),
+                              ),
                             for (final d in [1, 3, 7, 14, 30])
                               DropdownMenuItem(
                                 value: d,
@@ -1966,7 +2125,7 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
                       _checkOnly
                           ? 'Start check-only monitoring with these limits. No spending approval is given.'
                           : _free
-                          ? 'Approve maximum free public and eligible whitelist minting (up to 100 NFTs), including gas within these limits.'
+                          ? 'Approve ${_freeMaximum ? 'maximum free minting (up to 100 NFTs)' : 'my selected free mint quantity'}${_anyFreePhase ? ' across any eligible free phase in the followed collection' : ''}, including gas within these limits.'
                           : 'Approve paid public and eligible whitelist copying${_quantityChoice == 'max' ? ' at the maximum available quantity (up to 100 NFTs)' : ' at my selected quantity'}, including gas within these limits.',
                     ),
                   ),

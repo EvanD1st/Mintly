@@ -103,10 +103,12 @@ async def presale(copying, monkeypatch):
     state = SimpleNamespace(kind='allowlist', own_price=5, bad_proof=False, fallback=False, calls=[])
     source_params = (10, 5, lab.start, lab.end, 7, 50, 500, True)
     def own_params():
-        return (state.own_price, 7, lab.start, lab.end, 7, 50, 500, True)
+        return (state.own_price, 7, getattr(state, 'own_start', lab.start), getattr(state, 'own_end', lab.end), getattr(state, 'own_index', 7), 50, 500, True)
     def leaf(address, params):
         return keccak(encode(['address', PARAM_TYPE], [address, params]))
     def configure():
+        nonlocal source_params
+        source_params = (10, 5, lab.start, getattr(state, 'source_end', lab.end), 7, 50, 500, True)
         a, b = leaf(c['source'].address, source_params), leaf(lab.owner.address, own_params())
         root = keccak(min(a,b) + max(a,b))
         bounds = (0, 20, lab.start, lab.end, 50, 500, 500)
@@ -146,7 +148,7 @@ async def presale(copying, monkeypatch):
         if state.fallback:
             fee = lab.w.eth.accounts[1]
             data = lab.sea.functions.mintPublic(lab.nft.address, fee, address, quantity)._encode_transaction_data()
-            return 200, dict(to=SEADROP_V1_ADDRESS,data=data,value=str(10*quantity),chain='local-test')
+            return 200, dict(to=SEADROP_V1_ADDRESS,data=data,value=str(lab.sea.functions.getPublicDrop(lab.nft.address).call()[0]*quantity),chain='local-test')
         return 200, transaction(address, quantity)
     monkeypatch.setattr('app.services.opensea.OpenSeaClient.collection_for_contract', collection)
     monkeypatch.setattr('app.services.opensea.OpenSeaClient.build_mint', build)

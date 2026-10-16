@@ -45,6 +45,7 @@ class CopyEvent(Base):
     status: Mapped[str] = mapped_column(String(24), default='detected')
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     task_id: Mapped[str | None] = mapped_column(ForeignKey('mint_tasks.id'), nullable=True, unique=True)
+    phase_plan: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True),nullable=True)
     last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True),nullable=True)
     last_error_category: Mapped[str | None] = mapped_column(String(40),nullable=True)

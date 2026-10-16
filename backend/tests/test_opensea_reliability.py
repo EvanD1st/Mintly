@@ -51,7 +51,7 @@ async def test_revoked_provisioned_key_is_reported_without_replacement(tmp_path,
 
 def test_shared_preparation_messages_preserve_copy_terminal_reason_contract():
     assert set(diag.MINT_REASONS)=={'wallet_not_allowlisted','insufficient_funds','wallet_limit',
-        'supply_exhausted','creator_payout_missing','precondition_unknown'}
+        'supply_exhausted','creator_payout_missing','allowance_or_supply_exhausted','precondition_unknown'}
     assert 'rpc_unavailable' in diag.PREPARATION_REASONS and 'stage_not_active' in diag.PREPARATION_REASONS
 
 def test_overview_link_normalizes_without_loosening_host_validation():
