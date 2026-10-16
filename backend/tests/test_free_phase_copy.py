@@ -190,3 +190,17 @@ async def test_wallet_specific_free_price_is_verified_instead_of_assumed_from_sc
     await c['scan'](); e = await event(c)
     assert e['task_id'], e['note']
     await c['lab'].sign(e['task_id'])
+
+
+async def test_waiting_signal_stops_when_approval_expires(presale, monkeypatch):
+    from app.models import CopyRule
+    c, _ = await setup(presale, monkeypatch, future=True)
+    lab = c['lab']; await c['scan'](); e = await event(c)
+    async with lab.factory() as db:
+        rule = await db.get(CopyRule, c['request']['request_id'])
+        rule.expires_at = datetime.fromtimestamp(1, timezone.utc)
+        row = await db.get(CopyEvent, e['id']); row.next_attempt_at = None
+        await db.commit()
+    await c['scan'](); e = await event(c)
+    assert e['status'] == 'skipped' and 'approval ended' in e['note']
+    assert e['task_id'] is None and e['next_attempt_at'] is None

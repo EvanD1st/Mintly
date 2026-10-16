@@ -637,6 +637,11 @@ async def process_copy_events(db,watch_id,chain):
             rules=(await db.scalars(select(CopyRule).where(CopyRule.watch_id==watch_id,CopyRule.chain_id==chain,
                 CopyRule.status=='active',CopyRule.expires_at>now))).all()
             if not rules:
+                if event.phase_plan:
+                    event.status, event.note = 'skipped', 'The copy approval ended or is inactive. No transaction sent.'
+                    event.next_attempt_at = None
+                    event.last_error_category = 'copy_approval_ended'
+                    event.last_checked_at = now
                 await db.commit();continue
             from app.services import free_copy
             end=max(aware(free_copy.deadline(event,r)) for r in rules)
