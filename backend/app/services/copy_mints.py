@@ -285,32 +285,38 @@ async def prepare_presale_copy(web3, observation, rule):
             return mint
         mode = quantity_mode(rule)
         mint = await build(1 if mode in ('max_free','max_available') else rule['quantity'])
-        if mode in ('max_free','max_available') and (mint['params'][0] == 0 or mode=='max_available'):
-            minted, supply, maximum = decode(['uint256'] * 3, await web3.eth.call({
-                'to': observation['contract'], 'data': keccak(text='getMintStats(address)')[:4]
-                    + encode(['address'], [rule['account']])}))
-            count = min(rule['quantity'], mint['params'][1] - minted, mint['params'][5] - supply, maximum - supply)
-            if mint['params'][0]:
-                count=min(count,(rule['total_cap_wei']-rule['fee_cap_wei'])//mint['params'][0])
-            if count < 1:
-                raise HTTPException(409, 'No whitelist mint allowance or supply remains.')
-            if count != 1:
-                # Quantity is not part of SeaDrop's signed/Merkle eligibility payload.
-                # Reuse the receiving wallet's verified proof; never request a second signature.
-                from app.services.seadrop_mint import BASE_TYPES,PARAM_TYPE
-                values=[mint['contract'],mint['fee'],mint['wallet'],count,mint['params']]
-                types=BASE_TYPES+[PARAM_TYPE]
-                if mint['kind']=='allowlist':types+=['bytes32[]'];values+=[mint['proof']]
-                else:types+=['uint256','bytes'];values+=[mint['salt'],mint['signature']]
-                tx={'to':mint['execution']['target'],'value':str(mint['params'][0]*count),
-                    'data':'0x'+(ALLOW_SELECTOR if mint['kind']=='allowlist' else SIGNED_SELECTOR)+encode(types,values).hex()}
-                mint=decode_mint(tx,observation['contract'],rule['account'],count)
-                await verify_presale(web3,mint)
+        mint = await resize_presale(web3, observation, rule, mint)
         return mint, slug
     except OpenSeaUnavailable as error:
         if error.status in (400,404,409,422):
             raise HTTPException(409, 'Whitelist eligibility or mint data could not be verified for your wallet.') from None
         raise
+
+
+async def resize_presale(web3, observation, rule, mint):
+    mode = quantity_mode(rule)
+    if mode in ('max_free','max_available') and (mint['params'][0] == 0 or mode=='max_available'):
+        minted, supply, maximum = decode(['uint256'] * 3, await web3.eth.call({
+            'to': observation['contract'], 'data': keccak(text='getMintStats(address)')[:4]
+                + encode(['address'], [rule['account']])}))
+        count = min(rule['quantity'], mint['params'][1] - minted, mint['params'][5] - supply, maximum - supply)
+        if mint['params'][0]:
+            count=min(count,(rule['total_cap_wei']-rule['fee_cap_wei'])//mint['params'][0])
+        if count < 1:
+            raise HTTPException(409, 'No whitelist mint allowance or supply remains.')
+        if count != 1:
+            # Quantity is not part of SeaDrop's signed/Merkle eligibility payload.
+            # Reuse the receiving wallet's verified proof; never request a second signature.
+            from app.services.seadrop_mint import BASE_TYPES,PARAM_TYPE
+            values=[mint['contract'],mint['fee'],mint['wallet'],count,mint['params']]
+            types=BASE_TYPES+[PARAM_TYPE]
+            if mint['kind']=='allowlist':types+=['bytes32[]'];values+=[mint['proof']]
+            else:types+=['uint256','bytes'];values+=[mint['salt'],mint['signature']]
+            tx={'to':mint['execution']['target'],'value':str(mint['params'][0]*count),
+                'data':'0x'+(ALLOW_SELECTOR if mint['kind']=='allowlist' else SIGNED_SELECTOR)+encode(types,values).hex()}
+            mint=decode_mint(tx,observation['contract'],rule['account'],count)
+            await verify_presale(web3,mint)
+    return mint
 
 
 async def drop_for(db, web3, observation, *, presale=None, slug=None):
@@ -359,7 +365,7 @@ def stage_key(snapshot):
 async def no_mixed_stage_copy(db, snapshot, *, task_id=None):
     """Block queued/finished presale-public duplicates by address, network and collection."""
     rows = (await db.execute(select(MintTask, MintAuthorization).join(MintAuthorization,
-        MintTask.authorization_id == MintAuthorization.id).where(MintTask.copy_stage_key.is_not(None),
+        MintTask.authorization_id == MintAuthorization.id).where(
             MintAuthorization.snapshot['chain_id'].as_integer() == snapshot['chain_id'],
             func.lower(MintAuthorization.snapshot['account'].as_string()) == snapshot['account'].lower(),
             func.lower(MintAuthorization.snapshot['contract'].as_string()) == snapshot['contract'].lower()))).all()
@@ -368,6 +374,10 @@ async def no_mixed_stage_copy(db, snapshot, *, task_id=None):
         if task.id == task_id or not other:
             continue
         if task.status in ('failed','expired','disarmed') and not task.signed_tx_raw:
+            continue
+        if snapshot.get('copy_any_free_phase') or other.get('copy_any_free_phase'):
+            raise HTTPException(409, 'This wallet already has a pending or completed mint for this collection. Copy skipped.')
+        if not task.copy_stage_key:
             continue
         if (other['chain_id'] == snapshot['chain_id'] and other['account'].lower() == snapshot['account'].lower()
                 and other['contract'].lower() == snapshot['contract'].lower()
@@ -392,6 +402,13 @@ async def no_duplicate(db, snapshot):
 
 async def pause_rule(db, rule):
     rule.status = 'paused'
+    waiting = (await db.scalars(select(CopyEvent).where(CopyEvent.watch_id == rule.watch_id,
+        CopyEvent.status == 'detected', CopyEvent.task_id.is_(None),
+        CopyEvent.phase_plan['rule_id'].as_string() == rule.id))).all()
+    for event in waiting:
+        event.status, event.note = 'skipped', 'Copying paused. No mint will be sent for this signal.'
+        event.next_attempt_at = None
+        event.last_error_category = 'copy_paused'
     tasks = (await db.execute(select(MintTask).where(MintTask.copy_rule_id == rule.id,
         MintTask.status.in_(['armed','preparing']), MintTask.signed_tx_raw.is_(None)))).scalars().all()
     for task in tasks:
@@ -404,7 +421,10 @@ async def arm_event(db, event, rule, web3):
     check=await db.get(CopyCheck,rule.watch_id)
     if check and check.active:
         return
-    o, r = event.observation, rule.snapshot
+    source, r = event.observation, rule.snapshot
+    o = source
+    from app.services import free_copy
+    any_free = free_copy.enabled(r)
     if rule.status != 'active' or aware(rule.expires_at) <= datetime.now(timezone.utc):
         return
     if o['block_number'] <= rule.resume_after_block:
@@ -425,11 +445,11 @@ async def arm_event(db, event, rule, web3):
             daily=await usage(db,user.id,currency=symbol(rule.chain_id))
             ceiling=min(ceiling,owner.daily_limit_wei-sum(daily.values()))
         r={**r,'total_cap_wei':ceiling}
-    await no_mixed_stage_copy(db, {'chain_id':o['chain_id'], 'account':r['account'], 'contract':o['contract'], 'mint_kind':kind})
-    if kind=='public' and not accepts_price(r,o['price_wei']):
+    await no_mixed_stage_copy(db, {'chain_id':o['chain_id'], 'account':r['account'], 'contract':o['contract'], 'mint_kind':kind, 'copy_any_free_phase':any_free})
+    if not any_free and kind=='public' and not accepts_price(r,o['price_wei']):
         event.status,event.note='skipped','This is a free mint. Paid mints is selected.' if r.get('paid_only') else 'This is a paid mint. Free mints only is selected.'
         return
-    if kind == 'public' and o['price_wei'] > r['price_cap_wei']:
+    if not any_free and kind == 'public' and o['price_wei'] > r['price_cap_wei']:
         event.status, event.note = 'skipped', 'Mint price is outside your copy limits.'
         return
     if r['total_cap_wei']<=r['fee_cap_wei'] and r['price_cap_wei']>0:
@@ -444,13 +464,17 @@ async def arm_event(db, event, rule, web3):
     await verify_source(web3, o)
     mode = quantity_mode(r)
     presale, slug = None, None
+    if any_free:
+        o, presale, slug = await free_copy.select_phase(web3, source, rule)
+        kind = o.get('mint_kind', 'public')
     if kind == 'public':
         drop, stage = await drop_for(db, web3, o)
         quantity = (await maximum_free_quantity(web3,o,r) if mode=='max_free' else
             await maximum_available_quantity(web3,o,r) if mode=='max_available' else r['quantity'])
         price = o['price_wei']
     else:
-        presale, slug = await prepare_presale_copy(web3, o, r)
+        if presale is None:
+            presale, slug = await prepare_presale_copy(web3, o, r)
         quantity, price = presale['quantity'], presale['params'][0]
         drop, stage = await drop_for(db, web3, o, presale=presale, slug=slug)
         if not accepts_price(r,price):
@@ -467,7 +491,9 @@ async def arm_event(db, event, rule, web3):
         expires_at=min(aware(rule.expires_at), aware(stage.end_time_utc)), mint_kind=kind,
         conditional_eligibility=False, onchain_stage_index=o.get('onchain_stage_index'))
     grant, s = await automatic.make_snapshot(db, req, rule.user_id, presale_mint=presale)
-    s['copy_rule_id'], s['copy_source'] = rule.id, o
+    s['copy_rule_id'], s['copy_source'] = rule.id, source
+    if any_free:
+        s['copy_any_free_phase'] = True
     if mode in ('max_free','max_available'):
         s['copy_quantity_mode'] = mode
     key = await no_duplicate(db, s)
@@ -492,6 +518,7 @@ async def arm_event(db, event, rule, web3):
     from app.services.daily_budget import reserve
     await reserve(db,task,auth,rule.user_id)
     event.task_id, event.status, event.note = task.id, 'armed', None
+    event.phase_plan = None
     db.add(ActivityEvent(user_id=rule.user_id, event_type='copy_armed', label='Copied mint armed',
         detail=f'{rule.id}: {task.id}', icon_name='gem', is_demo=False))
 
@@ -609,7 +636,8 @@ async def process_copy_events(db,watch_id,chain):
                 CopyRule.status=='active',CopyRule.expires_at>now))).all()
             if not rules:
                 await db.commit();continue
-            end=datetime.fromtimestamp(event.observation['end'],timezone.utc)
+            from app.services import free_copy
+            end=max(aware(free_copy.deadline(event,r)) for r in rules)
             if end<=now:
                 event.status='skipped';event.note='The observed mint phase has ended. No transaction sent.'
                 event.next_attempt_at=None;event.last_error_category='phase_ended';event.last_checked_at=now
@@ -625,6 +653,11 @@ async def process_copy_events(db,watch_id,chain):
                     with mint_diagnostics.capture('','copy',event_id=event.id,owner_id=event.user_id) as events:
                         async with db.begin_nested():await arm_event(db,event,rule,web3)
                     event.last_error_category=None;event.last_upstream_status=None;event.next_attempt_at=None
+                except free_copy.PhaseWait as wait:
+                    await db.refresh(event)
+                    event.note, event.next_attempt_at = wait.note, wait.next_attempt
+                    event.phase_plan = wait.plan
+                    event.last_error_category = 'waiting_free_phase'
                 except OpenSeaUnavailable as error:
                     await db.refresh(event);await db.refresh(rule)
                     checked=datetime.now(timezone.utc)

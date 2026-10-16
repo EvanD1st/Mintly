@@ -23,3 +23,41 @@ Enable `ENABLE_ETHEREUM_AUTOMATIC=true`, `ENABLE_BASE_AUTOMATIC=true`, `ENABLE_C
 Validation includes real local SeaDrop source transactions, isolated signing and copy receipts; duplicate signals; history retention; historical/manual review; pause handling before and after signing; owner isolation; independent rule pin tampering; network opt-ins and RPC-chain mismatch; and Base parent/operator quote and receipt accounting. Read-only mainnet RPC probes verified chain IDs, deployed SeaDrop code and Base oracle methods. No new funded Ethereum or Base mainnet mint was performed as part of this feature release.
 
 The mobile change uses existing dependencies and drawn icons so installed releases can receive an audited Dart OTA without adding native plugins or image/font assets.
+
+
+## Any eligible free phase
+
+Copy -> Manage now opens the saved receiving wallet, currency, quantity mode,
+price and gas caps, budget, presale preference and exact approval expiry.
+Opening Manage does not create an approval. Changes require an unchecked consent
+box to be reviewed and approved again.
+
+The optional **Copy any eligible free phase** switch requires Free mints only
+and eligible whitelist copying. It creates a new immutable signer approval;
+existing rules retain their exact original scope. A verified source mint after
+approval becomes a collection signal. The worker may use a different supported
+free public, allowlist or signed phase on that same chain and collection. Paid
+fallback remains blocked. Both the API worker and isolated signer verify the
+receiving wallet's own instructions and on-chain conditions. They never reuse
+the followed wallet's proof or signature.
+
+Future phases are checked when they open, bounded by the copy and wallet-policy
+expiry. OpenSea does not always expose future wallet-specific instructions, so
+the app says eligibility will be checked at opening rather than claiming eligibility.
+The original source stage may close while waiting. RPC failures and rate limits
+retain the event for bounded retry; no reservation or signature is made while
+waiting. FCFS supply is not guaranteed. Existing quantity, gas, copy, wallet and
+daily budgets continue to apply.
+
+A receiving wallet that already minted from the collection is skipped. Pending
+or completed tasks in any phase block another collection copy; the signer also
+checks its independent journal, including regular mints hidden from mutable task
+history. Pausing, removing or replacing a rule cancels its waiting signals.
+Resuming or approving new limits does not authorize a historical backlog.
+
+The first authenticated opening after the Dart update shows a popup explaining
+Copy -> Manage -> Free mints only -> Copy any eligible free phase -> approve.
+Dismissal is saved once per account on the backend and does not enable spending.
+The OTA workflow waits for tests and backend deployment of the exact revision to
+succeed before publishing any Android patch. Native and installed-asset audits
+remain required for every installed release.

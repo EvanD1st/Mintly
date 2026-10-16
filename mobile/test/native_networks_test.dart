@@ -181,7 +181,11 @@ void main() {
       final field = find.byWidgetPredicate(
         (w) => w is TextField && w.decoration?.labelText == entry.$1,
       );
-      await tester.ensureVisible(field);
+      await tester.scrollUntilVisible(
+        field,
+        180,
+        scrollable: find.byType(Scrollable).last,
+      );
       await tester.pumpAndSettle();
       await tester.enterText(field, entry.$2);
       await tester.pump();

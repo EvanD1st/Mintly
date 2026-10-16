@@ -1191,6 +1191,13 @@ class ApiService extends ChangeNotifier {
   Future<Map<String, dynamic>> removeMintPlan(String id) async =>
       (await _delete('/mint-plans/$id')) as Map<String, dynamic>;
 
+  Future<bool> showFreePhaseNotice() async =>
+      (await _get('/copy-mints/update-notice'))['show'] == true;
+
+  Future<void> markFreePhaseNoticeSeen() async {
+    await _post('/copy-mints/update-notice/seen', {});
+  }
+
   Future<List<Map<String, dynamic>>> fetchMintPermissions() async =>
       ((await _get('/mint-permissions')) as List).cast<Map<String, dynamic>>();
 
