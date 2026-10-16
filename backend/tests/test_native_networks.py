@@ -294,3 +294,19 @@ async def test_mixed_currency_copy_budget_is_rejected_before_watching_or_signing
     journal=CustodyVault().journal()
     assert journal.execute('SELECT count(*) FROM copy_rules').fetchone()[0]==0
     journal.close()
+
+
+@pytest.mark.parametrize('chain', [999, 33139])
+def test_saved_copy_budget_is_exact_without_mutating_pinned_group(chain):
+    from app.api.copy_mints import public_rule
+    budget = 12500000000000000001
+    snapshot = dict(price_cap_wei=0, fee_cap_wei=100, total_cap_wei=100, budget_wei=budget,
+        budget_group={'id': 'group', 'members': ['rule'], 'budget_wei': budget})
+    before = automatic.digest(snapshot)
+    rule = SimpleNamespace(id='rule', watch_id='watch', chain_id=chain, status='active',
+        expires_at=datetime.now(timezone.utc)+timedelta(days=1), snapshot=snapshot,
+        budget_wei=budget, spent_wei=0, reserved_wei=0)
+    response = public_rule(rule)
+    assert response['saved_budget_wei'] == '12500000000000000001'
+    assert automatic.digest(snapshot) == before
+    assert response['snapshot']['budget_group']['budget_wei'] == budget

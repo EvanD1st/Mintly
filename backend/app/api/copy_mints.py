@@ -183,6 +183,7 @@ def public_rule(rule):
     return {'id': rule.id, 'watch_id': rule.watch_id, 'chain_id': rule.chain_id, 'native_symbol':symbol(rule.chain_id),
         'status': 'expired' if aware(rule.expires_at) <= datetime.now(timezone.utc) else rule.status,
         'expires_at': rule.expires_at, 'snapshot': snapshot,
+        'saved_budget_wei': str((rule.snapshot.get('budget_group') or {}).get('budget_wei', rule.budget_wei)),
         'budget_wei': str(rule.budget_wei), 'spent_wei': str(rule.spent_wei), 'reserved_wei': str(rule.reserved_wei),
         'remaining_wei': str(max(0, rule.budget_wei - rule.spent_wei - rule.reserved_wei))}
 
@@ -220,7 +221,7 @@ async def overview(user=Depends(get_current_user), db=Depends(get_db), native_cu
         'watches': [{'id': w.id, 'address': w.address, 'label': w.label, 'chains': [c for c in w.chains if native_currencies or symbol(c)=='ETH'],
             'preferences': w.preferences or {},
             'cursors': w.cursors, 'recent_mints': counts.get(w.id, 0),
-            'check_settings': next(({'snapshot': c.snapshot, 'expires_at': c.expires_at} for c in checks if c.watch_id == w.id and c.active), None),
+            'check_settings': next(({'snapshot': {k: str(v) if k in ('price_cap_wei','fee_cap_wei','budget_wei','total_cap_wei') else v for k,v in c.snapshot.items()}, 'expires_at': c.expires_at} for c in checks if c.watch_id == w.id and c.active), None),
             'check_only':any(c.watch_id==w.id and c.active and aware(c.expires_at)>datetime.now(timezone.utc) for c in checks),
             'rules': [public_rule(r) for r in rules if r.watch_id == w.id and (native_currencies or symbol(r.chain_id)=='ETH')]} for w in watches],
         'scope': 'Same-phase SeaDrop copies by default. Copy any eligible free phase requires a new explicit free-only approval; one mint per collection.'}

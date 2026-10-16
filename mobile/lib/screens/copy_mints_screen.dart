@@ -1415,6 +1415,18 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
       return;
     }
     final snapshot = data['snapshot'] as Map;
+    if (!_checkOnly && saved != null) {
+      final members =
+          (snapshot['budget_group'] as Map?)?['members'] as List? ??
+          [saved['id']];
+      final chains = rules
+          .where((r) => members.contains(r['id']))
+          .map((r) => r['chain_id'])
+          .toSet();
+      _policy!['policies'] = _currencyPolicies(
+        wallet,
+      ).where((p) => chains.contains(p['chain_id'])).toList();
+    }
     _free = snapshot['free_only'] == true;
     _paidOnly = snapshot['paid_only'] == true;
     _includePresales = (snapshot['mint_kinds'] as List? ?? ['public']).contains(
@@ -1431,7 +1443,11 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
     _price.text = copyEth(snapshot['price_cap_wei']);
     _gas.text = copyEth(snapshot['fee_cap_wei']);
     final group = snapshot['budget_group'] as Map?;
-    _budget.text = copyEth(group?['budget_wei'] ?? snapshot['budget_wei']);
+    _budget.text = copyEth(
+      data['saved_budget_wei'] ??
+          group?['budget_wei'] ??
+          snapshot['budget_wei'],
+    );
     _expiry = DateTime.parse('${data['expires_at']}').toUtc();
     _days = 0;
     _restored = true;
@@ -1847,7 +1863,7 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
                                   (p) => p['chain_id'] == chain,
                                 ))
                                 ? _network(chain)
-                                : '${_network(chain)} · ${_checkOnly ? 'Check only' : 'Not approved'}',
+                                : '${_network(chain)} · ${_checkOnly ? 'Check only' : 'Not selected'}',
                           ),
                       ],
                     ),

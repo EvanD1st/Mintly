@@ -581,6 +581,7 @@ void main() {
         ...watch,
         'rules': [
           {
+            'id': 'saved-rule',
             'status': 'active',
             'chain_id': 4663,
             'expires_at': expiry,
@@ -646,6 +647,7 @@ void main() {
       await tester.tap(find.text('Enable copy minting'));
       await tester.pumpAndSettle();
       expect(approved?['any_eligible_free_phase'], true);
+      expect(approved?['grant_ids'], ['policy4663']);
       expect(approved?['expires_at'], expiry);
       expect(approved?['price_cap_eth'], '0');
       expect(approved?['fee_cap_eth'], '0.0001');
