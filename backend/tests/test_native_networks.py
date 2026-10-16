@@ -144,6 +144,7 @@ def test_postgres_native_migration_preserves_old_approvals_and_large_integer(mon
     from alembic import command
     from alembic.config import Config
     from sqlalchemy.engine import make_url
+    from sqlalchemy import text
     from sqlalchemy.ext.asyncio import create_async_engine
     from app.models import Wallet
     url=os.environ.get('MINTLY_TEST_DATABASE_URL','')
@@ -163,13 +164,16 @@ def test_postgres_native_migration_preserves_old_approvals_and_large_integer(mon
         try:
             async with engine.begin() as conn:
                 if not after:
-                    await conn.execute(User.__table__.insert().values(id='owner',username='migration-owner',password_hash='unused',role='member'))
+                    # Seed the historical schema independently of today's ORM defaults.
+                    await conn.execute(text("INSERT INTO users (id, username, password_hash, role, is_active, must_change_password, created_at, updated_at) "
+                        "VALUES ('owner', 'migration-owner', 'unused', 'member', true, false, now(), now())"))
                     await conn.execute(Wallet.__table__.insert().values(id='wallet',user_id='owner',address='0x'+'1'*40,label='Wallet',signing_capability='custodial',supported_chains=['Ethereum']))
                     await conn.execute(AutomaticGrant.__table__.insert().values(id='grant',user_id='owner',wallet_id='wallet',chain_id=1,account='0x'+'1'*40,context_hash='unchanged-approval',scope={'max_task_wei':42},expires_at=datetime.now(timezone.utc)+timedelta(days=1),budget_wei=42,reserved_wei=7,spent_wei=3))
                 else:
                     row=(await conn.execute(select(AutomaticGrant.__table__))).mappings().one()
                     assert (row['budget_wei'],row['reserved_wei'],row['spent_wei'])==(42,7,3)
                     assert row['context_hash']=='unchanged-approval' and row['scope']=={'max_task_wei':42}
+                    assert (await conn.execute(text("SELECT feature_notices FROM users WHERE id='owner'"))).scalar_one() == {}
                     await conn.execute(AutomaticGrant.__table__.update().values(budget_wei=12500000000000000001))
                     assert (await conn.execute(select(AutomaticGrant.budget_wei))).scalar_one()==12500000000000000001
         finally: await engine.dispose()
