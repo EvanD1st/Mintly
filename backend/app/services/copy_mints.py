@@ -343,7 +343,7 @@ async def drop_for(db, web3, observation, *, presale=None, slug=None):
             is_supported_integration=True, is_demo=False)
         db.add(drop)
         await db.flush()
-        stage = MintStage(id=key, drop_id=key, stage_name='Public' if kind == 'public' else 'Whitelist',
+        stage = MintStage(id=key, drop_id=key, stage_name=observation.get('phase_name') or ('Public' if kind == 'public' else 'Whitelist'),
             start_time_utc=datetime.fromtimestamp(current['start'], timezone.utc),
             end_time_utc=datetime.fromtimestamp(current['end'], timezone.utc), price_wei=current['price_wei'],
             price_eth_str=format_wei_to_eth(current['price_wei']), limit_per_wallet=current['limit'], eligibility_status='unknown')
@@ -352,6 +352,8 @@ async def drop_for(db, web3, observation, *, presale=None, slug=None):
     else:
         stage = await db.get(MintStage, key)
         stage.limit_per_wallet = current['limit']
+        if observation.get('phase_name'):
+            stage.stage_name = observation['phase_name']
     return drop, stage
 
 

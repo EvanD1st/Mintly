@@ -148,7 +148,7 @@ async def presale(copying, monkeypatch):
         if state.fallback:
             fee = lab.w.eth.accounts[1]
             data = lab.sea.functions.mintPublic(lab.nft.address, fee, address, quantity)._encode_transaction_data()
-            return 200, dict(to=SEADROP_V1_ADDRESS,data=data,value=str(10*quantity),chain='local-test')
+            return 200, dict(to=SEADROP_V1_ADDRESS,data=data,value=str(lab.sea.functions.getPublicDrop(lab.nft.address).call()[0]*quantity),chain='local-test')
         return 200, transaction(address, quantity)
     monkeypatch.setattr('app.services.opensea.OpenSeaClient.collection_for_contract', collection)
     monkeypatch.setattr('app.services.opensea.OpenSeaClient.build_mint', build)

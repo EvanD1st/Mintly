@@ -494,6 +494,9 @@ async def activity(watch_id: str | None = None, offset: int = Query(0, ge=0), li
     for event in events:
         task = await db.get(MintTask, event.task_id) if event.task_id else None
         watch = await db.get(CopyWatch, event.watch_id)
+        auth = await db.get(MintAuthorization, task.authorization_id) if task else None
+        copied_phase = ({'name': auth.snapshot['stage_name'], 'kind': auth.snapshot['mint_kind'],
+            'price_wei': str(auth.snapshot['price_wei'])} if auth and auth.snapshot.get('copy_any_free_phase') else None)
         o = dict(event.observation)
         o['price_wei'] = str(o['price_wei'])
         note = task.failure_reason if task else event.note
@@ -507,15 +510,14 @@ async def activity(watch_id: str | None = None, offset: int = Query(0, ge=0), li
             'observed_at': event.created_at, 'observation': o,
             'status': 'skipped' if funding and unsigned else (task.status if task else event.status),
             'note': note, 'task_id': event.task_id,
-            'phase_plan':event.phase_plan,
+            'phase_plan':event.phase_plan, 'copied_phase':copied_phase,
             'next_attempt_at':event.next_attempt_at,'last_checked_at':event.last_checked_at,
             'last_error_category':event.last_error_category,'last_upstream_status':event.last_upstream_status,
             'upstream_events':event.upstream_events or [],'preparation_attempts':event.preparation_attempts,
             'retryable': funding and unsigned and (task is None or task.status == 'failed') and not watch.archived_at
                 and o.get('end', 0) > int(datetime.now(timezone.utc).timestamp()),
             'transaction_hash': task.transaction_hash if task else None,
-            'quantity': (await db.get(MintAuthorization,
-                task.authorization_id)).quantity if task else None,
+            'quantity': auth.quantity if auth else None,
             'actual_cost_wei': str(task.actual_total_cost_wei) if task and task.actual_total_cost_wei is not None else None})
     return {'events': entries, 'total': total, 'next_offset': offset + len(events) if offset + len(events) < total else None,
         'copied_mints': sum(t.status == 'confirmed' for t in tasks),

@@ -1,5 +1,6 @@
 """Real SeaDrop cross-phase execution, immutable consent and collection guards."""
 from datetime import datetime, timezone
+import pytest
 from app.models import CopyEvent, MintTask, MintAuthorization
 from app.services.custody import CustodyVault
 from test_copy_presales import presale
@@ -18,7 +19,7 @@ async def setup(presale, monkeypatch, *, future=False, opt_in=True, paid=False):
         return {'stages': [{'uuid': 'free-fcfs', 'label': 'Free FCFS', 'stage_type': 'signed_presale',
             'start_time': datetime.fromtimestamp(state.own_start, timezone.utc).isoformat(),
             'end_time': datetime.fromtimestamp(lab.end, timezone.utc).isoformat(),
-            'price': '0', 'max_per_wallet': 7, 'price_currency_address': '0x' + '0' * 40}]}
+            'price': getattr(state, 'schedule_price', '0'), 'max_per_wallet': 7, 'price_currency_address': '0x' + '0' * 40}]}
     monkeypatch.setattr('app.services.opensea.OpenSeaClient.get_drop', schedule)
     c['request'].update(free_only=True, quantity=100, quantity_mode='max_free', price_cap_eth='0',
         any_eligible_free_phase=opt_in)
@@ -34,6 +35,7 @@ async def test_different_free_phase_mints_with_receiving_signature_and_original_
     c, _ = await setup(presale, monkeypatch)
     lab = c['lab']; await c['scan'](); e = await event(c)
     assert e['task_id'], e['note']
+    assert e['copied_phase']['name'] == 'Free FCFS'
     async with lab.factory() as db:
         auth = await db.get(MintAuthorization, (await db.get(MintTask, e['task_id'])).authorization_id)
         assert auth.snapshot['onchain_stage_index'] == 8
@@ -156,3 +158,35 @@ async def test_paused_future_signal_never_mints_on_resuming(presale, monkeypatch
     assert response.status_code == 200
     await c['scan']()
     assert (await event(c))['task_id'] is None
+
+
+async def test_signed_source_can_trigger_a_verified_free_public_phase(presale, monkeypatch):
+    c, state = await setup(presale, monkeypatch)
+    lab = c['lab']; state.fallback = True
+    lab.w.provider.make_request('hardhat_impersonateAccount', [lab.nft.address])
+    lab.w.provider.make_request('hardhat_setBalance', [lab.nft.address, hex(10**18)])
+    lab.w.eth.wait_for_transaction_receipt(lab.sea.functions.updatePublicDrop(
+        (0, lab.start, lab.end, 2, 500, True)).transact({'from': lab.nft.address}))
+    lab.w.provider.make_request('hardhat_stopImpersonatingAccount', [lab.nft.address])
+    async def schedule(self, slug):
+        return {'stages': [{'uuid': 'public-free', 'label': 'Free public', 'stage_type': 'public_sale',
+            'start_time': datetime.fromtimestamp(lab.start, timezone.utc).isoformat(),
+            'end_time': datetime.fromtimestamp(lab.end, timezone.utc).isoformat(),
+            'price': '0', 'max_per_wallet': 2, 'price_currency_address': '0x' + '0' * 40}]}
+    monkeypatch.setattr('app.services.opensea.OpenSeaClient.get_drop', schedule)
+    await c['scan'](); e = await event(c)
+    assert e['task_id'], e['note']
+    async with lab.factory() as db:
+        auth = await db.get(MintAuthorization, (await db.get(MintTask, e['task_id'])).authorization_id)
+        assert auth.snapshot['mint_kind'] == 'public' and auth.snapshot['copy_source']['mint_kind'] == 'signed'
+        assert auth.snapshot['price_wei'] == 0
+    await lab.sign(e['task_id'])
+
+
+@pytest.mark.parametrize('schedule_price', [None, '100'])
+async def test_wallet_specific_free_price_is_verified_instead_of_assumed_from_schedule(presale, monkeypatch, schedule_price):
+    c, state = await setup(presale, monkeypatch)
+    state.schedule_price = schedule_price
+    await c['scan'](); e = await event(c)
+    assert e['task_id'], e['note']
+    await c['lab'].sign(e['task_id'])

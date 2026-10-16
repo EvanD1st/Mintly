@@ -1003,6 +1003,10 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
                           ? '${o['source_quantity']} NFT(s) minted by followed wallet'
                           : '${event['quantity']} NFT(s) copied',
                     ),
+                    if (event['copied_phase'] is Map)
+                      Text(
+                        'Copy phase: ${event['copied_phase']['name']} - free mint',
+                      ),
                     Text(
                       event['actual_cost_wei'] == null
                           ? 'Source price ${copyEth(o['price_wei'])} ${nativeSymbol(o['chain_id'])} / NFT'

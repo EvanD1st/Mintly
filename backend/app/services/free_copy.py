@@ -44,7 +44,9 @@ async def select_phase(web3, source, rule):
     drop = await client.get_drop(slug)
     now = max(int(datetime.now(timezone.utc).timestamp()), (await web3.eth.get_block('latest')).timestamp)
     expiry = int(rule.expires_at.replace(tzinfo=timezone.utc).timestamp())
-    phases = [p for p in stage_schedule(drop) if p['price_wei'] == 0
+    # Whitelist prices can be wallet-specific; only verified zero-value calldata
+    # can authorize execution, even when a schedule has a nonzero/unknown price.
+    phases = [p for p in stage_schedule(drop) if (p['price_wei'] in (0, None) or stage_kind(p['type']) in ('allowlist', 'signed'))
         and stage_kind(p['type']) in ('public', 'allowlist', 'signed')
         and int(p['ends_at'].timestamp()) > now and int(p['starts_at'].timestamp()) < expiry]
     if not phases:
@@ -71,7 +73,8 @@ async def select_phase(web3, source, rule):
             elif not matching:
                 reason = 'Wallet instructions do not match an active free phase. No transaction sent.'
             else:
-                selected = {**source, 'mint_kind': mint['kind'], 'price_wei': 0, 'start': start, 'end': end}
+                selected = {**source, 'mint_kind': mint['kind'], 'price_wei': 0, 'start': start, 'end': end,
+                    'phase_name': matching[0]['name']}
                 if mint['kind'] == 'public':
                     selected['limit'] = terms['limit']
                     selected.pop('onchain_stage_index', None)
@@ -96,6 +99,6 @@ async def select_phase(web3, source, rule):
         opening, label = upcoming['starts_at'], upcoming['name']
         time = (opening + timedelta(hours=1)).strftime('%d %b %H:%M WAT')
         raise PhaseWait(((reason + ' ') if reason else '') +
-            f'Waiting for {label} at {time}. Eligibility will be checked when it opens.',
+            f'Waiting for {label} at {time}. Eligibility will be checked when it opens; the mint price must be zero.',
             opening, {'rule_id': rule.id, 'slug': slug, 'phase': label, 'starts_at': opening.isoformat()})
     raise HTTPException(409, reason or 'No eligible free phase remains. No transaction sent.')
