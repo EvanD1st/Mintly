@@ -31,7 +31,7 @@ async def step(session_factory=AsyncSessionLocal):
     return bool(pairs)
 
 
-async def run():
+async def backfill():
     enabled()
     while True:
         try:
@@ -40,6 +40,11 @@ async def run():
         except Exception:
             logging.error('Public mint observation unavailable; cursor and spending records retained.')
         await asyncio.sleep(5)
+
+
+async def run():
+    from app.services import fast_copy
+    await asyncio.gather(backfill(),fast_copy.run())
 
 
 if __name__ == '__main__':

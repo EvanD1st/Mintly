@@ -143,7 +143,7 @@ async def test_watching_without_approval_explains_that_no_copy_was_requested(cop
     assert 'Watching only' in event['note'] and 'Manage' in event['note']
 
 
-@pytest.mark.parametrize('chain,confirmations,expected_head', [(1,2,999), (1,13,988), (1,1,999), (4663,2,988)])
+@pytest.mark.parametrize('chain,confirmations,expected_head', [(1,2,999), (1,13,988), (1,1,999), (4663,2,999)])
 async def test_source_confirmation_setting_changes_scan_horizon_without_allowing_one_confirmation(monkeypatch, chain, confirmations, expected_head):
     class Eth:
         @property

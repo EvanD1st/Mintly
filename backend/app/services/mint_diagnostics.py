@@ -28,6 +28,7 @@ PREPARATION_REASONS={
     'allowance_or_supply_exhausted':'OpenSea reports that this wallet has reached its active-stage mint limit or the stage is sold out.',
     'precondition_unknown':'OpenSea rejected a mint precondition; the specific reason could not be verified.',
     'wallet_approval_changed':'Wallet settings changed; renew the signing approval for this network in Wallet.',
+    'pending_source_changed':'The followed pending mint could not be verified. No transaction was signed or sent.',
 }
 # Preserve the existing copy-event terminal-reason contract.
 MINT_REASONS={key:PREPARATION_REASONS[key] for key in ('wallet_not_allowlisted','insufficient_funds',
@@ -196,7 +197,7 @@ def category(events,status,error=None):
     import httpx
     if isinstance(error,httpx.HTTPStatusError):
         reason=error.response.headers.get('X-Mintly-Reason')
-        if reason == 'wallet_approval_changed':
+        if reason in ('wallet_approval_changed','pending_source_changed'):
             return reason
     for row in reversed(events):
         code=row['http_status']

@@ -9,6 +9,8 @@ from app.services.automatic_fees import quote_gas, maximum_fee
 
 
 async def evaluate(web3,observation,snapshot,*,now=None):
+    if observation.get('source_pending') is True:
+        return {'status':'unavailable','note':'The followed mint is still pending. Check-only results wait for its verified receipt.'}
     o,r = observation,snapshot
     now = now or datetime.now(timezone.utc)
     kind=o.get('mint_kind','public')

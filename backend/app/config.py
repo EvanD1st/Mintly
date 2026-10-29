@@ -52,7 +52,13 @@ class Settings(BaseSettings):
 
     # RPC Configuration
     RPC_ETHEREUM: str = "https://ethereum-rpc.publicnode.com"
-    RPC_BASE: str = "https://mainnet.base.org"
+    RPC_ETHEREUM_WS: str = "wss://ethereum-rpc.publicnode.com"
+    RPC_BASE_WS: str = "wss://base-rpc.publicnode.com"
+    RPC_ROBINHOOD_WS: str = ""
+    RPC_HYPEREVM_WS: str = ""
+    RPC_APECHAIN_WS: str = ""
+    RPC_INK_WS: str = ""
+    RPC_BASE: str = "https://base-rpc.publicnode.com"
     # Archive-capable HyperEVM RPC: copy verification requires historical calls.
     RPC_HYPEREVM: str = "https://rpc.hypurrscan.io"
     RPC_APECHAIN: str = "https://rpc.apechain.com/http"
@@ -82,8 +88,10 @@ class Settings(BaseSettings):
     ENABLE_APECHAIN_AUTOMATIC: bool = False
     ENABLE_INK_AUTOMATIC: bool = False
     ENABLE_COPY_MINTS: bool = False
-    # Includes the source block. Default retains the previous 12-block lag.
-    COPY_ETHEREUM_SOURCE_CONFIRMATIONS: int = Field(default=13, ge=2, le=128)
+    # Global pending detection uses existing copy limits; no new user setting.
+    ENABLE_PENDING_COPY: bool = True
+    # Confirmed fallback includes the source block. Receipt finality is separate.
+    COPY_ETHEREUM_SOURCE_CONFIRMATIONS: int = Field(default=2, ge=2, le=128)
     AUTOMATIC_RPC: str = 'http://127.0.0.1:18545'
     AUTOMATIC_SIGNER_URL: str = 'http://127.0.0.1:18766'
     AUTOMATIC_SIGNER_TOKEN_FILE: str = ''

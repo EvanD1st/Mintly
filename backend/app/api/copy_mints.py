@@ -193,6 +193,24 @@ def record(db, user_id, label, detail):
         detail=detail, icon_name='gem', is_demo=False))
 
 
+def public_cursors(cursors):
+    result = {}
+    for chain, value in cursors.items():
+        cursor = dict(value)
+        try:
+            live = datetime.fromisoformat(cursor.get('live_checked_at',''))
+            fresh = live.tzinfo is not None and timedelta(0)<=datetime.now(timezone.utc)-live<timedelta(seconds=60)
+        except (ValueError,TypeError):
+            fresh = False
+        if fresh:
+            cursor['history_status'] = cursor.get('status')
+            cursor['status'] = 'monitoring'
+            if cursor['history_status'] in ('unavailable','catching_up'):
+                cursor['history_note'] = 'Live mint monitoring is active. Older history is still syncing or awaiting its provider.'
+        result[chain] = cursor
+    return result
+
+
 async def register_rule(rule_id):
     try:
         token = Path(settings.AUTOMATIC_SIGNER_TOKEN_FILE).read_text().strip()
@@ -213,6 +231,7 @@ async def overview(user=Depends(get_current_user), db=Depends(get_db), native_cu
         CopyWatch.archived_at.is_(None)).order_by(CopyWatch.created_at.desc()))).scalars().all()
     cutoff = int((datetime.now(timezone.utc) - timedelta(days=7)).timestamp())
     counts = dict((await db.execute(select(CopyEvent.watch_id, func.count()).where(CopyEvent.user_id == user.id,
+        CopyEvent.observation['source_pending'].as_boolean().is_not(True),
         CopyEvent.observation['timestamp'].as_integer() >= cutoff)
         .group_by(CopyEvent.watch_id))).all())
     rules = (await db.execute(select(CopyRule).where(CopyRule.user_id == user.id,
@@ -220,11 +239,11 @@ async def overview(user=Depends(get_current_user), db=Depends(get_db), native_cu
     return {'enabled': settings.ENABLE_COPY_MINTS, 'networks': [n for n in copying.networks() if native_currencies or n['native_symbol']=='ETH'],
         'watches': [{'id': w.id, 'address': w.address, 'label': w.label, 'chains': [c for c in w.chains if native_currencies or symbol(c)=='ETH'],
             'preferences': w.preferences or {},
-            'cursors': w.cursors, 'recent_mints': counts.get(w.id, 0),
+            'cursors': public_cursors(w.cursors), 'recent_mints': counts.get(w.id, 0),
             'check_settings': next(({'snapshot': {k: str(v) if k in ('price_cap_wei','fee_cap_wei','budget_wei','total_cap_wei') else v for k,v in c.snapshot.items()}, 'expires_at': c.expires_at} for c in checks if c.watch_id == w.id and c.active), None),
             'check_only':any(c.watch_id==w.id and c.active and aware(c.expires_at)>datetime.now(timezone.utc) for c in checks),
             'rules': [public_rule(r) for r in rules if r.watch_id == w.id and (native_currencies or symbol(r.chain_id)=='ETH')]} for w in watches],
-        'scope': 'Same-phase SeaDrop copies by default. Copy any eligible free phase requires a new explicit free-only approval; one mint per collection.'}
+        'scope': 'Copying can start from publicly visible pending mint activity, within existing approvals; the followed transaction may fail or be cancelled. Same-phase SeaDrop copies by default. Copy any eligible free phase requires a new explicit free-only approval; one mint per collection.'}
 
 
 @router.post('/watches')
@@ -502,6 +521,8 @@ async def activity(watch_id: str | None = None, offset: int = Query(0, ge=0), li
         o['price_wei'] = str(o['price_wei'])
         from app.services.mint_diagnostics import public_note
         note = public_note(task.failure_reason if task else event.note)
+        if not note and o.get('source_pending') is True:
+            note = 'Started from pending mint activity. The followed transaction may still fail or be cancelled.'
         funding = copying.is_funding_note(note, o['chain_id'])
         unsigned = not task or not task.signed_tx_raw
         if funding:

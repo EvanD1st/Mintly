@@ -40,7 +40,9 @@ async def acquire(path,*,factory=None,now=None,request_id=None):
                 .outerjoin(CopyCheck,CopyCheck.watch_id==CopyEvent.watch_id).where(CopyEvent.status=='detected',CopyEvent.task_id.is_(None),
                 CopyWatch.archived_at.is_(None),CopyRule.status=='active',CopyRule.expires_at>now,
                 CopyRule.chain_id==CopyEvent.observation['chain_id'].as_integer(),
-                CopyRule.resume_after_block<CopyEvent.observation['block_number'].as_integer(),
+                or_(CopyRule.resume_after_block<CopyEvent.observation['block_number'].as_integer(),
+                    (CopyEvent.observation['source_pending'].as_boolean().is_(True)) &
+                    (CopyRule.resume_after_block<CopyEvent.observation['seen_block'].as_integer())),
                 User.automation_paused.is_(False),User.is_active.is_(True),User.deleted_at.is_(None),
                 or_(CopyCheck.watch_id.is_(None),CopyCheck.active.is_(False)),
                 CopyEvent.observation['start'].as_integer()<=int(now.timestamp()),
