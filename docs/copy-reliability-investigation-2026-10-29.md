@@ -42,9 +42,13 @@ by the investigation, and no approvals, wallet code or spending counters were ch
   reads succeeded. Neither cursor was advanced manually. A read-only Base
   PublicNode probe returned the correct chain ID and accepted historical and
   recent log reads; this is an interim candidate, not an availability guarantee.
-  The documented Hyperliquid PublicNode endpoint returned HTTP 403 from the server
-  and is not a usable replacement in that environment. Provider recovery remains
-  separate from the confirmed wallet/budget repairs.
+  Probes using Python urllib received HTTP 403 from both PublicNode endpoints;
+  the application's actual Web3 client accepted both chain identities and Base's
+  historical/recent filtered reads. Hyperliquid PublicNode accepted a 10-block
+  historical range and a recent 300-block range, but rejected the historical
+  300-block request. Provider selection must be validated with the application
+  client and the cursor's actual range. Provider recovery remains separate from
+  the confirmed wallet/budget repairs.
 - Server disk had about 1.4 GB free (96% used); no disk-full failure was established
   by this snapshot.
 
