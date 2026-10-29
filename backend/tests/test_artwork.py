@@ -6,7 +6,8 @@ from sqlalchemy import select
 from app.api import artwork
 from app.api.deps import get_db
 from app.main import app
-from app.models import User, Wallet, MintPlan, OpenSeaRequestWaiter
+from app.models import (User, Wallet, MintPlan, OpenSeaRequestWaiter, CopyWatch, CopyRule,
+    CopyEvent, CopyCheck, AutomaticGrant)
 from datetime import datetime, timezone, timedelta
 from app.services.opensea import OpenSeaClient, OpenSeaUnavailable
 from app.models import CollectionArtwork
@@ -96,6 +97,17 @@ async def test_artwork_requires_login_and_owns_private_plan(test_db, monkeypatch
             assert response.json() == {'image_url': 'https://i.seadn.io/example.png'}
             assert fetch.await_count == 1
             assert (await client.get('/api/artwork?reference=https://evil.test')).status_code == 422
+            now = datetime.now(timezone.utc)
+            test_db.add(CollectionArtwork(key=artwork.artwork_key('example', 8453, plan.contract_address),
+                image_url='https://i.seadn.io/saved.png', refresh_after=now-timedelta(days=14),
+                stale_until=now-timedelta(days=7)))
+            await test_db.commit()
+            refresh = AsyncMock()
+            monkeypatch.setattr(artwork, 'refresh_image', refresh)
+            response = await client.get(path)
+            assert response.json() == {'image_url': 'https://i.seadn.io/saved.png'}
+            assert fetch.await_count == 1  # No upstream wait in the screen request.
+            refresh.assert_awaited_once()
     finally:
         app.dependency_overrides.pop(get_db, None)
 
@@ -114,7 +126,7 @@ async def test_persistent_cache_survives_memory_restart_and_busy_preparation(tes
 
 async def test_failed_refresh_keeps_previous_image_without_extending_stale_deadline(test_db, monkeypatch):
     now=datetime.now(timezone.utc)
-    deadline=now+timedelta(days=1)
+    deadline=now-timedelta(days=1)
     test_db.add(CollectionArtwork(key='slug:example',image_url='https://i.seadn.io/old.png',
         refresh_after=now-timedelta(seconds=1),stale_until=deadline))
     await test_db.commit()
@@ -124,6 +136,77 @@ async def test_failed_refresh_keeps_previous_image_without_extending_stale_deadl
     row=await test_db.get(CollectionArtwork,'slug:example',populate_existing=True)
     from app.services.mint_plans import aware
     assert aware(row.stale_until)==deadline
+
+
+async def test_expired_artwork_remains_visible_during_minting_and_refreshes_later(test_db, monkeypatch):
+    now = datetime.now(timezone.utc)
+    test_db.add(CollectionArtwork(key='slug:example', image_url='https://i.seadn.io/old.png',
+        refresh_after=now-timedelta(days=14), stale_until=now-timedelta(days=7)))
+    await test_db.commit()
+    request = AsyncMock(return_value=(200, {'collection': 'example', 'image_url': 'https://i.seadn.io/new.png'}))
+    monkeypatch.setattr(OpenSeaClient, '_key', AsyncMock(return_value='server-only-test-key'))
+    monkeypatch.setattr(OpenSeaClient, '_request', request)
+    assert await artwork.collection_image('example', db=test_db, allow_fetch=False) == 'https://i.seadn.io/old.png'
+    request.assert_not_awaited()
+    assert await artwork.collection_image('example', db=test_db) == 'https://i.seadn.io/new.png'
+    request.assert_awaited_once()
+
+
+@pytest.fixture
+async def artwork_copy(test_db):
+    from types import SimpleNamespace
+    now = datetime.now(timezone.utc)
+    user = await test_db.scalar(select(User).where(User.username == 'member'))
+    wallet = Wallet(user_id=user.id, label='Art test', address='0x'+'a'*40, signing_capability='custodial')
+    test_db.add(wallet)
+    await test_db.flush()
+    grant = AutomaticGrant(user_id=user.id, wallet_id=wallet.id, chain_id=8453,
+        account=wallet.address, context_hash='artwork-grant', scope={}, status='enabled',
+        expires_at=now+timedelta(days=1), budget_wei=100)
+    watch = CopyWatch(id='artwork-watch', user_id=user.id, address='0x'+'b'*40, label='Art test', chains=[8453])
+    test_db.add_all([grant, watch])
+    await test_db.flush()
+    rule = CopyRule(user_id=user.id, watch_id=watch.id, grant_id=grant.id, chain_id=8453,
+        snapshot={}, context_hash='artwork-rule', status='active', expires_at=now+timedelta(days=1),
+        resume_after_block=10, budget_wei=100)
+    event = CopyEvent(id='artwork-event', user_id=user.id, watch_id=watch.id, status='detected',
+        observation={'chain_id': 8453, 'block_number': 11, 'start': int(now.timestamp())-60,
+            'end': int((now+timedelta(days=300)).timestamp())})
+    test_db.add_all([rule, event])
+    await test_db.commit()
+    return SimpleNamespace(user=user, wallet=wallet, grant=grant, watch=watch, rule=rule, event=event, now=now)
+
+
+@pytest.mark.parametrize('state', ['ready', 'pending_ready', 'no_rule', 'paused_rule', 'revoked_rule',
+    'expired_rule', 'archived_watch', 'paused_user', 'inactive_user', 'deleted_user', 'check_only',
+    'other_chain', 'before_approval', 'pending_before_approval', 'retry_later', 'disabled_grant',
+    'expired_grant', 'archived_wallet', 'phase_ended', 'phase_later'])
+async def test_only_actionable_copies_defer_artwork(test_db, artwork_copy, state):
+    c = artwork_copy
+    if state == 'no_rule': await test_db.delete(c.rule)
+    elif state == 'paused_rule': c.rule.status = 'paused'
+    elif state == 'revoked_rule': c.rule.status = 'revoked'
+    elif state == 'expired_rule': c.rule.expires_at = c.now-timedelta(seconds=1)
+    elif state == 'archived_watch': c.watch.archived_at = c.now
+    elif state == 'paused_user': c.user.automation_paused = True
+    elif state == 'inactive_user': c.user.is_active = False
+    elif state == 'deleted_user': c.user.deleted_at = c.now
+    elif state == 'check_only': test_db.add(CopyCheck(watch_id=c.watch.id, user_id=c.user.id,
+        wallet_id=c.wallet.id, version='artwork-check', snapshot={}, active=True, expires_at=c.now+timedelta(days=1)))
+    elif state == 'other_chain': c.rule.chain_id = 1
+    elif state == 'before_approval': c.rule.resume_after_block = 11
+    elif state in ('pending_ready', 'pending_before_approval'):
+        c.event.observation = {**c.event.observation, 'source_pending': True, 'block_number': 0,
+            'seen_block': 11 if state == 'pending_ready' else 10}
+    elif state == 'retry_later': c.event.next_attempt_at = c.now+timedelta(minutes=5)
+    elif state == 'disabled_grant': c.grant.status = 'revoked'
+    elif state == 'expired_grant': c.grant.expires_at = c.now-timedelta(seconds=1)
+    elif state == 'archived_wallet': c.wallet.archived_at = c.now
+    elif state == 'phase_ended': c.event.observation = {**c.event.observation, 'end': int(c.now.timestamp())-1}
+    elif state == 'phase_later': c.event.observation = {**c.event.observation, 'start': int(c.now.timestamp())+300}
+    await test_db.commit()
+    assert await artwork.minting_busy(test_db) is (state in ('ready', 'pending_ready'))
+    assert c.event.status == 'detected' and c.event.task_id is None
 
 
 async def test_two_second_shared_capacity_preserves_twenty_second_mint_pacing(test_db,monkeypatch):

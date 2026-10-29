@@ -4,9 +4,10 @@ import re
 from datetime import datetime, timezone, timedelta
 from urllib.parse import urlsplit
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import select, or_
 from app.api.deps import get_current_user, get_db
-from app.models import MintPlan, MintTask, Wallet, Drop, CopyEvent, OpenSeaRequestWaiter, CollectionArtwork
+from app.models import (MintPlan, MintTask, Wallet, Drop, CopyEvent, CopyWatch, CopyRule,
+    CopyCheck, AutomaticGrant, User, OpenSeaRequestWaiter, CollectionArtwork)
 from app.database import AsyncSessionLocal
 from app.services.mint_plans import aware
 from app.config import settings
@@ -40,7 +41,9 @@ async def collection_image(slug=None, *, chain_id=None, contract=None, allow_fet
     cache_key = artwork_key(slug, chain_id, contract)
     persisted = await db.get(CollectionArtwork, cache_key) if db else None
     now = datetime.now(timezone.utc)
-    old = image_url(persisted.image_url) if persisted and aware(persisted.stale_until) > now else None
+    # A refresh deadline is not an expiry for public collection artwork. Keep the
+    # last trusted image while metadata is deferred; it never informs minting.
+    old = image_url(persisted.image_url) if persisted else None
     if persisted and aware(persisted.refresh_after) > now:
         return old
     if not allow_fetch and old:
@@ -115,7 +118,26 @@ async def minting_busy(db):
     if await db.scalar(select(MintTask.id).where(MintTask.status.in_(['armed', 'preparing']),
             MintTask.scheduled_for_utc <= horizon, MintTask.expires_at_utc > now).limit(1)):
         return True
-    return bool(await db.scalar(select(CopyEvent.id).where(CopyEvent.status == 'detected',
+    return bool(await db.scalar(select(CopyEvent.id)
+        .join(CopyWatch, CopyWatch.id == CopyEvent.watch_id)
+        .join(CopyRule, CopyRule.watch_id == CopyEvent.watch_id)
+        .join(AutomaticGrant, AutomaticGrant.id == CopyRule.grant_id)
+        .join(Wallet, Wallet.id == AutomaticGrant.wallet_id)
+        .join(User, User.id == CopyEvent.user_id)
+        .outerjoin(CopyCheck, CopyCheck.watch_id == CopyEvent.watch_id)
+        .where(CopyEvent.status == 'detected',
+        CopyWatch.archived_at.is_(None), CopyRule.status == 'active', CopyRule.expires_at > now,
+        CopyRule.user_id == CopyEvent.user_id, CopyWatch.user_id == CopyEvent.user_id,
+        CopyRule.chain_id == CopyEvent.observation['chain_id'].as_integer(),
+        AutomaticGrant.status == 'enabled', AutomaticGrant.expires_at > now,
+        AutomaticGrant.user_id == CopyEvent.user_id, Wallet.archived_at.is_(None),
+        Wallet.user_id == CopyEvent.user_id,
+        User.automation_paused.is_(False), User.is_active.is_(True), User.deleted_at.is_(None),
+        or_(CopyCheck.watch_id.is_(None), CopyCheck.active.is_(False)),
+        or_(CopyRule.resume_after_block < CopyEvent.observation['block_number'].as_integer(),
+            (CopyEvent.observation['source_pending'].as_boolean().is_(True)) &
+            (CopyRule.resume_after_block < CopyEvent.observation['seen_block'].as_integer())),
+        or_(CopyEvent.next_attempt_at.is_(None), CopyEvent.next_attempt_at <= horizon),
         CopyEvent.task_id.is_(None), CopyEvent.observation['start'].as_integer() <= int(horizon.timestamp()),
         CopyEvent.observation['end'].as_integer() > int(now.timestamp())).limit(1)))
 
@@ -156,7 +178,7 @@ async def artwork(background_tasks: BackgroundTasks, reference: str = Query(min_
         raise HTTPException(422, 'Invalid collection reference.')
     cached = await db.get(CollectionArtwork, artwork_key(slug, chain_id, contract))
     now = datetime.now(timezone.utc)
-    if cached and cached.image_url and aware(cached.stale_until)>now:
+    if cached and image_url(cached.image_url):
         if aware(cached.refresh_after)<=now:
             background_tasks.add_task(refresh_image, slug, chain_id, contract)
         return {'image_url': image_url(cached.image_url)}
