@@ -31,6 +31,7 @@ x-custody: &custody
     RPC_APECHAIN: ${RPC_APECHAIN:-https://rpc.apechain.com/http}
     RPC_INK: ${RPC_INK:-https://rpc-gel.inkonchain.com}
     ENABLE_COPY_MINTS: ${ENABLE_COPY_MINTS:-false}
+    COPY_ETHEREUM_SOURCE_CONFIRMATIONS: ${COPY_ETHEREUM_SOURCE_CONFIRMATIONS:-13}
     RPC_ETHEREUM: ${RPC_ETHEREUM:-https://ethereum-rpc.publicnode.com}
     RPC_BASE: ${RPC_BASE:-https://mainnet.base.org}
     AUTOMATIC_RPC: ${CUSTODY_RPC:-${CUSTODY_SEPOLIA_RPC:-}}

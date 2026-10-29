@@ -500,7 +500,8 @@ async def activity(watch_id: str | None = None, offset: int = Query(0, ge=0), li
             'price_wei': str(auth.snapshot['price_wei'])} if auth and auth.snapshot.get('copy_any_free_phase') else None)
         o = dict(event.observation)
         o['price_wei'] = str(o['price_wei'])
-        note = task.failure_reason if task else event.note
+        from app.services.mint_diagnostics import public_note
+        note = public_note(task.failure_reason if task else event.note)
         funding = copying.is_funding_note(note, o['chain_id'])
         unsigned = not task or not task.signed_tx_raw
         if funding:
