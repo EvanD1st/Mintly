@@ -19,6 +19,7 @@ from app.models import MintTask, MintAuthorization, AutomaticGrant, AutomaticNon
 from app.services import automatic, mint_instruction_cache
 from app.services.custody import CustodyVault, private_read
 from app.services.custody_accounts import verify_account, WalletApprovalChanged
+from app.services.pending_copy import after_approval, PendingSourceChanged
 from app.services.automatic_fees import quote_gas, maximum_fee, receipt_cost
 from app.services.mint_plans import aware
 from app.services.opensea import OpenSeaUnavailable
@@ -132,6 +133,10 @@ async def advance_checks(task_id: str, authorization: str | None = Header(defaul
             await db.rollback()
             raise HTTPException(409, WalletApprovalChanged.message,
                 headers={**mint_diagnostics.headers(events),'X-Mintly-Reason':'wallet_approval_changed'}) from None
+        except PendingSourceChanged:
+            await db.rollback()
+            raise HTTPException(409, PendingSourceChanged.message,
+                headers={**mint_diagnostics.headers(events),'X-Mintly-Reason':'pending_source_changed'}) from None
         except Exception:
             await db.rollback()
             raise HTTPException(503, 'Advance checks unavailable; no transaction was signed.',headers=mint_diagnostics.headers(events)) from None
@@ -227,7 +232,7 @@ async def prepare_task(db, task_id, vault=None):
                     or (not any_free and s['mint_kind'] == 'public' and source['price_wei'] != s['price_wei'])
                     or (not any_free and s['mint_kind'] != 'public' and source['onchain_stage_index'] != s.get('onchain_stage_index'))):
                 raise ValueError('Copy source differs from the authorized public stage')
-            await copy_mints.verify_source(web3, source)
+            verified_source = await copy_mints.verify_source(web3, source)
             if task.copy_rule_id:
                 rule = await db.get(CopyRule, task.copy_rule_id)
                 check=await db.get(CopyCheck,rule.watch_id) if rule else None
@@ -264,7 +269,7 @@ async def prepare_task(db, task_id, vault=None):
                         or r['grant_id'] != grant.id or r['user_id'] != grant.user_id
                         or r['chain_id'] != s['chain_id'] or r['wallet_id'] != wallet.id
                         or r['source_address'].lower() != source['source_address'].lower()
-                        or source['block_number'] <= r['after_block']
+                        or not after_approval(source,r['after_block'],r['approved_at'],verified_source)
                         or not quantity_matches or s['expiry'] > r['expiry']
                         or s['price_cap_wei'] != r['price_cap_wei'] or not copy_mints.approved_task_caps(r,s)
                         or not copy_mints.accepts_price(r,s['price_wei'])):
@@ -272,6 +277,11 @@ async def prepare_task(db, task_id, vault=None):
             duplicate = journal.execute('SELECT task FROM copy_signed WHERE stage=?', (copy_key,)).fetchone()
             if duplicate and duplicate['task'] != task.id:
                 raise ValueError('This public stage already has a signed copy for this wallet')
+            if source.get('source_pending') is True:
+                prior_source = journal.execute('SELECT task FROM copy_source_nonces WHERE chain=? AND sender=? AND nonce=? AND address=?',
+                    (s['chain_id'],source['source_address'].lower(),source['source_nonce'],s['account'].lower())).fetchone()
+                if prior_source and prior_source['task'] != task.id:
+                    raise ValueError('This source transaction nonce already triggered a signed copy')
         elif task.copy_rule_id or task.copy_stage_key:
             raise ValueError('Copy task lacks a verified source')
         block = await web3.eth.get_block('latest')
@@ -381,6 +391,10 @@ async def prepare_task(db, task_id, vault=None):
             journal.execute('INSERT INTO daily_signed(task,user_id,day) VALUES(?,?,?)',
                 (task.id,user.id,daily_budget.day_key(datetime.now(timezone.utc))))
             if copy_key:
+                if s['copy_source'].get('source_pending') is True:
+                    source = s['copy_source']
+                    journal.execute('INSERT INTO copy_source_nonces(chain,sender,nonce,address,task) VALUES(?,?,?,?,?)',
+                        (s['chain_id'],source['source_address'].lower(),source['source_nonce'],address.lower(),task.id))
                 journal.execute('INSERT INTO copy_signed(task,rule,stage) VALUES(?,?,?)', (task.id, task.copy_rule_id, copy_key))
                 journal.execute('INSERT INTO copy_collections(task,address,chain,contract,kind) VALUES(?,?,?,?,?)',
                     (task.id, address.lower(), s['chain_id'], s['contract'].lower(), 'any_free' if s.get('copy_any_free_phase') else s['mint_kind']))
@@ -419,6 +433,10 @@ async def prepare(task_id: str, db=Depends(get_db)):
             await db.rollback()
             raise HTTPException(409, WalletApprovalChanged.message,
                 headers={**mint_diagnostics.headers(events),'X-Mintly-Reason':'wallet_approval_changed'}) from None
+        except PendingSourceChanged:
+            await db.rollback()
+            raise HTTPException(409, PendingSourceChanged.message,
+                headers={**mint_diagnostics.headers(events),'X-Mintly-Reason':'pending_source_changed'}) from None
         except (ValueError, HTTPException) as error:
             await db.rollback()
             if isinstance(error,HTTPException) and (error.status_code == 429 or error.status_code >= 500):

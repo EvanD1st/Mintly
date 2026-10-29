@@ -214,8 +214,16 @@ async def public_stage(web3, contract, block='latest'):
     return {'price_wei': price, 'start': start, 'end': end, 'limit': limit}
 
 
-async def verify_source(web3, observation):
+async def verify_source(web3, observation, *, minimum_confirmations=2):
     """Signer and observer independently check sender, calldata and ERC721 receipt."""
+    if observation.get('source_pending') is True:
+        from app.services.pending_copy import verify, PendingSourceChanged
+        if not settings.ENABLE_PENDING_COPY:
+            raise PendingSourceChanged(PendingSourceChanged.message)
+        try:
+            return await verify(web3, observation)
+        except ValueError:
+            raise PendingSourceChanged(PendingSourceChanged.message) from None
     tx = await web3.eth.get_transaction(observation['source_hash'])
     receipt = await web3.eth.get_transaction_receipt(observation['source_hash'])
     block = await web3.eth.get_block(receipt.blockNumber)
@@ -224,7 +232,7 @@ async def verify_source(web3, observation):
             or hex_value(receipt.blockHash) != observation['block_hash'] or block.hash != receipt.blockHash
             or receipt.blockNumber != observation['block_number']
             or block.timestamp != observation['timestamp']
-            or await web3.eth.block_number - receipt.blockNumber + 1 < 2):
+            or await web3.eth.block_number - receipt.blockNumber + 1 < minimum_confirmations):
         raise ValueError('Source mint is not canonical or does not belong to the followed wallet')
     data = tx.get('input', tx.get('data'))
     data = data if isinstance(data, str) else hex_value(data)
@@ -450,7 +458,8 @@ async def arm_event(db, event, rule, web3):
     any_free = free_copy.enabled(r)
     if rule.status != 'active' or aware(rule.expires_at) <= datetime.now(timezone.utc):
         return
-    if o['block_number'] <= rule.resume_after_block:
+    from app.services.pending_copy import after_approval
+    if not after_approval(o, rule.resume_after_block, r['approved_at']):
         return  # Recent history and paused intervals are never spent automatically.
     kind = o.get('mint_kind', 'public')
     if kind not in r.get('mint_kinds', ['public']):
@@ -495,7 +504,9 @@ async def arm_event(db, event, rule, web3):
         event.status, event.note = 'skipped', budget_note(rule.chain_id,
             await group_remaining(db, rule), r['total_cap_wei'], 'Shared copy')
         return
-    await verify_source(web3, o)
+    verified_source = await verify_source(web3, o)
+    if o.get('source_pending') is True and not after_approval(o, max(rule.resume_after_block,r['after_block']),r['approved_at'],verified_source):
+        return
     mode = quantity_mode(r)
     presale, slug = None, None
     if any_free:
@@ -536,7 +547,9 @@ async def arm_event(db, event, rule, web3):
     auth = MintAuthorization(id=str(uuid.uuid4()), wallet_id=r['wallet_id'], drop_id=drop.id, stage_id=stage.id,
         quantity=s['quantity'], max_price_per_token_wei=s['price_cap_wei'], max_fee_wei=s['fee_cap_wei'],
         total_spend_cap_wei=s['total_cap_wei'], recipient_address=s['account'],
-        user_consent_text='Copy this followed wallet’s verified public mints within the approved immutable rule.',
+        user_consent_text=('Execution under the existing copy approval, triggered by the followed wallet’s authenticated pending mint intent; '
+            'the source transaction may fail or be cancelled.' if source.get('source_pending') is True else
+            'Copy this followed wallet’s verified public mints within the approved immutable rule.'),
         authorized_at=datetime.fromtimestamp(r['approved_at'], timezone.utc), grant_id=grant.id, snapshot=s)
     db.add(auth)
     await db.flush()
@@ -563,7 +576,7 @@ async def discover_watch(watch, chain):
     web3 = await automatic.provider_for(chain)
     observations = []
     try:
-        confirmations = max(2, settings.COPY_ETHEREUM_SOURCE_CONFIRMATIONS) if chain == 1 else 13
+        confirmations = max(2, settings.COPY_ETHEREUM_SOURCE_CONFIRMATIONS) if chain == 1 else 2
         head = max(0, await web3.eth.block_number - (confirmations - 1))
         last = previous.get('block', max(0, head - 2000))
         if previous.get('hash') and hex_value((await web3.eth.get_block(last)).hash) != previous['hash']:
@@ -626,14 +639,20 @@ async def scan_watch(db, watch, chain):
     await db.refresh(watch)
     if watch.archived_at or chain not in watch.chains:
         return
-    if dict(watch.cursors.get(str(chain), {})) != original:
+    history = lambda value: {k:v for k,v in value.items() if not k.startswith('live_')}
+    current = dict(watch.cursors.get(str(chain), {}))
+    if history(current) != history(original):
         return  # Another process advanced this pair; never overwrite a newer cursor.
     for observation in observations:
         key = automatic.digest([watch_id, chain, observation['source_hash'], observation['contract'].lower()])
-        if not await db.get(CopyEvent, key):
+        existing = await db.get(CopyEvent, key)
+        if not existing:
             db.add(CopyEvent(id=key, user_id=watch.user_id, watch_id=watch_id, observation=observation, status='detected'))
             await db.flush()
-    watch.cursors = {**watch.cursors, str(chain): previous}
+        elif existing.observation.get('source_pending') is True:
+            existing.observation = observation
+    watch.cursors = {**watch.cursors, str(chain): {**current, **previous,
+        **{k:v for k,v in current.items() if k.startswith('live_')}}}
     watch.updated_at = datetime.now(timezone.utc)
     await db.flush()
     # Observation and reservations are committed independently for crash replay.
@@ -688,7 +707,8 @@ async def process_copy_events(db,watch_id,chain):
                 event.status='skipped';event.note='The observed mint phase has ended. No transaction sent.'
                 event.next_attempt_at=None;event.last_error_category='phase_ended';event.last_checked_at=now
                 await db.commit();continue
-            if all(event.observation['block_number']<=r.resume_after_block for r in rules):
+            from app.services.pending_copy import after_approval
+            if all(not after_approval(event.observation,r.resume_after_block,r.snapshot['approved_at']) for r in rules):
                 event.status='skipped';event.note='Detected before this copy approval. No automatic mint authorized.'
                 event.last_checked_at=datetime.now(timezone.utc);event.next_attempt_at=None;event.last_error_category='before_approval'
                 await db.commit();continue

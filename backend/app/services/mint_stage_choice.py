@@ -57,7 +57,12 @@ async def wallet_stages(db,wallet,slug,chain_id,contract,selected_stage=None,*,r
             note=str(error.detail) if error.status_code==409 else 'Eligibility could not be verified now. Public stage details are still available.'
         except Exception:
             note='Eligibility could not be verified now. Public stage details are still available.'
-    else:note='Enable read-only OpenSea access to check your whitelist stages.'
+    elif consent and consent.user_id==user_id and consent.enabled and aware(consent.expires_at)<=datetime.now(timezone.utc):
+        note=('Your OpenSea eligibility connection expired. Open Wallet > Details > OpenSea eligibility access '
+              'and reconnect to check your whitelist phases. This does not mean you are ineligible; public phases remain available.')
+    else:
+        note=('Connect OpenSea eligibility access in Wallet > Details to check this wallet’s whitelist phases. '
+              'This does not mean you are ineligible; public phases remain available.')
     minted=supply=maximum=None
     try:
         from eth_abi import encode,decode
