@@ -27,6 +27,7 @@ PREPARATION_REASONS={
     'creator_payout_missing':'The creator has not configured the payout address required for this paid mint.',
     'allowance_or_supply_exhausted':'OpenSea reports that this wallet has reached its active-stage mint limit or the stage is sold out.',
     'precondition_unknown':'OpenSea rejected a mint precondition; the specific reason could not be verified.',
+    'wallet_approval_changed':'Wallet settings changed; renew the signing approval for this network in Wallet.',
 }
 # Preserve the existing copy-event terminal-reason contract.
 MINT_REASONS={key:PREPARATION_REASONS[key] for key in ('wallet_not_allowlisted','insufficient_funds',
@@ -35,6 +36,17 @@ PROVIDER_CODES={'STAGE_NOT_ACTIVE':'stage_not_active','MINT_NOT_ACTIVE':'stage_n
     'INVALID_PROOF':'invalid_proof','INVALID_SIGNATURE':'invalid_proof','INSUFFICIENT_FUNDS':'insufficient_funds',
     'WALLET_LIMIT_EXCEEDED':'wallet_limit','MAX_SUPPLY_EXCEEDED':'supply_exhausted','SOLD_OUT':'supply_exhausted',
     'NOT_ALLOWLISTED':'wallet_not_allowlisted','RATE_LIMIT_EXCEEDED':'upstream_rate_limited'}
+
+
+def public_note(note):
+    """Explain older stored failures without inventing the missing specific cause."""
+    return {
+        'Independent signer rejected task policy, identity, budget or chain readiness.':
+            'Mintly could not verify the wallet approval, spending limits or network checks. '
+            'No transaction was sent. Review the approval in Wallet and your Copy settings.',
+        'Bounded preparation retries exhausted. No transaction broadcast.':
+            'Mint instructions remained unavailable after repeated checks. No transaction was sent.',
+    }.get(note, note)
 
 
 def provider_code(body):
@@ -181,6 +193,11 @@ def from_error(error):
 
 
 def category(events,status,error=None):
+    import httpx
+    if isinstance(error,httpx.HTTPStatusError):
+        reason=error.response.headers.get('X-Mintly-Reason')
+        if reason == 'wallet_approval_changed':
+            return reason
     for row in reversed(events):
         code=row['http_status']
         if code==429:return 'upstream_rate_limited'
@@ -190,7 +207,6 @@ def category(events,status,error=None):
         if code in (401,403):return 'upstream_access_denied'
         if code is not None and code>=500:return 'upstream_server_error'
         if row['failure']:return row['failure']
-    import httpx
     if isinstance(error,httpx.TimeoutException):return 'signer_timeout'
     if isinstance(error,httpx.RequestError):return 'signer_connection_error'
     if status==409:return 'signer_validation_rejected'

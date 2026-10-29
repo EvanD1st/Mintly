@@ -6,6 +6,14 @@ Code pins detect changes; they are not an audit of delegated wallet storage/code
 from eth_utils import keccak, to_checksum_address
 
 
+class WalletApprovalChanged(ValueError):
+    """The account no longer matches the adapter explicitly approved by its owner."""
+
+    message = ('Your wallet settings changed since its signing approval. Open Wallet and renew '
+               'the approval for this network, then approve your mint or Copy settings again. '
+               'No transaction was sent.')
+
+
 async def inspect_account(web3, address, mode='eoa'):
     code = bytes(await web3.eth.get_code(to_checksum_address(address), 'pending'))
     if mode == 'eoa':
@@ -24,6 +32,9 @@ async def inspect_account(web3, address, mode='eoa'):
 
 async def verify_account(web3, policy):
     expected = policy.get('account_adapter', {'mode': 'eoa'})
-    observed = await inspect_account(web3, policy['account'], expected.get('mode'))
+    try:
+        observed = await inspect_account(web3, policy['account'], expected.get('mode'))
+    except ValueError as error:
+        raise WalletApprovalChanged(WalletApprovalChanged.message) from error
     if observed != expected:
-        raise ValueError('Account delegation or implementation changed; provision a new policy')
+        raise WalletApprovalChanged(WalletApprovalChanged.message)

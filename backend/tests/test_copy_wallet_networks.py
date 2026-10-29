@@ -119,7 +119,7 @@ async def test_other_network_reservations_exhaust_the_shared_budget(wallet_netwo
     await c['scan']()
     event = (await lab.client.get('/api/copy-mints/activity')).json()['events'][0]
     assert event['status'] == 'skipped' and event['task_id'] is None
-    assert event['note'] == 'Total copy budget is used or reserved by pending mints.'
+    assert 'Shared copy budget:' in event['note'] and 'available' in event['note']
 
 
 async def test_independent_journal_blocks_overspend_even_when_database_sibling_accounting_is_reset(wallet_networks):

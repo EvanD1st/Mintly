@@ -18,7 +18,7 @@ from app.services.networks import symbol
 from app.models import MintTask, MintAuthorization, AutomaticGrant, AutomaticNonce, Wallet, User, CopyRule, CopyWatch, CopyCheck
 from app.services import automatic, mint_instruction_cache
 from app.services.custody import CustodyVault, private_read
-from app.services.custody_accounts import verify_account
+from app.services.custody_accounts import verify_account, WalletApprovalChanged
 from app.services.automatic_fees import quote_gas, maximum_fee, receipt_cost
 from app.services.mint_plans import aware
 from app.services.opensea import OpenSeaUnavailable
@@ -128,6 +128,10 @@ async def advance_checks(task_id: str, authorization: str | None = Header(defaul
         try:
             result=await preflight_task(db, task_id)
             return {**result,'_diagnostics':events}
+        except WalletApprovalChanged:
+            await db.rollback()
+            raise HTTPException(409, WalletApprovalChanged.message,
+                headers={**mint_diagnostics.headers(events),'X-Mintly-Reason':'wallet_approval_changed'}) from None
         except Exception:
             await db.rollback()
             raise HTTPException(503, 'Advance checks unavailable; no transaction was signed.',headers=mint_diagnostics.headers(events)) from None
@@ -262,8 +266,7 @@ async def prepare_task(db, task_id, vault=None):
                         or r['source_address'].lower() != source['source_address'].lower()
                         or source['block_number'] <= r['after_block']
                         or not quantity_matches or s['expiry'] > r['expiry']
-                        or s['price_cap_wei'] != r['price_cap_wei'] or s['fee_cap_wei'] != r['fee_cap_wei']
-                        or (s['total_cap_wei'] != r['total_cap_wei'] if mode!='max_available' else not 0<s['total_cap_wei']<=r['total_cap_wei'])
+                        or s['price_cap_wei'] != r['price_cap_wei'] or not copy_mints.approved_task_caps(r,s)
                         or not copy_mints.accepts_price(r,s['price_wei'])):
                     raise ValueError('Copy mint differs from the independently approved limits')
             duplicate = journal.execute('SELECT task FROM copy_signed WHERE stage=?', (copy_key,)).fetchone()
@@ -412,6 +415,10 @@ async def prepare(task_id: str, db=Depends(get_db)):
             if error.mint_reason:retry_headers['X-Mintly-Reason']=error.mint_reason
             if error.upstream_status:retry_headers['X-Mintly-Upstream-Status']=str(error.upstream_status)
             raise HTTPException(409 if error.status in (400,409,422) else 503,str(error),headers=retry_headers) from None
+        except WalletApprovalChanged:
+            await db.rollback()
+            raise HTTPException(409, WalletApprovalChanged.message,
+                headers={**mint_diagnostics.headers(events),'X-Mintly-Reason':'wallet_approval_changed'}) from None
         except (ValueError, HTTPException) as error:
             await db.rollback()
             if isinstance(error,HTTPException) and (error.status_code == 429 or error.status_code >= 500):

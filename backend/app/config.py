@@ -1,6 +1,7 @@
 """Configuration settings for Mintly Backend."""
 
 from typing import Optional
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -81,6 +82,8 @@ class Settings(BaseSettings):
     ENABLE_APECHAIN_AUTOMATIC: bool = False
     ENABLE_INK_AUTOMATIC: bool = False
     ENABLE_COPY_MINTS: bool = False
+    # Includes the source block. Default retains the previous 12-block lag.
+    COPY_ETHEREUM_SOURCE_CONFIRMATIONS: int = Field(default=13, ge=2, le=128)
     AUTOMATIC_RPC: str = 'http://127.0.0.1:18545'
     AUTOMATIC_SIGNER_URL: str = 'http://127.0.0.1:18766'
     AUTOMATIC_SIGNER_TOKEN_FILE: str = ''

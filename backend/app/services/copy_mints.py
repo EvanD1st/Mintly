@@ -105,6 +105,27 @@ def quantity_mode(rule):
     return mode
 
 
+def flexible_free_budget(rule):
+    return rule.get('free_only') is True and rule['price_cap_wei'] == 0
+
+
+def approved_task_caps(rule, snapshot):
+    """A free task may narrow the approved ceiling; it cannot increase spending rights."""
+    if flexible_free_budget(rule):
+        return (snapshot['price_wei'] == 0
+            and 0 < snapshot['fee_cap_wei'] == snapshot['total_cap_wei']
+            <= min(rule['fee_cap_wei'], rule['total_cap_wei']))
+    return (snapshot['fee_cap_wei'] == rule['fee_cap_wei']
+        and (0 < snapshot['total_cap_wei'] <= rule['total_cap_wei']
+            if quantity_mode(rule) == 'max_available' else snapshot['total_cap_wei'] == rule['total_cap_wei']))
+
+
+def budget_note(chain, available, required, scope='Copy'):
+    return (f'{scope} budget: {format_wei_to_eth(max(0, available))} {symbol(chain)} available; '
+        f'this mint needs up to {format_wei_to_eth(required)} {symbol(chain)}. '
+        'Open Copy > Manage to review the budget and gas limit.')
+
+
 async def maximum_free_quantity(web3, observation, rule):
     """Remaining supported quantity, submitted only when its fee quote fits.
 
@@ -435,7 +456,8 @@ async def arm_event(db, event, rule, web3):
     if kind not in r.get('mint_kinds', ['public']):
         event.status, event.note = 'skipped', 'Whitelist copying is off. Enable it in Copy settings.'
         return
-    if quantity_mode(r)=='max_available':
+    flexible_free = flexible_free_budget(r)
+    if quantity_mode(r)=='max_available' or flexible_free:
         from app.models import AutomaticGrant,User
         from app.services.daily_budget import usage, limit_owner
         grant=await db.get(AutomaticGrant,rule.grant_id)
@@ -446,7 +468,15 @@ async def arm_event(db, event, rule, web3):
         if owner.daily_limit_wei is not None:
             daily=await usage(db,user.id,currency=symbol(rule.chain_id))
             ceiling=min(ceiling,owner.daily_limit_wei-sum(daily.values()))
+            if owner.daily_limit_wei <= sum(daily.values()):
+                from app.services.daily_budget import LIMIT_NOTE
+                raise HTTPException(429, LIMIT_NOTE)
+        if ceiling <= 0:
+            event.status, event.note = 'skipped', budget_note(rule.chain_id, ceiling, r['total_cap_wei'], 'Available copy / wallet')
+            return
         r={**r,'total_cap_wei':ceiling}
+        if flexible_free:
+            r={**r,'fee_cap_wei':min(r['fee_cap_wei'],ceiling)}
     await no_mixed_stage_copy(db, {'chain_id':o['chain_id'], 'account':r['account'], 'contract':o['contract'], 'mint_kind':kind, 'copy_any_free_phase':any_free})
     if not any_free and kind=='public' and not accepts_price(r,o['price_wei']):
         event.status,event.note='skipped','This is a free mint. Paid mints is selected.' if r.get('paid_only') else 'This is a paid mint. Free mints only is selected.'
@@ -458,10 +488,12 @@ async def arm_event(db, event, rule, web3):
         event.status,event.note='skipped','No paid mint quantity fits the remaining spending budget.'
         return
     if rule.budget_wei - rule.spent_wei - rule.reserved_wei < r['total_cap_wei']:
-        event.status, event.note = 'skipped', 'Copy budget is exhausted or reserved by pending mints.'
+        event.status, event.note = 'skipped', budget_note(rule.chain_id,
+            rule.budget_wei - rule.spent_wei - rule.reserved_wei, r['total_cap_wei'])
         return
     if await group_remaining(db, rule) < r['total_cap_wei']:
-        event.status, event.note = 'skipped', 'Total copy budget is used or reserved by pending mints.'
+        event.status, event.note = 'skipped', budget_note(rule.chain_id,
+            await group_remaining(db, rule), r['total_cap_wei'], 'Shared copy')
         return
     await verify_source(web3, o)
     mode = quantity_mode(r)
@@ -531,7 +563,8 @@ async def discover_watch(watch, chain):
     web3 = await automatic.provider_for(chain)
     observations = []
     try:
-        head = max(0, await web3.eth.block_number - 12)
+        confirmations = max(2, settings.COPY_ETHEREUM_SOURCE_CONFIRMATIONS) if chain == 1 else 13
+        head = max(0, await web3.eth.block_number - (confirmations - 1))
         last = previous.get('block', max(0, head - 2000))
         if previous.get('hash') and hex_value((await web3.eth.get_block(last)).hash) != previous['hash']:
             last = max(0, last - 24)
@@ -568,9 +601,11 @@ async def discover_watch(watch, chain):
                 'since_block': previous.get('since_block', last + 1),
                 'since': previous.get('since', datetime.now(timezone.utc).isoformat()),
                 'history_note': previous.get('history_note'),
-                'checked_at': datetime.now(timezone.utc).isoformat(), 'status': 'catching_up' if end < head else 'monitoring'}
+                'checked_at': datetime.now(timezone.utc).isoformat(), 'source_confirmations': confirmations,
+                'status': 'catching_up' if end < head else 'monitoring'}
         else:
-            previous.update(checked_at=datetime.now(timezone.utc).isoformat(), status='monitoring')
+            previous.update(checked_at=datetime.now(timezone.utc).isoformat(),
+                source_confirmations=confirmations, status='monitoring')
         return previous, observations
     finally:
         await web3.provider.disconnect()
@@ -641,6 +676,10 @@ async def process_copy_events(db,watch_id,chain):
                     event.status, event.note = 'skipped', 'The copy approval ended or is inactive. No transaction sent.'
                     event.next_attempt_at = None
                     event.last_error_category = 'copy_approval_ended'
+                    event.last_checked_at = now
+                elif event.last_error_category != 'copy_not_enabled':
+                    event.note = 'Watching only on this network. No active copy approval. Open Copy > Manage to enable copying.'
+                    event.last_error_category = 'copy_not_enabled'
                     event.last_checked_at = now
                 await db.commit();continue
             from app.services import free_copy
