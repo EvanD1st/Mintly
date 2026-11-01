@@ -1,21 +1,21 @@
 """Background display eligibility; no signatures, approvals or personal plans."""
 import asyncio
 from datetime import datetime,timezone,timedelta
-from sqlalchemy import select,or_
+from sqlalchemy import select,or_,case
 from app.config import settings
 from app.models import FeedWalletCheck,Wallet,Drop,User
 from app.services.opensea import OpenSeaClient,collection_slug,CHAINS,OpenSeaUnavailable
 from app.services.mint_plans import aware
 from app.services.networks import advertised
 
-async def active_mints(db, user, wallet, drops):
-    """Match the selected owner's live tasks using authorized collection identity."""
+async def existing_mints(db, user, wallet, drops):
+    """Match confirmed or live tasks using the selected owner's collection identity."""
     if not wallet or not drops:
         return {}
     from app.models import MintTask, MintAuthorization, MintStage
     from app.services.automatic import TERMINAL
     rows = (await db.execute(select(
-        MintTask.id, MintTask.plan_id, MintTask.status, MintTask.scheduled_for_utc,
+        MintTask.id, MintTask.plan_id, MintTask.status, MintTask.scheduled_for_utc, MintTask.confirmed_at,
         MintAuthorization.quantity, MintAuthorization.snapshot,
         Drop.chain_id, Drop.contract_address, Drop.mint_page_url, MintStage.stage_name,
     ).join(MintAuthorization, MintTask.authorization_id == MintAuthorization.id)
@@ -23,8 +23,10 @@ async def active_mints(db, user, wallet, drops):
         .join(MintStage, MintTask.stage_id == MintStage.id)
         .join(Wallet, MintTask.wallet_id == Wallet.id)
         .where(Wallet.user_id == user.id, Wallet.id == wallet.id,
-            MintTask.is_demo.is_(False), MintTask.status.not_in(TERMINAL))
-        .order_by(MintTask.scheduled_for_utc, MintTask.id))).mappings().all()
+            MintTask.is_demo.is_(False), or_(MintTask.status == 'confirmed', MintTask.status.not_in(TERMINAL)))
+        # A successful mint remains visible even after archiving or a later failed attempt.
+        .order_by(case((MintTask.status == 'confirmed', 0), else_=1),
+            MintTask.confirmed_at.desc(), MintTask.scheduled_for_utc, MintTask.id))).mappings().all()
     result = {}
     for drop in drops:
         for row in rows:
@@ -43,7 +45,8 @@ async def active_mints(db, user, wallet, drops):
                 result[drop.id] = dict(id=row['id'], plan_id=row['plan_id'], wallet_id=wallet.id,
                     status=row['status'], quantity=row['quantity'],
                     stage_name=scope.get('stage_name') or row['stage_name'],
-                    scheduled_for_utc=aware(row['scheduled_for_utc']))
+                    scheduled_for_utc=aware(row['scheduled_for_utc']),
+                    confirmed_at=aware(row['confirmed_at']) if row['confirmed_at'] else None)
                 break
     return result
 
@@ -82,12 +85,12 @@ def presentation(check,now=None):
 
 async def queue_checks(db,user,wallet,drops):
     now=datetime.now(timezone.utc)
-    active = await active_mints(db, user, wallet, drops)
+    existing = await existing_mints(db, user, wallet, drops)
     from sqlalchemy.dialects.postgresql import insert as pg_insert
     from sqlalchemy.dialects.sqlite import insert as sqlite_insert
     insert=pg_insert if db.bind.dialect.name=='postgresql' else sqlite_insert
     for drop in drops:
-        if not supported(drop) or drop.id in active:continue
+        if not supported(drop) or drop.id in existing:continue
         await db.execute(insert(FeedWalletCheck).values(user_id=user.id,wallet_id=wallet.id,drop_id=drop.id,
             status='queued',result={},attempts=0,next_attempt_at=now,created_at=now,updated_at=now)
             .on_conflict_do_nothing(index_elements=['user_id','wallet_id','drop_id']))
@@ -112,8 +115,8 @@ async def step(factory):
         lease=row.lease_until
         key=(row.user_id,row.wallet_id,row.drop_id)
         wallet=await db.get(Wallet,row.wallet_id);drop=await db.get(Drop,row.drop_id);user=await db.get(User,row.user_id)
-        if user and wallet and drop and await active_mints(db, user, wallet, [drop]):
-            # An old queued display check must not keep polling an armed collection.
+        if user and wallet and drop and await existing_mints(db, user, wallet, [drop]):
+            # Old queued display checks must not poll active or already minted collections.
             row.status='unverified';row.lease_until=None
             await db.commit()
             return True

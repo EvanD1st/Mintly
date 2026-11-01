@@ -13,6 +13,7 @@ import '../widgets/delete_icon.dart';
 import 'dart:async';
 import 'saved_plan_screen.dart';
 import 'queue_screen.dart';
+import 'history_screen.dart';
 import '../widgets/network_budget_card.dart' show formatNative;
 
 class DiscoverScreen extends ConsumerStatefulWidget {
@@ -300,7 +301,9 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
 
   Widget _automaticCard(BuildContext context, DropModel drop) {
     final mint = drop.automaticMint!;
+    final minted = mint['status'] == 'confirmed';
     final status = switch (mint['status']) {
+      'confirmed' => 'Minted',
       'armed' => 'Armed',
       'preparing' => 'Preparing mint',
       'prepared' => 'Mint prepared',
@@ -312,6 +315,7 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
     final scheduled = DateTime.tryParse(
       mint['scheduled_for_utc'] as String? ?? '',
     );
+    final confirmed = DateTime.tryParse(mint['confirmed_at'] as String? ?? '');
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -343,7 +347,14 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
             ),
             const SizedBox(height: 12),
             Text('${mint['stage_name']} · ${mint['quantity']} NFT(s)'),
-            if (scheduled != null) Text('Scheduled ${_wat(scheduled)} WAT'),
+            if (minted && confirmed != null)
+              Text('Confirmed ${_wat(confirmed)} WAT')
+            else if (!minted && scheduled != null)
+              Text('Scheduled ${_wat(scheduled)} WAT'),
+            if (minted)
+              const Text(
+                'Mint confirmed for this wallet. Eligibility checks have stopped.',
+              ),
             if (mint['status'] == 'armed')
               const Text(
                 'Your automatic mint is already set up. It runs while the app is closed.',
@@ -356,15 +367,17 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
                 await Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (_) => Scaffold(
-                      appBar: AppBar(title: const Text('Automatic mint')),
-                      body: QueueScreen(taskId: mint['id'] as String),
-                    ),
+                    builder: (_) => minted
+                        ? const HistoryScreen(initialSection: 'mints')
+                        : Scaffold(
+                            appBar: AppBar(title: const Text('Automatic mint')),
+                            body: QueueScreen(taskId: mint['id'] as String),
+                          ),
                   ),
                 );
                 if (mounted) await _refresh();
               },
-              child: const Text('View automatic mint'),
+              child: Text(minted ? 'View mint history' : 'View automatic mint'),
             ),
           ],
         ),
