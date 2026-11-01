@@ -8,6 +8,46 @@ from app.services.opensea import OpenSeaClient,collection_slug,CHAINS,OpenSeaUna
 from app.services.mint_plans import aware
 from app.services.networks import advertised
 
+async def active_mints(db, user, wallet, drops):
+    """Match the selected owner's live tasks using authorized collection identity."""
+    if not wallet or not drops:
+        return {}
+    from app.models import MintTask, MintAuthorization, MintStage
+    from app.services.automatic import TERMINAL
+    rows = (await db.execute(select(
+        MintTask.id, MintTask.plan_id, MintTask.status, MintTask.scheduled_for_utc,
+        MintAuthorization.quantity, MintAuthorization.snapshot,
+        Drop.chain_id, Drop.contract_address, Drop.mint_page_url, MintStage.stage_name,
+    ).join(MintAuthorization, MintTask.authorization_id == MintAuthorization.id)
+        .join(Drop, MintTask.drop_id == Drop.id)
+        .join(MintStage, MintTask.stage_id == MintStage.id)
+        .join(Wallet, MintTask.wallet_id == Wallet.id)
+        .where(Wallet.user_id == user.id, Wallet.id == wallet.id,
+            MintTask.is_demo.is_(False), MintTask.status.not_in(TERMINAL))
+        .order_by(MintTask.scheduled_for_utc, MintTask.id))).mappings().all()
+    result = {}
+    for drop in drops:
+        for row in rows:
+            scope = row['snapshot'] or {}
+            if scope.get('chain_id', row['chain_id']) != drop.chain_id:
+                continue
+            contract = scope.get('contract') or row['contract_address'] or ''
+            if drop.contract_address:
+                matches = contract.lower() == drop.contract_address.lower()
+            else:
+                try:
+                    matches = collection_slug(scope.get('mint_page_url') or row['mint_page_url']) == collection_slug(drop.mint_page_url)
+                except OpenSeaUnavailable:
+                    matches = False
+            if matches:
+                result[drop.id] = dict(id=row['id'], plan_id=row['plan_id'], wallet_id=wallet.id,
+                    status=row['status'], quantity=row['quantity'],
+                    stage_name=scope.get('stage_name') or row['stage_name'],
+                    scheduled_for_utc=aware(row['scheduled_for_utc']))
+                break
+    return result
+
+
 def supported(drop):
     if drop.chain_id not in {n['chain_id'] for n in advertised(native_currencies=True)}:return False
     try:collection_slug(drop.mint_page_url);return drop.status_kind!='unsupported'
@@ -42,11 +82,12 @@ def presentation(check,now=None):
 
 async def queue_checks(db,user,wallet,drops):
     now=datetime.now(timezone.utc)
+    active = await active_mints(db, user, wallet, drops)
     from sqlalchemy.dialects.postgresql import insert as pg_insert
     from sqlalchemy.dialects.sqlite import insert as sqlite_insert
     insert=pg_insert if db.bind.dialect.name=='postgresql' else sqlite_insert
     for drop in drops:
-        if not supported(drop):continue
+        if not supported(drop) or drop.id in active:continue
         await db.execute(insert(FeedWalletCheck).values(user_id=user.id,wallet_id=wallet.id,drop_id=drop.id,
             status='queued',result={},attempts=0,next_attempt_at=now,created_at=now,updated_at=now)
             .on_conflict_do_nothing(index_elements=['user_id','wallet_id','drop_id']))
@@ -71,6 +112,11 @@ async def step(factory):
         lease=row.lease_until
         key=(row.user_id,row.wallet_id,row.drop_id)
         wallet=await db.get(Wallet,row.wallet_id);drop=await db.get(Drop,row.drop_id);user=await db.get(User,row.user_id)
+        if user and wallet and drop and await active_mints(db, user, wallet, [drop]):
+            # An old queued display check must not keep polling an armed collection.
+            row.status='unverified';row.lease_until=None
+            await db.commit()
+            return True
         await db.commit()  # No row or execution lock across provider IO.
         result={};error=None
         try:

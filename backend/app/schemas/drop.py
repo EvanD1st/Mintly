@@ -42,6 +42,7 @@ class DropSchema(BaseModel):
     source_price_text: Optional[str] = None
     source_time_text: Optional[str] = None
     wallet_check: Optional[dict] = None
+    automatic_mint: Optional[dict] = None
 
 
 class DropListResponse(BaseModel):

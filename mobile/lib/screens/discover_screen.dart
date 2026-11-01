@@ -12,6 +12,7 @@ import 'source_screen.dart';
 import '../widgets/delete_icon.dart';
 import 'dart:async';
 import 'saved_plan_screen.dart';
+import 'queue_screen.dart';
 import '../widgets/network_budget_card.dart' show formatNative;
 
 class DiscoverScreen extends ConsumerStatefulWidget {
@@ -236,6 +237,7 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
     MintlyNotifier notifier,
     DropModel drop,
   ) {
+    if (drop.automaticMint != null) return _automaticCard(context, drop);
     if (drop.walletCheck != null) return _verifiedCard(context, drop);
     final stage = drop.stages.isNotEmpty ? drop.stages.first : null;
     final price = stage == null || stage.priceEthStr.isEmpty
@@ -292,6 +294,80 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
             MaterialPageRoute(builder: (_) => DropDetailScreen(drop: drop)),
           );
         },
+      ),
+    );
+  }
+
+  Widget _automaticCard(BuildContext context, DropModel drop) {
+    final mint = drop.automaticMint!;
+    final status = switch (mint['status']) {
+      'armed' => 'Armed',
+      'preparing' => 'Preparing mint',
+      'prepared' => 'Mint prepared',
+      'submitting' => 'Submitting mint',
+      'submitted' => 'Mint submitted',
+      'uncertain' => 'Checking transaction',
+      _ => 'Automatic mint active',
+    };
+    final scheduled = DateTime.tryParse(
+      mint['scheduled_for_utc'] as String? ?? '',
+    );
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                CollectionThumbnail(
+                  name: drop.name,
+                  reference: 'drop:${drop.id}',
+                  size: 64,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        drop.name,
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                      Text('${drop.chain} · ${drop.nativeCurrency}'),
+                      Text(status),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text('${mint['stage_name']} · ${mint['quantity']} NFT(s)'),
+            if (scheduled != null) Text('Scheduled ${_wat(scheduled)} WAT'),
+            if (mint['status'] == 'armed')
+              const Text(
+                'Your automatic mint is already set up. It runs while the app is closed.',
+              ),
+            const SizedBox(height: 10),
+            FilledButton(
+              onPressed: () async {
+                await ref.read(mintlyProvider.notifier).loadInitialData();
+                if (!context.mounted) return;
+                await Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => Scaffold(
+                      appBar: AppBar(title: const Text('Automatic mint')),
+                      body: QueueScreen(taskId: mint['id'] as String),
+                    ),
+                  ),
+                );
+                if (mounted) await _refresh();
+              },
+              child: const Text('View automatic mint'),
+            ),
+          ],
+        ),
       ),
     );
   }

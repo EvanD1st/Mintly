@@ -759,10 +759,14 @@ class ApiService extends ChangeNotifier {
 
   Future<void> queueFeedChecks(List<DropModel> drops) async {
     final wallet = selectedFeedWallet;
-    if (wallet == null || drops.isEmpty) return;
+    final unchecked = drops
+        .where((drop) => drop.automaticMint == null)
+        .take(20)
+        .toList();
+    if (wallet == null || unchecked.isEmpty) return;
     await _post('/drops/wallet-checks', {
       'wallet_id': wallet,
-      'drop_ids': drops.take(20).map((d) => d.id).toList(),
+      'drop_ids': unchecked.map((d) => d.id).toList(),
     });
   }
 
