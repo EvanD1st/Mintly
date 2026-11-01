@@ -25,3 +25,15 @@ provider calls and resuming after disarm. Flutter tests verify that active cards
 open the existing task without preparing or arming another, and restore the setup
 path after disarm. This requires a backend deployment and a Dart OTA; no database
 migration, native release or new user setting is needed.
+
+The first publication attempt stopped before upload because Shorebird 1.6.134
+stores original release artifacts in its shared cache instead of the isolated
+temporary folder used by the audit helper. The publisher now captures the exact
+release identity reported by the dry run, obtains that release's Android AAB
+metadata through authenticated CLI API calls, and downloads the original bundle
+into its own scratch folder. Recorded byte length and SHA256 must match before
+the existing asset/font/native-library audit runs. Download URLs are not logged.
+The publisher regression suite covers release mismatch, corrupt/incomplete
+downloads, duplicate artifacts and failure before publication.
+
+Upstream reference: [Shorebird 1.6.134 artifact cache](https://github.com/shorebirdtech/shorebird/blob/v1.6.134/packages/shorebird_cli/lib/src/artifact_manager.dart).

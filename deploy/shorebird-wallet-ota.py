@@ -15,6 +15,8 @@ import re
 from pathlib import Path
 import subprocess
 import tempfile
+from urllib.parse import urlsplit
+from urllib.request import urlopen
 import zipfile
 
 from fontTools.pens.recordingPen import DecomposingRecordingPen
@@ -165,32 +167,89 @@ def installed_launcher_icons(version, release_archive):
             path.write_bytes(data)
 
 
+def dry_run(command, env, version):
+    completed = subprocess.run(command + ["--dry-run", "--allow-asset-diffs"],
+                               env=env, check=True, stdout=subprocess.PIPE, text=True)
+    payload = json.loads(completed.stdout)
+    result = payload.get('data', {})
+    if (payload.get('status') != 'success' or result.get('dry_run') is not True
+            or result.get('release_version') != version
+            or type(result.get('release_id')) is not int or result['release_id'] <= 0
+            or not re.fullmatch(r'[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}', result.get('app_id', ''))):
+        raise ValueError('Dry-run did not confirm the requested release identity')
+    return result
+
+
+def release_bundle(release, scratch):
+    """Download the exact dry-run release through authenticated artifact metadata.
+
+    Shorebird 1.6.134 caches downloads outside TMPDIR. Do not scan that shared
+    cache or guess an installed archive; bind the audit to the reported release
+    ID, Android AAB artifact and server-recorded SHA256 and byte length instead.
+    Signed download URLs stay in memory and are never printed in the audit log.
+    """
+    endpoint = (f"/apps/{release['app_id']}/releases/{release['release_id']}/artifacts"
+                "?arch=aab&platform=android")
+    completed = subprocess.run(['shorebird', 'api', 'GET', endpoint], check=True,
+                               stdout=subprocess.PIPE, text=True)
+    artifacts = json.loads(completed.stdout).get('artifacts', [])
+    if len(artifacts) != 1:
+        raise ValueError('Expected exactly one original Android AAB artifact')
+    artifact = artifacts[0]
+    digest = artifact.get('hash', '')
+    if (artifact.get('release_id') != release['release_id']
+            or artifact.get('platform') != 'android' or artifact.get('arch') != 'aab'
+            or type(artifact.get('id')) is not int or artifact['id'] <= 0
+            or type(artifact.get('size')) is not int or artifact['size'] <= 0
+            or not re.fullmatch(r'[0-9a-f]{64}', digest)):
+        raise ValueError('Original release artifact metadata is invalid')
+    url = artifact.get('url', '')
+    parsed = urlsplit(url)
+    if parsed.scheme != 'https' or not parsed.hostname or parsed.username or parsed.password:
+        raise ValueError('Original release bundle requires an HTTPS download')
+    destination = Path(scratch) / 'installed.aab'
+    checksum, size = hashlib.sha256(), 0
+    try:
+        with urlopen(url, timeout=60) as response, destination.open('wb') as output:
+            while chunk := response.read(1024 * 1024):
+                size += len(chunk)
+                if size > artifact['size']:
+                    raise ValueError('Original release bundle exceeds its recorded size')
+                checksum.update(chunk)
+                output.write(chunk)
+    except OSError:
+        raise ValueError('Original release bundle could not be downloaded') from None
+    if size != artifact['size'] or checksum.hexdigest() != digest:
+        raise ValueError('Original release bundle failed its recorded SHA256 or size check')
+    with zipfile.ZipFile(destination) as archive:
+        if NOTICES not in archive.namelist():
+            raise ValueError('Original release artifact is not an Android app bundle')
+    return destination, {'release_id': release['release_id'], 'artifact_id': artifact['id'],
+                         'artifact_sha256': digest, 'artifact_size': size}
+
+
 def patch_release(version, track, audit_only):
     command = patch_command(version, track)
     legacy_icons = version in LEGACY_ICON_VERSIONS
-    # Isolate Shorebird downloads so the archive audited is the exact release
-    # selected by the CLI, rather than a guessed or stale release artifact.
+    # Keep build scratch isolated and bind the audit to the CLI's selected release.
     with installed_native_sources(version), installed_plugin_graph(legacy_icons), tempfile.TemporaryDirectory(prefix="mintly-ota-") as scratch:
         env = {**os.environ, "TMPDIR": scratch, "TMP": scratch, "TEMP": scratch}
-        subprocess.run(command + ["--dry-run", "--allow-asset-diffs"], env=env, check=True)
-        candidates = []
-        for path in Path(scratch).rglob("artifact"):
-            if zipfile.is_zipfile(path):
-                with zipfile.ZipFile(path) as archive:
-                    if NOTICES in archive.namelist():
-                        candidates.append(path)
-        if len(candidates) != 1:
-            raise ValueError(f"Expected one release AAB, found {len(candidates)}")
+        release = dry_run(command, env, version)
+        installed, artifact = release_bundle(release, scratch)
         built = Path("build/app/outputs/bundle/release/app-release.aab")
-        with installed_launcher_icons(version, candidates[0]) as preserved_launcher:
+        with installed_launcher_icons(version, installed) as preserved_launcher:
             if preserved_launcher:
-                subprocess.run(command + ["--dry-run", "--allow-asset-diffs"], env=env, check=True)
-            result = audit(candidates[0], built)
+                repeated = dry_run(command, env, version)
+                if any(repeated[key] != release[key] for key in ('app_id', 'release_id', 'release_version')):
+                    raise ValueError('Release identity changed during launcher compatibility build')
+            result = audit(installed, built)
+            if result['installed_sha256'] != artifact['artifact_sha256']:
+                raise ValueError('Original release bundle changed before the asset audit')
             result.update(release_version=version, track=track, legacy_icons=legacy_icons,
                           release_5_icons=version in RELEASE_5_ICON_VERSIONS,
                           browser_links="copy and paste" if legacy_icons else "native launcher",
                           preserved_installed_launcher=preserved_launcher,
-                          native_checks="Shorebird enabled; no override")
+                          native_checks="Shorebird enabled; no override", original_artifact=artifact)
             evidence = Path(f"build/shorebird/wallet-ota-audit-{version}.json")
             evidence.parent.mkdir(parents=True, exist_ok=True)
             evidence.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")

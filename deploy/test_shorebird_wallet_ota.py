@@ -1,9 +1,13 @@
 """Regression checks for the asset exception used by the wallet OTA rollout."""
 import importlib.util
 import io
+import hashlib
+import json
 import os
+from contextlib import nullcontext
 from pathlib import Path
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 import zipfile
@@ -44,6 +48,95 @@ def font(codepoints=(65, 66), width=600):
 
 
 class AssetGuardTests(unittest.TestCase):
+    release = {'app_id': '11111111-2222-3333-4444-555555555555', 'release_id': 42,
+               'release_version': '1.1.4+7', 'dry_run': True}
+
+    def test_dry_run_records_the_exact_cli_selected_release(self):
+        output = SimpleNamespace(stdout=json.dumps({'status': 'success', 'data': self.release}))
+        with patch.object(ota.subprocess, 'run', return_value=output) as run:
+            self.assertEqual(ota.dry_run(['shorebird', '--json', 'patch', 'android'], {}, '1.1.4+7'), self.release)
+            self.assertEqual(run.call_args.args[0][-2:], ['--dry-run', '--allow-asset-diffs'])
+            self.assertEqual(run.call_args.kwargs['stdout'], ota.subprocess.PIPE)
+
+    def test_dry_run_rejects_an_unconfirmed_or_different_release(self):
+        for changes in ({'dry_run': False}, {'release_version': '1.1.3+6'},
+                        {'release_id': True}, {'app_id': '../../different-app'}):
+            with self.subTest(changes=changes):
+                output = SimpleNamespace(stdout=json.dumps({'status': 'success', 'data': {**self.release, **changes}}))
+                with patch.object(ota.subprocess, 'run', return_value=output):
+                    with self.assertRaisesRegex(ValueError, 'release identity'):
+                        ota.dry_run(['shorebird'], {}, '1.1.4+7')
+
+    def original_bundle(self, metadata_changes=None, body=None, files=None, duplicate=False):
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, 'w') as archive:
+            for name, data in (files or {ota.NOTICES: b'original notices'}).items():
+                archive.writestr(name, data)
+        original = buffer.getvalue()
+        artifact = {'id': 100, 'release_id': 42, 'arch': 'aab', 'platform': 'android',
+                    'size': len(original), 'hash': hashlib.sha256(original).hexdigest(),
+                    'url': 'https://artifacts.example/original?signature=disposable',
+                    **(metadata_changes or {})}
+        metadata = SimpleNamespace(stdout=json.dumps({'artifacts': [artifact] * (2 if duplicate else 1)}))
+        with tempfile.TemporaryDirectory() as scratch:
+            with patch.object(ota.subprocess, 'run', return_value=metadata) as run, \
+                    patch.object(ota, 'urlopen', return_value=io.BytesIO(original if body is None else body)) as download:
+                installed, evidence = ota.release_bundle(self.release, scratch)
+                self.assertEqual(installed.read_bytes(), original)
+                self.assertEqual(run.call_args.args[0], ['shorebird', 'api', 'GET',
+                    '/apps/11111111-2222-3333-4444-555555555555/releases/42/artifacts?arch=aab&platform=android'])
+                download.assert_called_once_with(artifact['url'], timeout=60)
+                self.assertNotIn('url', evidence)
+                self.assertNotIn('signature', json.dumps(evidence))
+                return evidence
+
+    def test_original_bundle_is_verified_independently_of_cli_cache_layout(self):
+        evidence = self.original_bundle()
+        self.assertEqual(evidence['release_id'], 42)
+        self.assertEqual(evidence['artifact_id'], 100)
+        self.assertEqual(len(evidence['artifact_sha256']), 64)
+
+    def test_original_bundle_rejects_other_release_platform_arch_or_bad_hash(self):
+        for changes in ({'release_id': 43}, {'arch': 'arm64'}, {'platform': 'ios'},
+                        {'hash': 'invalid'}, {'id': -1}, {'size': 0}):
+            with self.subTest(changes=changes):
+                with self.assertRaisesRegex(ValueError, 'metadata is invalid'):
+                    self.original_bundle(metadata_changes=changes)
+        with self.assertRaisesRegex(ValueError, 'exactly one'):
+            self.original_bundle(duplicate=True)
+
+    def test_original_bundle_rejects_insecure_download_and_corrupt_or_incomplete_bytes(self):
+        with self.assertRaisesRegex(ValueError, 'HTTPS'):
+            self.original_bundle(metadata_changes={'url': 'http://artifacts.example/original'})
+        with self.assertRaisesRegex(ValueError, 'SHA256 or size'):
+            self.original_bundle(metadata_changes={'hash': '0' * 64})
+        with self.assertRaisesRegex(ValueError, 'SHA256 or size'):
+            self.original_bundle(body=b'partial')
+        with self.assertRaisesRegex(ValueError, 'exceeds its recorded size'):
+            self.original_bundle(metadata_changes={'size': 1})
+        with self.assertRaisesRegex(ValueError, 'not an Android app bundle'):
+            self.original_bundle(files={'other.txt': b'not a bundle'})
+
+    def test_original_bundle_failure_prevents_any_publish_command(self):
+        with patch.object(ota, 'dry_run', return_value=self.release), \
+                patch.object(ota, 'release_bundle', side_effect=ValueError('invalid original')), \
+                patch.object(ota.subprocess, 'run') as run:
+            with self.assertRaisesRegex(ValueError, 'invalid original'):
+                ota.patch_release('1.1.4+7', 'stable', False)
+            run.assert_not_called()
+
+    def test_launcher_rebuild_cannot_change_the_selected_release_before_audit(self):
+        with patch.object(ota, 'installed_native_sources', return_value=nullcontext()), \
+                patch.object(ota, 'installed_plugin_graph', return_value=nullcontext()), \
+                patch.object(ota, 'installed_launcher_icons', return_value=nullcontext(True)), \
+                patch.object(ota, 'dry_run', side_effect=[self.release, {**self.release, 'release_id': 43}]), \
+                patch.object(ota, 'release_bundle', return_value=(Path('original.aab'), {})), \
+                patch.object(ota, 'audit') as audit, patch.object(ota.subprocess, 'run') as run:
+            with self.assertRaisesRegex(ValueError, 'Release identity changed'):
+                ota.patch_release('1.0.0+1', 'stable', False)
+            audit.assert_not_called()
+            run.assert_not_called()
+
     def test_every_installer_gets_its_tested_icon_variant_without_native_override(self):
         expected = {
             '1.1.4+7': ['--dart-define=MINTLY_RELEASE_5_ICONS=true'],
