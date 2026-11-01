@@ -11,6 +11,7 @@ class MintPlanModel {
   final String? stageName;
   final String? stageType;
   final DateTime? startsAt;
+  final DateTime? createdAt;
   final DateTime? endsAt;
   final String? priceEth;
   final String? mintValueEth;
@@ -32,6 +33,7 @@ class MintPlanModel {
     required this.walletAddress,
     required this.stageName,
     required this.startsAt,
+    this.createdAt,
     required this.endsAt,
     required this.priceEth,
     required this.mintValueEth,
@@ -56,6 +58,7 @@ class MintPlanModel {
     stageName: json['stage_name'] as String?,
     stageType: json['stage_type'] as String?,
     startsAt: DateTime.tryParse(json['starts_at']?.toString() ?? ''),
+    createdAt: DateTime.tryParse(json['created_at']?.toString() ?? ''),
     endsAt: DateTime.tryParse(json['ends_at']?.toString() ?? ''),
     priceEth: json['price_eth'] as String?,
     mintValueEth: json['mint_value_eth'] as String?,
