@@ -16,6 +16,7 @@ void main() {
     ('submitting', 'Submitting mint'),
     ('submitted', 'Mint submitted'),
     ('uncertain', 'Checking transaction'),
+    ('confirmed', 'Minted'),
   ]) {
     testWidgets(
       'Today opens existing $status mint without checking eligibility or rearming',
@@ -72,6 +73,8 @@ void main() {
                         'quantity': 2,
                         'stage_name': 'GTD',
                         'scheduled_for_utc': scheduled,
+                        if (status == 'confirmed')
+                          'confirmed_at': '2026-11-01T11:16:00Z',
                       },
                   },
                 ],
@@ -99,6 +102,8 @@ void main() {
               };
             } else if (path.endsWith('/artwork')) {
               data = {'image_url': null};
+            } else if (path.endsWith('/history')) {
+              data = {'records': [], 'next_offset': null};
             } else if (path.endsWith('/automation')) {
               data = {'paused': false};
             } else if (path.endsWith('/wallet-checks')) {
@@ -127,9 +132,21 @@ void main() {
           findsNothing,
         );
         expect(calls.where((c) => c.endsWith('/wallet-checks')), isEmpty);
-        await tester.tap(find.text('View automatic mint'));
+        expect(find.text('GTD · 2 NFT(s)'), findsOneWidget);
+        final minted = status == 'confirmed';
+        if (minted) {
+          expect(find.text('Confirmed 1 Nov, 12:16 WAT'), findsOneWidget);
+          expect(find.textContaining('Scheduled '), findsNothing);
+        }
+        await tester.tap(
+          find.text(minted ? 'View mint history' : 'View automatic mint'),
+        );
         await tester.pumpAndSettle();
-        expect(find.text('Villagers'), findsOneWidget);
+        if (minted) {
+          expect(calls.where((c) => c.endsWith('/history')), isNotEmpty);
+        } else {
+          expect(find.text('Villagers'), findsOneWidget);
+        }
         expect(find.text('Unrelated mint'), findsNothing);
         expect(find.text('Review mint'), findsNothing);
         expect(
@@ -142,12 +159,18 @@ void main() {
           isEmpty,
         );
         // Returning after a server-side disarm restores the normal checked setup path.
-        active = false;
+        if (!minted) active = false;
         await tester.pageBack();
         await tester.pumpAndSettle();
         expect(find.text('View automatic mint'), findsNothing);
-        expect(find.text('Set up automatic mint'), findsOneWidget);
-        expect(calls.where((c) => c.endsWith('/wallet-checks')), isNotEmpty);
+        if (minted) {
+          expect(find.text('Minted'), findsOneWidget);
+          expect(find.text('Set up automatic mint'), findsNothing);
+          expect(calls.where((c) => c.endsWith('/wallet-checks')), isEmpty);
+        } else {
+          expect(find.text('Set up automatic mint'), findsOneWidget);
+          expect(calls.where((c) => c.endsWith('/wallet-checks')), isNotEmpty);
+        }
         await tester.pumpWidget(const SizedBox.shrink());
         container.dispose();
         expect(tester.takeException(), isNull);

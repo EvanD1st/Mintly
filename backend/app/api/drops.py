@@ -12,7 +12,7 @@ from sqlalchemy.orm import selectinload
 from app.api.deps import get_current_user, get_db
 from app.models import Drop, DismissedDrop, SourceConnection, SourcePost, User, Wallet, FeedWalletCheck, FeedWalletSelection, MintPlan
 from app.schemas.drop import DropListResponse, DropSchema
-from app.services.feed_checks import supported, presentation, queue_checks, active_mints
+from app.services.feed_checks import supported, presentation, queue_checks, existing_mints
 from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/drops", tags=["drops"])
@@ -71,7 +71,7 @@ async def list_drops(
     checks = {c.drop_id:c for c in (await db.scalars(select(FeedWalletCheck).where(
         FeedWalletCheck.user_id==user.id,FeedWalletCheck.wallet_id==wallet.id,
         FeedWalletCheck.drop_id.in_([d.id for d in drops])))).all()} if daily_only and wallet else {}
-    active = await active_mints(db, user, wallet, drops) if daily_only else {}
+    existing = await existing_mints(db, user, wallet, drops) if daily_only else {}
     for drop in drops:
         card = DropSchema.model_validate(drop)
         if daily_only:
@@ -83,10 +83,12 @@ async def list_drops(
                 if check.result['collection_slug'] != collection_slug(drop.mint_page_url) or (drop.contract_address and
                         check.result.get('contract_address', '').lower() != drop.contract_address.lower()):
                     card.wallet_check = dict(status='unverified', setup_enabled=False, stages=[], note='Collection terms changed. Check again.')
-            if drop.id in active:
-                card.automatic_mint = active[drop.id]
-                card.wallet_check = dict(status=active[drop.id]['status'], setup_enabled=False,
-                    stages=[], note='An automatic mint is already active for this wallet. View it in Mint plans.')
+            if drop.id in existing:
+                card.automatic_mint = existing[drop.id]
+                minted = existing[drop.id]['status'] == 'confirmed'
+                card.wallet_check = dict(status=existing[drop.id]['status'], setup_enabled=False,
+                    stages=[], note='This wallet already minted this collection. View its mint history.' if minted
+                    else 'An automatic mint is already active for this wallet. View it in Mint plans.')
         cards.append(card)
     if daily_only and filter_kind and filter_kind != 'all':
         wanted={'unknown':'unverified','manual':'not_eligible'}.get(filter_kind,filter_kind)
