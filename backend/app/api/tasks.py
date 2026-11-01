@@ -163,7 +163,7 @@ async def task_response(db, task):
     s = auth.snapshot
     recovery = await db.scalar(select(MintRecovery).where(MintRecovery.task_id == task.id))
     return TaskSchema(id=task.id, plan_id=task.plan_id, wallet_id=task.wallet_id, drop_id=task.drop_id,
-        stage_id=task.stage_id, status=task.status, is_demo=task.is_demo,
+        stage_id=task.stage_id, status=task.status, is_demo=task.is_demo, created_at=aware(task.created_at),
         scheduled_for_utc=task.scheduled_for_utc,
         expires_at_utc=recovery.expires_at if recovery and recovery.activated_at else task.expires_at_utc,
         quantity=auth.quantity, unit_price_eth=format_wei_to_eth(s['price_wei']),
@@ -205,7 +205,7 @@ async def disarm_task(task_id: str, db: AsyncSession = Depends(get_db),
 async def list_mint_queue(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user), native_currencies:bool=False):
     tasks = (await db.execute(select(MintTask).join(Wallet, Wallet.id == MintTask.wallet_id).where(
         Wallet.user_id == user.id, MintTask.is_demo.is_(False), MintTask.archived_at.is_(None),
-    ).order_by(MintTask.scheduled_for_utc.asc()))).scalars().all()
+    ).order_by(MintTask.created_at.desc(), MintTask.id.desc()))).scalars().all()
     formatted = []
     for task in tasks:
         if task.execution_mode == automatic.MODE:
@@ -219,7 +219,7 @@ async def list_mint_queue(db: AsyncSession = Depends(get_db), user: User = Depen
         ))).scalar_one_or_none()
         formatted.append(TaskSchema(
             id=task.id, plan_id=task.plan_id, wallet_id=task.wallet_id, drop_id=task.drop_id, stage_id=task.stage_id,
-            status=task.status, is_demo=False, scheduled_for_utc=task.scheduled_for_utc,
+            status=task.status, is_demo=False, created_at=aware(task.created_at), scheduled_for_utc=task.scheduled_for_utc,
             expires_at_utc=task.expires_at_utc, quantity=auth.quantity if auth else 1,
             unit_price_eth=stage.price_eth_str if stage else "",
             fee_cap_eth=format_wei_to_eth(auth.max_fee_wei) if auth else "0",

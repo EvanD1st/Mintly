@@ -61,6 +61,27 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
                   (_filter == 'tasks' && activeStatuses.contains(t.status))),
         )
         .toList();
+    final entries =
+        <({DateTime time, String id, Widget card})>[
+          for (final task in tasks)
+            (
+              time: task.createdAt ?? task.scheduledForUtc,
+              id: 'task:${task.id}',
+              card: _taskCard(context, notifier, task),
+            ),
+          for (final plan in plans)
+            (
+              time:
+                  plan.createdAt ??
+                  plan.startsAt ??
+                  DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
+              id: 'plan:${plan.id}',
+              card: _planCard(context, notifier, plan),
+            ),
+        ]..sort((a, b) {
+          final order = b.time.compareTo(a.time);
+          return order != 0 ? order : b.id.compareTo(a.id);
+        });
     return RefreshIndicator(
       onRefresh: () async {
         ref.invalidate(collectionArtworkProvider);
@@ -112,19 +133,9 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
                 ),
               ),
             ),
-          if (tasks.isNotEmpty) ...[
-            _section(
-              tasks.every((t) => activeStatuses.contains(t.status))
-                  ? 'Armed mints'
-                  : 'Automatic mints',
-              tasks.length,
-            ),
-            ...tasks.map((task) => _taskCard(context, notifier, task)),
-            const SizedBox(height: 12),
-          ],
-          if (plans.isNotEmpty) ...[
-            _section('Needs approval', plans.length),
-            ...plans.map((plan) => _planCard(context, notifier, plan)),
+          if (entries.isNotEmpty) ...[
+            _section('Newest first', entries.length),
+            ...entries.map((entry) => entry.card),
           ],
           if (plans.isEmpty &&
               tasks.isEmpty &&

@@ -10,6 +10,7 @@ class MintTaskModel {
   final String status;
   final bool isDemo;
   final DateTime scheduledForUtc;
+  final DateTime? createdAt;
   final int quantity;
   final String unitPriceEth;
   final String feeCapEth;
@@ -33,6 +34,7 @@ class MintTaskModel {
     required this.status,
     required this.isDemo,
     required this.scheduledForUtc,
+    this.createdAt,
     required this.quantity,
     required this.unitPriceEth,
     required this.feeCapEth,
@@ -59,6 +61,7 @@ class MintTaskModel {
       isDemo: json['is_demo'] ?? false,
       scheduledForUtc:
           DateTime.tryParse(json['scheduled_for_utc'] ?? '') ?? DateTime.now(),
+      createdAt: DateTime.tryParse(json['created_at']?.toString() ?? ''),
       quantity: json['quantity'] ?? 1,
       unitPriceEth: json['unit_price_eth'] ?? '0',
       feeCapEth: json['fee_cap_eth'] ?? '0',

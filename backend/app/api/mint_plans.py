@@ -124,7 +124,7 @@ async def list_mint_plans(user: User = Depends(get_current_user),
                           db: AsyncSession = Depends(get_db), native_currencies:bool=False):
     plans = (await db.execute(select(MintPlan, Wallet).join(Wallet, Wallet.id == MintPlan.wallet_id).where(
         MintPlan.user_id == user.id, Wallet.user_id == user.id, MintPlan.archived_at.is_(None),
-    ).order_by(MintPlan.created_at.desc()))).all()
+    ).order_by(MintPlan.created_at.desc(), MintPlan.id.desc()))).all()
     return [response(plan, wallet) for plan, wallet in plans if native_currencies or symbol(plan.chain_id)=='ETH']
 
 

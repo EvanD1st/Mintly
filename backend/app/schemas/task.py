@@ -57,6 +57,7 @@ class TaskSchema(BaseModel):
     stage_id: str
     status: str
     is_demo: bool
+    created_at: datetime | None = None
     scheduled_for_utc: datetime
     expires_at_utc: datetime
     
