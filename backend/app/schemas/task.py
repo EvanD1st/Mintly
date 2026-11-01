@@ -77,6 +77,7 @@ class TaskSchema(BaseModel):
     transaction_hash: Optional[str] = None
     explorer_url: Optional[str] = None
     failure_reason: Optional[str] = None
+    external_mint: dict | None = None
     submitted_at: Optional[datetime] = None
     confirmed_at: Optional[datetime] = None
     actual_total_cost_wei: Optional[int] = None

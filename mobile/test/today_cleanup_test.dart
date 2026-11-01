@@ -102,7 +102,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.text('@lakzonevn drops'), findsOneWidget);
+    expect(find.text('Mint sources'), findsOneWidget);
     expect(find.textContaining('awaiting an X session'), findsOneWidget);
   });
   for (final canRevoke in [false, true]) {

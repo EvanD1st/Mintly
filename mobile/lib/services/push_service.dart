@@ -28,12 +28,33 @@ class PushService {
   ApiService? _api;
   String? _token;
   int _generation = 0;
+  final todayRequests = ValueNotifier(0);
+  Map<String, dynamic>? _pendingOpen;
+  String? todayOwner;
+
+  void openToday(Map<String, dynamic> data) {
+    if (!acceptsMessage(data) || data['category'] != 'daily_list') return;
+    todayOwner = _api?.userId;
+    todayRequests.value++;
+  }
+
+  void _notificationOpened(RemoteMessage message) {
+    if (_api == null) {
+      _pendingOpen = message.data;
+      return;
+    }
+    openToday(message.data);
+  }
 
   bool acceptsMessage(Map<String, dynamic> data) {
     final api = _api;
     if (api == null || !api.isLiveBackendConnected) return false;
     final owner = data['user_id'];
-    if (['mint_status', 'wallet_alerts'].contains(data['category']) &&
+    if ([
+          'mint_status',
+          'wallet_alerts',
+          'daily_list',
+        ].contains(data['category']) &&
         owner == null) {
       return false;
     }
@@ -49,6 +70,9 @@ class PushService {
     try {
       await Firebase.initializeApp();
       _messaging = FirebaseMessaging.instance;
+      FirebaseMessaging.onMessageOpenedApp.listen(_notificationOpened);
+      final initial = await _messaging!.getInitialMessage();
+      if (initial != null) _notificationOpened(initial);
       FirebaseMessaging.onMessage.listen((message) {
         if (!acceptsMessage(message.data)) return;
         final notification = message.notification;
@@ -58,6 +82,12 @@ class PushService {
             content: Text(
               '${notification.title ?? 'Mintly'}: ${notification.body ?? ''}',
             ),
+            action: message.data['category'] == 'daily_list'
+                ? SnackBarAction(
+                    label: 'Open Today',
+                    onPressed: () => openToday(message.data),
+                  )
+                : null,
           ),
         );
       });
@@ -106,6 +136,9 @@ class PushService {
     final generation = ++_generation;
     final revision = api.sessionRevision;
     _api = api;
+    final pending = _pendingOpen;
+    _pendingOpen = null;
+    if (pending != null) openToday(pending);
     preferences.value = const PushPreferences();
     if (_messaging == null) return false;
     final permission = await _messaging!.requestPermission();
@@ -154,6 +187,8 @@ class PushService {
     final token = _token;
     _generation++;
     _api = null;
+    _pendingOpen = null;
+    todayOwner = null;
     _token = null;
     preferences.value = const PushPreferences();
     try {

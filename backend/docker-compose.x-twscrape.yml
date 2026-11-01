@@ -8,5 +8,7 @@ services:
     environment:
       X_DISCOVERY_ENABLED: ${X_DISCOVERY_ENABLED:-true}
       TWSCRAPE_ACCOUNTS_FILE: /run/x-session/accounts.db
+      SOURCE_ARCHIVE_DIR: /var/lib/source-archive
     volumes:
       - ${MINTLY_X_ACCOUNTS_DIR:?Set MINTLY_X_ACCOUNTS_DIR}:/run/x-session:rw
+      - ${MINTLY_SOURCE_ARCHIVE_DIR:?Set protected source archive directory}:/var/lib/source-archive:rw

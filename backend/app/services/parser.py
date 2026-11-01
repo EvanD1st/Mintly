@@ -86,7 +86,7 @@ class DropPostParser:
         if not posted_at:
             posted_at = datetime.now(timezone.utc)
 
-        if re.search(r'(?mi)^\s*[-•*]?\s*(?:Chain|Network)\s+:',post_text):
+        if re.search(r'(?mi)^\s*[-•*]?\s*(?:Chain|Network)\s*:',post_text) or re.search(r'\bmints?\s+today\b',post_text,re.I):
             from app.services.daily_list_parser import parse
             return parse(post_text,posted_at)
 

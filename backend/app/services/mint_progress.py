@@ -5,6 +5,9 @@ LABELS = ('Checking wallet','Preparing','Sent','Included','Confirmed')
 
 
 def progress(task):
+    if task.status == 'already_minted':
+        return {'key':'confirmed', 'label':'Already minted', 'detail':task.failure_reason,
+            'steps':[], 'included_at':None, 'confirmed_at':None}
     terminal = task.status in ('failed','expired','disarmed','reverted')
     index = (4 if task.status == 'confirmed' else 3 if task.included_at or task.status == 'reverted' else
         2 if task.status == 'submitted' else 2 if task.broadcast_attempts else

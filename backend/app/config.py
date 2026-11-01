@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     TWSCRAPE_ACCOUNTS_FILE: str = '/run/x-session/accounts.db'
     X_DISCOVERY_INTERVAL_SECONDS: int = 300
     X_DISCOVERY_TIMEOUT_SECONDS: int = 45
+    SOURCE_ARCHIVE_DIR: str = ''
     FEED_WALLET_CHECKS_ENABLED: bool = True
     REMEMBERED_LOGIN_ISSUANCE_ENABLED: bool = True
 

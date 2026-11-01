@@ -221,7 +221,7 @@ async def test_zero_drop_reprocessing_shortened_links_and_unsupported_records(te
     assert await x_feed.sync_x_drops(test_db,adapter)==7
     assert await x_feed.sync_x_drops(test_db,adapter)==0
     stored=await test_db.scalar(select(SourcePost))
-    assert stored.full_text==post['text'] and stored.parser_version==1 and stored.list_date==date(2026,10,13)
+    assert stored.full_text==post['text'] and stored.parser_version==2 and stored.list_date==date(2026,10,13)
     assert len((await test_db.scalars(select(Drop))).all())==7
     assert any(d.chain_id==0 for d in (await test_db.scalars(select(Drop))).all())
 

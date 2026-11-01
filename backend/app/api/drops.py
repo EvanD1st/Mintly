@@ -13,6 +13,7 @@ from app.api.deps import get_current_user, get_db
 from app.models import Drop, DismissedDrop, SourceConnection, SourcePost, User, Wallet, FeedWalletCheck, FeedWalletSelection, MintPlan
 from app.schemas.drop import DropListResponse, DropSchema
 from app.services.feed_checks import supported, presentation, queue_checks, existing_mints
+from app.services.feed_sources import approved, daily_collections, source_metadata, health, SOURCE_NAMES
 from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/drops", tags=["drops"])
@@ -41,32 +42,28 @@ async def list_drops(
         await db.execute(insert(FeedWalletSelection).values(user_id=user.id,wallet_id=wallet.id,
             created_at=now,updated_at=now).on_conflict_do_update(index_elements=['user_id'],
             set_={'wallet_id':wallet.id,'updated_at':now}))
-    approved = or_(SourcePost.is_manual_import.is_(True), and_(
-        SourcePost.author_username == "lakzonevn", SourcePost.is_manual_import.is_(False)))
+    source_filter = approved()
     stmt = select(Drop).join(SourcePost, Drop.source_post_id == SourcePost.id).options(selectinload(Drop.stages)).where(
         Drop.is_demo.is_(False),
-        approved,
+        source_filter,
         ~select(DismissedDrop.drop_id).where(DismissedDrop.user_id == user.id,
             DismissedDrop.drop_id == Drop.id).exists(),
     ).order_by(Drop.updated_at.desc()).limit(100)
     if daily_only:
         day = now.astimezone(ZoneInfo('Africa/Lagos')).date()
-        stmt = stmt.where(SourcePost.list_date == day)
-    drops = (await db.execute(stmt)).scalars().all()
-    if daily_only:
-        drops = [d for d in drops if supported(d)]
+    groups = await daily_collections(db,day,user.id) if daily_only else []
+    drops = [g['drop'] for g in groups] if daily_only else (await db.execute(stmt)).scalars().all()
     if not daily_only and filter_kind and filter_kind != "all":
         drops = [drop for drop in drops if drop.status_kind == filter_kind]
-    source = (await db.execute(select(SourceConnection).where(
-        SourceConnection.source_name == "lakzonevn",
-    ))).scalar_one_or_none()
-    if user.role != 'admin':
-        source_text = ''
-    elif source and source.last_sync_at:
-        synced = source.last_sync_at.replace(tzinfo=timezone.utc).astimezone(ZoneInfo("Africa/Lagos"))
-        source_text = f"@lakzonevn checked {synced:%d %b %H:%M} WAT"
-    else:
-        source_text = "@lakzonevn feed awaiting an X session; admin imports are available"
+    sources = await health(db)
+    source_text = ' · '.join('@'+s['name']+(' monitoring paused' if not s['is_monitoring'] else
+        ' refresh delayed' if s['delayed'] or s['status']!='healthy' else
+        ' list available' if s['today_posted'] else " awaiting today's list") for s in sources)
+    if any(s['processing_pending'] for s in sources):source_text+=' · Some saved entries are waiting for link verification.'
+    admin_source_text = source_text
+    if user.role == 'admin':
+        admin_source_text += ' · Operator X session details are available in Mint sources.'
+    metadata,editions=await source_metadata(db,groups,user.id) if daily_only else ({},[])
     cards = []
     checks = {c.drop_id:c for c in (await db.scalars(select(FeedWalletCheck).where(
         FeedWalletCheck.user_id==user.id,FeedWalletCheck.wallet_id==wallet.id,
@@ -75,6 +72,7 @@ async def list_drops(
     for drop in drops:
         card = DropSchema.model_validate(drop)
         if daily_only:
+            card.sources=metadata[drop.id]['sources'];card.additions=metadata[drop.id]['additions']
             check = checks.get(drop.id)
             card.wallet_check = presentation(check, now) if wallet else dict(status='unverified',
                 setup_enabled=False, stages=[], note='Link a wallet to check eligibility.')
@@ -85,23 +83,27 @@ async def list_drops(
                     card.wallet_check = dict(status='unverified', setup_enabled=False, stages=[], note='Collection terms changed. Check again.')
             if drop.id in existing:
                 card.automatic_mint = existing[drop.id]
-                minted = existing[drop.id]['status'] == 'confirmed'
+                minted = existing[drop.id]['status'] in ('confirmed','already_minted')
                 card.wallet_check = dict(status=existing[drop.id]['status'], setup_enabled=False,
                     stages=[], note='This wallet already minted this collection. View its mint history.' if minted
                     else 'An automatic mint is already active for this wallet. View it in Mint plans.')
+            elif not supported(drop):
+                card.wallet_check=dict(status='unsupported',setup_enabled=False,stages=[],
+                    note='Source information only. Automatic minting is not available for this collection.')
         cards.append(card)
     if daily_only and filter_kind and filter_kind != 'all':
         wanted={'unknown':'unverified','manual':'not_eligible'}.get(filter_kind,filter_kind)
         cards=[c for c in cards if c.wallet_check['status']==wanted]
     return DropListResponse(
         date_label=datetime.now(timezone.utc).astimezone(ZoneInfo("Africa/Lagos")).strftime("%A, %d %B").upper(),
-        source_status_text=source_text,
+        source_status_text=admin_source_text if user.role == 'admin' else '',
         drops=cards,
         checked_wallet_label=wallet.address if wallet else "No wallet connected",
         last_checked_text="Wallet-specific eligibility is unverified",
         selected_wallet_id=wallet.id if wallet else None,
         wallets=[dict(id=w.id, label=w.label, address=w.address) for w in wallets],
-        feed_status_text='Daily list available' if cards else 'No supported collections in today’s saved list.',
+        feed_status_text=source_text,
+        editions=editions,
     )
 
 
@@ -120,12 +122,29 @@ async def check_cards(body: CheckCards, user: User = Depends(get_current_user), 
     if not wallet:
         raise HTTPException(404, 'Wallet not found.')
     day = datetime.now(timezone.utc).astimezone(ZoneInfo('Africa/Lagos')).date()
-    drops = (await db.scalars(select(Drop).join(SourcePost).where(Drop.id.in_(set(body.drop_ids)),
-        SourcePost.list_date == day, SourcePost.author_username == 'lakzonevn', Drop.is_demo.is_(False),
-        ~select(DismissedDrop.drop_id).where(DismissedDrop.user_id == user.id,
-            DismissedDrop.drop_id == Drop.id).exists()))).all()
+    groups=await daily_collections(db,day,user.id)
+    drops=[g['drop'] for g in groups if g['ids']&set(body.drop_ids)]
     await queue_checks(db, user, wallet, drops)
     return {'queued': len([d for d in drops if supported(d)])}
+
+
+class SeenEditions(BaseModel):
+    editions: list[dict[str,str]] = Field(max_length=100)
+
+
+@router.post('/seen')
+async def seen_editions(body: SeenEditions,user=Depends(get_current_user),db=Depends(get_db)):
+    from app.models import FeedSeen
+    from app.services.x_feed import insert_for
+    now=datetime.now(timezone.utc)
+    for edition in body.editions:
+        post=await db.scalar(select(SourcePost).where(SourcePost.id==edition.get('id'),approved()))
+        # Acknowledging an older screen cannot clear a newly arrived revision.
+        if not post or not post.content_hash or post.content_hash!=edition.get('content_hash'):continue
+        await db.execute(insert_for(db)(FeedSeen).values(user_id=user.id,post_id=post.id,content_hash=post.content_hash,
+            created_at=now,updated_at=now).on_conflict_do_update(index_elements=['user_id','post_id'],
+                set_={'content_hash':post.content_hash,'updated_at':now}))
+    await db.commit();return {'seen':True}
 
 
 class SetupCard(BaseModel):
@@ -170,8 +189,7 @@ async def get_drop_detail(drop_id: str, db: AsyncSession = Depends(get_db)):
     drop = (await db.execute(select(Drop).join(SourcePost, Drop.source_post_id == SourcePost.id)
         .options(selectinload(Drop.stages)).where(
         Drop.id == drop_id, Drop.is_demo.is_(False),
-        or_(SourcePost.is_manual_import.is_(True), and_(
-            SourcePost.author_username == "lakzonevn", SourcePost.is_manual_import.is_(False))),
+        approved(),
     ))).scalar_one_or_none()
     if drop is None:
         raise HTTPException(status_code=404, detail="Drop not found.")

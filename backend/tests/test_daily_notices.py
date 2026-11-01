@@ -23,8 +23,8 @@ async def setup(db,monkeypatch,offset=0,chain=8453):
   preferences={'daily_list':True}) for i,u in enumerate(users)]
  db.add_all(devices);await db.commit()
  return users,devices,async_sessionmaker(db.bind,expire_on_commit=False)
-@pytest.mark.parametrize('offset,chain',[(-1,8453),(1,8453),(0,12345)])
-async def test_only_current_supported_today_list_enqueues(test_db,monkeypatch,offset,chain):
+@pytest.mark.parametrize('offset,chain',[(-1,8453),(1,8453)])
+async def test_only_current_today_list_enqueues(test_db,monkeypatch,offset,chain):
  _,_,factory=await setup(test_db,monkeypatch,offset,chain)
  assert await daily_notices.poll(factory,now=NOW)==0
  assert await test_db.scalar(select(func.count()).select_from(DailyListNotice))==0

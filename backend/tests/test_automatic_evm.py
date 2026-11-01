@@ -453,6 +453,52 @@ async def test_import_encrypts_and_runs_unattended_without_duplicate_allowance(l
     assert lab.nft.functions.ownerOf(1).call() == lab.owner.address
 
 
+@pytest.mark.parametrize('kind', ['public','signed'])
+async def test_external_mint_releases_unused_task_budget_without_signing(lab, kind):
+    """Real SeaDrop execution outside the task consumes its exact phase allowance."""
+    lab.kind = kind
+    lab.request['mint_kind'] = kind
+    if kind == 'signed':
+        lab.request['onchain_stage_index'] = 1
+    response = await lab.client.post('/api/tasks/arm', json=lab.request)
+    assert response.status_code == 200, response.text
+    task_id = response.json()['id']
+    lab.w.provider.make_request('evm_setNextBlockTimestamp', [lab.start])
+    lab.w.provider.make_request('evm_mine', [])
+    external = lab.sea.functions.mintPublic(lab.nft.address, lab.w.eth.accounts[1], lab.owner.address, 20).build_transaction({
+        'from':lab.owner.address, 'value':200, 'gas':3000000, 'gasPrice':lab.w.eth.gas_price,
+        'nonce':lab.w.eth.get_transaction_count(lab.owner.address), 'chainId':31337})
+    if kind == 'signed':
+        from app.services.opensea import OpenSeaClient
+        _, mint = await OpenSeaClient().build_mint('local-test',lab.owner.address,20)
+        external['data'] = mint['data']
+    signed = lab.owner.sign_transaction(external)
+    tx_hash = lab.w.eth.send_raw_transaction(signed.raw_transaction)
+    assert lab.w.eth.wait_for_transaction_receipt(tx_hash).status == 1
+    lab.w.provider.make_request('evm_mine', [])
+    await lab.due(); await lab.tick()
+    async with lab.factory() as db:
+        task = await db.get(MintTask, task_id)
+        assert task.status == 'already_minted', task.failure_reason
+        assert task.external_mint['transaction_hash'] == '0x'+bytes(tx_hash).hex()
+        assert task.external_mint['quantity'] == 20
+        assert task.transaction_hash is None and task.signed_tx_raw is None and task.assigned_nonce is None
+        assert task.actual_total_cost_wei is None and task.confirmed_at is None
+        assert task.broadcast_attempts == 0 and task.next_attempt_at is None
+        grant = await db.get(AutomaticGrant, lab.grant.id)
+        assert grant.reserved_wei == 0 and grant.spent_wei == 0
+        from app.models import DailyDebit
+        assert (await db.get(DailyDebit,task_id)).actual_wei == 0
+    assert await lab.tick() is False
+    assert lab.nft.functions.totalSupply().call() == 20
+    journal = CustodyVault().journal()
+    assert journal.execute('SELECT count(*) FROM signed').fetchone()[0] == 0
+    journal.close()
+    history = (await lab.client.get('/api/history?section=mints')).json()['records'][0]
+    assert history['status'] == 'already_minted' and history['transaction_hash'] is None
+    assert history['external_mint']['transaction_hash'] == '0x'+bytes(tx_hash).hex()
+
+
 @pytest.mark.parametrize('failure',['wrong_key','wrong_password','other_wallet','consent','expired','malformed','oversized','empty_scope','mixed_scope','unknown_scope'])
 async def test_import_rejects_invalid_input_without_echoing_secrets(lab, importer, failure):
     client, request = importer

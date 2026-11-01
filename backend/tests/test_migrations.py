@@ -57,6 +57,56 @@ def test_fresh_database_migrates_to_head(monkeypatch):
             engine.dispose()
 
 
+def test_two_source_upgrade_preserves_ids_dismissals_and_delivery_history(monkeypatch,tmp_path):
+    import sqlalchemy as sa
+    from datetime import datetime,timezone
+    from zoneinfo import ZoneInfo
+    path=tmp_path/'sources-upgrade.db'
+    monkeypatch.setattr(settings,'DATABASE_URL',f'sqlite+aiosqlite:///{path.as_posix()}')
+    command.upgrade(Config('alembic.ini'),'028_free_phase_copy')
+    engine=create_engine(f'sqlite:///{path.as_posix()}')
+    now=datetime.now(timezone.utc);day=now.astimezone(ZoneInfo('Africa/Lagos')).date()
+    try:
+        with engine.begin() as conn:
+            meta=sa.MetaData()
+            def table(name):return sa.Table(name,meta,autoload_with=conn)
+            dates={'created_at':now,'updated_at':now}
+            conn.execute(table('users').insert().values(id='owner',username='member',password_hash='retained-hash',
+                role='member',is_active=True,must_change_password=False,automation_paused=False,**dates))
+            conn.execute(table('notification_devices').insert().values(id='phone',user_id='owner',
+                device_token='migration-fixture',platform='android',is_active=True,preferences={'daily_list':True},**dates))
+            for index in (1,2):
+                conn.execute(table('source_posts').insert().values(id=f'post{index}',post_id=str(index),
+                    author_username='lakzonevn',full_text='Retain original public post',posted_at=now,
+                    extracted_urls=['https://opensea.io/collection/shared'],is_daily_list=True,is_correction=False,
+                    is_manual_import=False,list_date=day,parser_version=1,**dates))
+                conn.execute(table('drops').insert().values(id=f'drop{index}',source_post_id=f'post{index}',
+                    name='Shared',chain='Base',chain_id=8453,mint_page_url='https://opensea.io/collection/shared',
+                    site_label='OpenSea',icon_name='gem',status_label='Unverified',status_kind='manual',
+                    is_supported_integration=False,is_demo=False,source_entry_key=f'entry{index}',**dates))
+            conn.execute(table('dismissed_drops').insert().values(user_id='owner',drop_id='drop2',**dates))
+            conn.execute(table('daily_list_notices').insert().values(id='retained-notice',list_date=day,
+                device_id='phone',user_id='owner',source_post_id='post1',status='sent',attempts=1,
+                next_attempt_at=now,sent_at=now,**dates))
+        command.upgrade(Config('alembic.ini'),'head')
+        with engine.begin() as conn:
+            assert conn.exec_driver_sql('SELECT id FROM drops ORDER BY id').scalars().all()==['drop1','drop2']
+            assert conn.exec_driver_sql("SELECT canonical_id FROM drops WHERE id='drop2'").scalar_one()=='drop1'
+            assert conn.exec_driver_sql('SELECT DISTINCT drop_id FROM feed_mentions').scalars().all()==['drop1']
+            assert conn.exec_driver_sql('SELECT count(*) FROM source_revisions').scalar_one()==2
+            assert conn.exec_driver_sql('SELECT count(*) FROM feed_seen').scalar_one()==2
+            assert conn.exec_driver_sql("SELECT status FROM daily_list_notices WHERE id='retained-notice'").scalar_one()=='sent'
+            assert conn.exec_driver_sql('SELECT drop_id FROM dismissed_drops').scalar_one()=='drop2'
+            assert not conn.exec_driver_sql("SELECT is_monitoring FROM source_connections WHERE source_name='cassio_sch'").scalar_one()
+            assert conn.exec_driver_sql('SELECT password_hash FROM users').scalar_one()=='retained-hash'
+            notices=sa.Table('daily_list_notices',sa.MetaData(),autoload_with=conn)
+            conn.execute(notices.insert().values(id='second-list',list_date=day,device_id='phone',user_id='owner',
+                source_post_id='post2',status='pending',attempts=0,next_attempt_at=now,**dates))
+            assert conn.exec_driver_sql('SELECT count(*) FROM daily_list_notices').scalar_one()==2
+    finally:engine.dispose()
+
+
+
 def test_existing_permission_history_survives_timestamp_upgrade(monkeypatch):
     with tempfile.TemporaryDirectory(prefix='mintly-upgrade-') as directory:
         path = Path(directory) / 'existing.db'

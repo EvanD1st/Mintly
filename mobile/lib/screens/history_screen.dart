@@ -406,6 +406,22 @@ class _HistoryState extends ConsumerState<HistoryScreen> {
                 ),
               if (data['stage_name'] != null)
                 DetailRow('Phase', '${data['stage_name']}'),
+              if (data['external_mint'] is Map) ...[
+                DetailRow(
+                  'Wallet minted',
+                  _time(data['external_mint']['minted_at']),
+                ),
+                TextButton(
+                  onPressed: () => openExternalUrl(
+                    context,
+                    Uri.parse(data['external_mint']['explorer_url'] as String),
+                  ),
+                  child: const Text('View completed wallet mint'),
+                ),
+                const Text(
+                  'Completed in a separate transaction. This automatic task sent no transaction and released its reserved budget.',
+                ),
+              ],
               if (data['confirmed_at'] != null)
                 DetailRow('Confirmed', _time(data['confirmed_at'])),
               for (final key in ['failure_reason', 'note', 'detail'])

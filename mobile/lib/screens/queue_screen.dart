@@ -469,6 +469,14 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(fontSize: 11),
             ),
+          if (task.externalMint != null)
+            TextButton(
+              onPressed: () => openExternalUrl(
+                context,
+                Uri.parse(task.externalMint!['explorer_url'] as String),
+              ),
+              child: const Text('View completed wallet mint'),
+            ),
           const SizedBox(height: 7),
           OutlinedButton(
             onPressed: () => Navigator.push(

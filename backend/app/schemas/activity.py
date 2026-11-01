@@ -26,6 +26,8 @@ class SourceStatusResponse(BaseModel):
     last_error: Optional[str] = None
     drops_count: int
     summary_text: str
+    sources: list[dict] = []
+    pending_posts: list[dict] = []
 
 
 class ActivityEventSchema(BaseModel):

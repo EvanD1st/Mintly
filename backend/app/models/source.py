@@ -20,6 +20,9 @@ class SourceConnection(Base):
     last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     consecutive_failures: Mapped[int] = mapped_column(Integer, default=0)
     is_monitoring: Mapped[bool] = mapped_column(Boolean, default=True)
+    next_attempt_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    catchup_cursor: Mapped[Optional[str]] = mapped_column(Text)
+    catchup_until: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
 
 class SourcePost(Base):
@@ -37,3 +40,11 @@ class SourcePost(Base):
     is_manual_import: Mapped[bool] = mapped_column(Boolean, default=False)
     list_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True, index=True)
     parser_version: Mapped[int] = mapped_column(Integer, default=0, server_default='0')
+    expanded_text: Mapped[Optional[str]] = mapped_column(Text)
+    content_hash: Mapped[Optional[str]] = mapped_column(String(64))
+    processed_hash: Mapped[Optional[str]] = mapped_column(String(64))
+    next_process_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    processing_error: Mapped[Optional[str]] = mapped_column(String(200))
+    published_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    list_sequence: Mapped[Optional[int]] = mapped_column(Integer)
+    notice_eligible: Mapped[bool] = mapped_column(Boolean, default=True, server_default='true')
