@@ -19,7 +19,8 @@ import '../widgets/collection_thumbnail.dart';
 import '../widgets/main_navigation.dart';
 
 class QueueScreen extends ConsumerStatefulWidget {
-  const QueueScreen({super.key});
+  final String? taskId;
+  const QueueScreen({super.key, this.taskId});
   @override
   ConsumerState<QueueScreen> createState() => _QueueScreenState();
 }
@@ -35,6 +36,7 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
       'armed',
       'preparing',
       'prepared',
+      'submitting',
       'submitted',
       'uncertain',
     ];
@@ -47,14 +49,16 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
         .where(
           (p) =>
               (_filter == 'all' || _filter == 'review') &&
+              widget.taskId == null &&
               !activePlans.contains(p.id),
         )
         .toList();
     final tasks = state.queue
         .where(
           (t) =>
-              _filter == 'all' ||
-              (_filter == 'tasks' && activeStatuses.contains(t.status)),
+              (widget.taskId == null || t.id == widget.taskId) &&
+              (_filter == 'all' ||
+                  (_filter == 'tasks' && activeStatuses.contains(t.status))),
         )
         .toList();
     return RefreshIndicator(
@@ -71,31 +75,32 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
             'Review saved plans. Track armed mints.',
             action: AutomationControl(toolbar: true),
           ),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              for (final item in [
-                ('all', 'All'),
-                ('review', 'Needs approval'),
-                ('tasks', 'Armed'),
-              ])
-                FilterChip(
-                  deleteIcon: const SizedBox.shrink(),
-                  label: Text(item.$2),
-                  selected: _filter == item.$1,
-                  showCheckmark: false,
-                  selectedColor: scheme.primary,
-                  labelStyle: TextStyle(
-                    fontSize: 12,
-                    color: _filter == item.$1
-                        ? scheme.onPrimary
-                        : scheme.onSurface,
+          if (widget.taskId == null)
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final item in [
+                  ('all', 'All'),
+                  ('review', 'Needs approval'),
+                  ('tasks', 'Armed'),
+                ])
+                  FilterChip(
+                    deleteIcon: const SizedBox.shrink(),
+                    label: Text(item.$2),
+                    selected: _filter == item.$1,
+                    showCheckmark: false,
+                    selectedColor: scheme.primary,
+                    labelStyle: TextStyle(
+                      fontSize: 12,
+                      color: _filter == item.$1
+                          ? scheme.onPrimary
+                          : scheme.onSurface,
+                    ),
+                    onSelected: (_) => setState(() => _filter = item.$1),
                   ),
-                  onSelected: (_) => setState(() => _filter = item.$1),
-                ),
-            ],
-          ),
+              ],
+            ),
           const SizedBox(height: 12),
           if (state.isLoading) const LinearProgressIndicator(),
           if (state.error != null)
@@ -132,20 +137,24 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
                   Icon(Icons.timer_outlined, size: 40, color: scheme.primary),
                   const SizedBox(height: 16),
                   Text(
-                    _filter == 'all'
+                    widget.taskId != null
+                        ? 'This mint is no longer in the active list'
+                        : _filter == 'all'
                         ? 'No mint plans yet'
                         : 'No matching mints',
                     style: Theme.of(context).textTheme.titleLarge,
                   ),
                   const SizedBox(height: 8),
-                  const Text(
-                    'Import an OpenSea collection link to check its stage and your linked wallet.',
+                  Text(
+                    widget.taskId != null
+                        ? 'Check Activity for its latest record.'
+                        : 'Import an OpenSea collection link to check its stage and your linked wallet.',
                     textAlign: TextAlign.center,
                   ),
                 ],
               ),
             ),
-          if (state.mintPermissions.isNotEmpty)
+          if (widget.taskId == null && state.mintPermissions.isNotEmpty)
             DisclosureSection(
               title: const Text('Wallet permissions'),
               subtitle: const Text('Manage approvals and revocations'),

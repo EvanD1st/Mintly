@@ -70,6 +70,7 @@ class DropModel {
   final bool isDemo;
   final List<MintStageModel> stages;
   final Map<String, dynamic>? walletCheck;
+  final Map<String, dynamic>? automaticMint;
   final String? sourcePriceText;
   final String? sourceTimeText;
 
@@ -89,6 +90,7 @@ class DropModel {
     required this.isDemo,
     required this.stages,
     this.walletCheck,
+    this.automaticMint,
     this.sourcePriceText,
     this.sourceTimeText,
   });
@@ -110,6 +112,7 @@ class DropModel {
       manualNotice: json['manual_notice'],
       isDemo: json['is_demo'] ?? false,
       walletCheck: json['wallet_check'] as Map<String, dynamic>?,
+      automaticMint: json['automatic_mint'] as Map<String, dynamic>?,
       sourcePriceText: json['source_price_text'] as String?,
       sourceTimeText: json['source_time_text'] as String?,
       stages: rawStages
