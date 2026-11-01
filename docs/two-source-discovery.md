@@ -67,8 +67,19 @@ Check source identity, persisted revisions, merged Today cards, finite retry
 state, delivery records and archive output. Do not manually arm or retry customer
 mints for this verification.
 
+Migration 030 adds nullable public receipt evidence for unsigned tasks whose wallet
+already consumed its selected phase allowance in another transaction. Reconciliation
+runs after a specific mint rejection; it verifies chain, wallet, collection, phase,
+canonical receipt/finality and exhausted allowance. A matching finalized mint gets
+`already_minted`, stops retries and personal-plan polling, and releases the unused
+reservation at zero task cost. The separate receipt is linked in Today/history;
+the task never inherits another transaction's signature, nonce or spend. Ownership,
+another phase, an unfinalized/reverted receipt or unavailable RPC history cannot
+establish this outcome. Recent-history scans are bounded to twelve network-sized
+log pages and eight seconds; older/unavailable evidence retains bounded checks
+and the specific provider reason. No customer task is rearmed during deployment.
+
 The captured November 1 list fixture was read from the authenticated X reader:
 https://x.com/Cassio_Sch/status/2116814511298519048 .
 The pagination adapter uses the pinned twscrape 0.20.1 raw timeline API:
 https://github.com/vladkens/twscrape/blob/v0.20.1/twscrape/api.py .
-

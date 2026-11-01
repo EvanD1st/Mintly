@@ -274,6 +274,7 @@ async def step(session_factory=AsyncSessionLocal, sign=request_signature, *, now
                     plan = await db.get(MintPlan, task.plan_id)
                     if plan and plan.wallet_id == task.wallet_id:
                         plan.next_check_at = None
+                        plan.status, plan.status_note = 'already_minted', note
                 await mint_diagnostics.save(db, task, 'preparation', attempt_number, attempt_started,
                     'already_minted', events=events, status=error.response.status_code if isinstance(error, httpx.HTTPStatusError) else None, error=error)
                 await db.commit()

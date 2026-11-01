@@ -52,6 +52,9 @@ async def refresh_mint_plan(plan: MintPlan, wallet: Wallet, client: OpenSeaClien
                             now: datetime | None = None, detail: dict | None = None,
                             transaction_out: dict | None = None, db=None) -> MintPlan:
     """The only path to ready_for_approval is a successful OpenSea mint check."""
+    if plan.status == 'already_minted' and wallet.id == plan.wallet_id and wallet.user_id == plan.user_id:
+        plan.next_check_at = None
+        return plan
     now = now or datetime.now(timezone.utc)
     client = client or OpenSeaClient()
     detail = detail or await client.get_drop(plan.collection_slug)

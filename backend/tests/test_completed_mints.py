@@ -94,3 +94,13 @@ async def test_today_uses_completed_evidence_without_new_eligibility_work(test_d
     assert 'already minted' in result.drops[0].wallet_check['note']
     assert not result.drops[0].wallet_check['setup_enabled']
     assert await test_db.scalar(select(func.count()).select_from(FeedWalletCheck))==0
+
+
+async def test_completed_plan_refresh_does_not_reopen_setup_or_contact_provider():
+    from app.services.mint_plans import refresh_mint_plan
+    plan=SimpleNamespace(status='already_minted',user_id='owner',wallet_id='wallet',next_check_at=123)
+    wallet=SimpleNamespace(id='wallet',user_id='owner')
+    client=SimpleNamespace(get_drop=AsyncMock(side_effect=AssertionError('No eligibility refresh after completion')))
+    assert await refresh_mint_plan(plan,wallet,client) is plan
+    assert plan.status=='already_minted' and plan.next_check_at is None
+    client.get_drop.assert_not_called()

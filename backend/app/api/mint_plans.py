@@ -174,6 +174,8 @@ async def automatic_context(plan_id: str, user: User = Depends(get_current_user)
     ))).scalar_one_or_none()
     if plan is None:
         raise HTTPException(404, 'Mint plan not found.')
+    if plan.status == 'already_minted':
+        raise HTTPException(409, plan.status_note)
     wallet = await db.get(Wallet, plan.wallet_id)
     client = OpenSeaClient()
     try:
