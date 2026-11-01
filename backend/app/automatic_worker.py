@@ -253,6 +253,8 @@ async def step(session_factory=AsyncSessionLocal, sign=request_signature, *, now
             scope = auth.snapshot
             can_reconcile = (observed.status in ('armed', 'preparing') and not observed.signed_tx_raw
                 and not observed.transaction_hash and not observed.broadcast_attempts)
+            if can_reconcile:
+                can_reconcile = not await other_mint_due(db, task_id)
         reason = error.response.headers.get('X-Mintly-Reason') if isinstance(error, httpx.HTTPStatusError) else None
         completed = await reconcile_rejection(scope, events, reason) if can_reconcile else None
         async with session_factory() as db:
@@ -335,6 +337,19 @@ def explorer_url(tx_hash, chain_id=None):
     network = NETWORKS.get(settings.AUTOMATIC_CHAIN_ID if chain_id is None else chain_id)
     base = network.explorer if network else None
     return base + tx_hash if base else None
+
+
+async def other_mint_due(db, task_id):
+    """Optional receipt enrichment must yield to imminent execution/receipt work."""
+    imminent = datetime.now(timezone.utc) + timedelta(seconds=10)
+    return bool(await db.scalar(select(MintTask.id).join(Wallet,Wallet.id == MintTask.wallet_id)
+        .join(User,User.id == Wallet.user_id).where(MintTask.id != task_id,
+        MintTask.execution_mode == automatic.MODE,
+        MintTask.status.in_(('armed','preparing','prepared')),
+        User.is_active.is_(True), User.deleted_at.is_(None), User.automation_paused.is_(False),
+        MintTask.expires_at_utc > datetime.now(timezone.utc),
+        MintTask.scheduled_for_utc <= imminent,
+        or_(MintTask.next_attempt_at.is_(None), MintTask.next_attempt_at <= imminent)).limit(1)))
 
 
 async def run():

@@ -104,3 +104,22 @@ async def test_completed_plan_refresh_does_not_reopen_setup_or_contact_provider(
     assert await refresh_mint_plan(plan,wallet,client) is plan
     assert plan.status=='already_minted' and plan.next_check_at is None
     client.get_drop.assert_not_called()
+
+
+async def test_optional_reconciliation_yields_to_another_imminent_task(test_db,monkeypatch):
+    from test_today_armed import armed_fixture
+    from app.automatic_worker import other_mint_due
+    from app.models import MintTask
+    from datetime import datetime,timedelta,timezone
+    _,_,_,task,_=await armed_fixture(test_db,monkeypatch)
+    task.execution_mode='custodial_v1'
+    task.scheduled_for_utc=datetime.now(timezone.utc)+timedelta(seconds=5)
+    await test_db.commit()
+    assert await other_mint_due(test_db,'another-task')
+    assert not await other_mint_due(test_db,task.id)
+    task.next_attempt_at=datetime.now(timezone.utc)+timedelta(minutes=1)
+    await test_db.commit()
+    assert not await other_mint_due(test_db,'another-task')
+    task.next_attempt_at=None;task.status='already_minted'
+    await test_db.commit()
+    assert not await other_mint_due(test_db,'another-task')
