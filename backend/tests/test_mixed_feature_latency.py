@@ -97,11 +97,19 @@ async def test_mixed_feature_reads_and_writes_during_four_wallet_preparation(cop
                 drop=await db.scalar(select(Drop).where(Drop.contract_address==instance.nft.address))
                 drop.mint_page_url='https://opensea.io/collection/local-test'
                 await db.commit()
+                # Armed wallets now skip display checks. Keep exercising real
+                # discovery for another owned wallet during the same signer load.
+                await feed_checks.queue_checks(db,owner,wallet,[drop])
+                assert await db.get(FeedWalletCheck,(instance.user.id,instance.wallet.id,drop.id)) is None
+                wallet=Wallet(id='mixed-discovery-wallet',user_id=instance.user.id,
+                    label='Unarmed discovery wallet',address=instance.w.eth.accounts[8],is_demo=False)
+                db.add(wallet)
+                await db.commit()
                 await feed_checks.queue_checks(db,owner,wallet,[drop])
             assert await feed_checks.step(instance.factory)
             async with instance.factory() as db:
-                row=await db.get(FeedWalletCheck,(instance.user.id,instance.wallet.id,drop.id))
-                assert row.status=='complete' and row.result['address']==instance.wallet.address
+                row=await db.get(FeedWalletCheck,(instance.user.id,wallet.id,drop.id))
+                assert row.status=='complete' and row.result['address']==wallet.address
                 assert row.result['stages'][0]['eligibility']=='eligible'
                 assert row.result['stages'][0]['remaining'] is not None
         await asyncio.gather(*(read(path) for path in paths for _ in range(3)),logins(),device_settings(),discovery_checks(),scenario)
