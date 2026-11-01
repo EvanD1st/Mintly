@@ -76,14 +76,15 @@ async def daily_collections(db,day,user_id=None):
         target['mentions'].append((p,details))
     if user_id:
         dismissed=set((await db.scalars(select(DismissedDrop.drop_id).where(DismissedDrop.user_id==user_id))).all())
-        aliases=(await db.execute(select(Drop.id,Drop.canonical_id).where(Drop.canonical_id.is_not(None)))).all()
+        aliases=(await db.execute(select(Drop.id,Drop.canonical_id).where(Drop.id.in_(dismissed),Drop.canonical_id.is_not(None)))).all() if dismissed else []
         dismissed|={canonical for alias,canonical in aliases if alias in dismissed}
         groups=[g for g in groups if not(g['ids']&dismissed)]
     return groups
 
 
 async def source_metadata(db,groups,user_id):
-    seen={s.post_id:s.content_hash for s in (await db.scalars(select(FeedSeen).where(FeedSeen.user_id==user_id))).all()}
+    ids={p.id for g in groups for p,_ in g['mentions']}
+    seen={s.post_id:s.content_hash for s in (await db.scalars(select(FeedSeen).where(FeedSeen.user_id==user_id,FeedSeen.post_id.in_(ids)))).all()} if ids else {}
     result={};editions={}
     for group in groups:
         mentions=group['mentions'];sources=[]
@@ -107,6 +108,10 @@ async def health(db):
     result=[]
     from app.services.mint_plans import aware
     now=datetime.now(timezone.utc)
+    day=now.astimezone(ZoneInfo('Africa/Lagos')).date()
+    posts=(await db.execute(select(SourcePost.author_username,SourcePost.processing_error,
+        SourcePost.posted_at,SourcePost.list_date,SourcePost.published_at).where(
+            SourcePost.author_username.in_(SOURCE_NAMES),or_(SourcePost.posted_at>=now-timedelta(days=2),SourcePost.list_date==day)))).all()
     for name in SOURCE_NAMES:
         row=next((r for r in rows if r.source_name==name),None)
         delayed=not row or not row.last_sync_at or (now-aware(row.last_sync_at)).total_seconds()>900
@@ -114,10 +119,6 @@ async def health(db):
             'is_monitoring':row.is_monitoring if row else True,'last_sync_at':row.last_sync_at if row else None,
             'delayed':delayed,'last_error':row.last_error if row else None})
         result[-1]['catchup_pending']=bool(row and row.catchup_cursor)
-        result[-1]['processing_pending']=bool(await db.scalar(select(SourcePost.id).where(
-            SourcePost.author_username==name,SourcePost.processing_error.is_not(None),
-            SourcePost.posted_at>=now-timedelta(days=2)).limit(1)))
-        result[-1]['today_posted']=bool(await db.scalar(select(SourcePost.id).where(SourcePost.author_username==name,
-            SourcePost.list_date==now.astimezone(ZoneInfo('Africa/Lagos')).date(),
-            SourcePost.published_at.is_not(None)).limit(1)))
+        result[-1]['processing_pending']=any(p.processing_error and aware(p.posted_at)>=now-timedelta(days=2) for p in posts if p.author_username==name)
+        result[-1]['today_posted']=any(p.list_date==day and p.published_at for p in posts if p.author_username==name)
     return result

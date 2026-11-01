@@ -95,9 +95,9 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
             style: TextStyle(color: muted),
           ),
           const SizedBox(height: 18),
-          if (state.sourceStatusText.isNotEmpty)
+          if (!api.isAdmin && api.feedStatusText.isNotEmpty)
             Text(
-              state.sourceStatusText,
+              api.feedStatusText,
               style: Theme.of(context).textTheme.bodySmall,
             ),
           if (state.drops.any((d) => d.additions != null))
@@ -329,7 +329,7 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
     final stage = drop.stages.isNotEmpty ? drop.stages.first : null;
     final price = stage == null || stage.priceEthStr.isEmpty
         ? 'Price on source'
-        : '${stage.priceEthStr} ETH';
+        : '${stage.priceEthStr} ${drop.nativeCurrency}';
     final schedule = stage == null
         ? 'Schedule on source'
         : '${_wat(stage.startTimeUtc)} WAT';

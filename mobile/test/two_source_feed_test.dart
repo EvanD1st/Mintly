@@ -37,6 +37,8 @@ void main() {
               'selected_wallet_id': 'wallet',
               'source_status_text':
                   '@lakzonevn connected · @Cassio_Sch refresh delayed',
+              'feed_status_text':
+                  '@lakzonevn list available · @Cassio_Sch refresh delayed',
               'wallets': [
                 {
                   'id': 'wallet',

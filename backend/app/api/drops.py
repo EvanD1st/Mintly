@@ -51,11 +51,8 @@ async def list_drops(
     ).order_by(Drop.updated_at.desc()).limit(100)
     if daily_only:
         day = now.astimezone(ZoneInfo('Africa/Lagos')).date()
-        stmt = stmt.where(SourcePost.list_date == day)
-    drops = (await db.execute(stmt)).scalars().all()
     groups = await daily_collections(db,day,user.id) if daily_only else []
-    if daily_only:
-        drops = [g['drop'] for g in groups]
+    drops = [g['drop'] for g in groups] if daily_only else (await db.execute(stmt)).scalars().all()
     if not daily_only and filter_kind and filter_kind != "all":
         drops = [drop for drop in drops if drop.status_kind == filter_kind]
     sources = await health(db)

@@ -80,6 +80,7 @@ class ApiService extends ChangeNotifier {
   }
 
   String sourceStatusText = 'Waiting for live data';
+  String feedStatusText = '';
   String checkedWalletLabel = 'No wallet connected';
   String lastCheckedText = 'Wallet-specific eligibility is unverified';
   String? selectedFeedWallet;
@@ -748,6 +749,7 @@ class ApiService extends ChangeNotifier {
         .toList();
     sourceStatusText =
         data['source_status_text'] as String? ?? 'Live source unavailable';
+    feedStatusText = data['feed_status_text'] as String? ?? '';
     checkedWalletLabel =
         data['checked_wallet_label'] as String? ?? 'No wallet connected';
     lastCheckedText =
@@ -760,6 +762,7 @@ class ApiService extends ChangeNotifier {
     selectedFeedWallet = null;
     feedWallets = [];
     feedEditions = [];
+    feedStatusText = '';
   }
 
   Future<void> queueFeedChecks(List<DropModel> drops) async {
