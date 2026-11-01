@@ -2,6 +2,7 @@ import '../widgets/collection_thumbnail.dart';
 import '../widgets/mintly_notice.dart';
 import '../theme/compatible_icons.dart';
 import 'package:flutter/material.dart';
+import '../widgets/screen_components.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../models/drop_model.dart';
@@ -290,7 +291,7 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
         ),
       _dropBody(context, notifier, drop),
       if (drop.sources.isNotEmpty)
-        ExpansionTile(
+        DisclosureSection(
           title: const Text('Source details'),
           children: [
             for (final source in drop.sources)
