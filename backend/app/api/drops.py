@@ -60,6 +60,9 @@ async def list_drops(
         ' refresh delayed' if s['delayed'] or s['status']!='healthy' else
         ' list available' if s['today_posted'] else " awaiting today's list") for s in sources)
     if any(s['processing_pending'] for s in sources):source_text+=' · Some saved entries are waiting for link verification.'
+    admin_source_text = source_text
+    if user.role == 'admin':
+        admin_source_text += ' · Operator X session details are available in Mint sources.'
     metadata,editions=await source_metadata(db,groups,user.id) if daily_only else ({},[])
     cards = []
     checks = {c.drop_id:c for c in (await db.scalars(select(FeedWalletCheck).where(
@@ -80,7 +83,7 @@ async def list_drops(
                     card.wallet_check = dict(status='unverified', setup_enabled=False, stages=[], note='Collection terms changed. Check again.')
             if drop.id in existing:
                 card.automatic_mint = existing[drop.id]
-                minted = existing[drop.id]['status'] == 'confirmed'
+                minted = existing[drop.id]['status'] in ('confirmed','already_minted')
                 card.wallet_check = dict(status=existing[drop.id]['status'], setup_enabled=False,
                     stages=[], note='This wallet already minted this collection. View its mint history.' if minted
                     else 'An automatic mint is already active for this wallet. View it in Mint plans.')
@@ -93,7 +96,7 @@ async def list_drops(
         cards=[c for c in cards if c.wallet_check['status']==wanted]
     return DropListResponse(
         date_label=datetime.now(timezone.utc).astimezone(ZoneInfo("Africa/Lagos")).strftime("%A, %d %B").upper(),
-        source_status_text=source_text,
+        source_status_text=admin_source_text if user.role == 'admin' else '',
         drops=cards,
         checked_wallet_label=wallet.address if wallet else "No wallet connected",
         last_checked_text="Wallet-specific eligibility is unverified",

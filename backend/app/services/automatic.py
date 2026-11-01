@@ -26,7 +26,7 @@ from app.services.seadrop_mint import decode_mint, verify_presale
 from app.services.signer.base import SEADROP_V1_ADDRESS, MINT_PUBLIC_SELECTOR
 
 MODE = 'custodial_v1'
-TERMINAL = {'confirmed', 'reverted', 'failed', 'expired', 'disarmed'}
+TERMINAL = {'confirmed', 'reverted', 'failed', 'expired', 'disarmed', 'already_minted'}
 
 
 def digest(value):
@@ -292,8 +292,10 @@ async def validate_mint(web3, snapshot, transaction):
                 raise ValueError('Public fee recipient is not allowed')
         minted, supply, maximum = decode(['uint256'] * 3, await web3.eth.call({
             'to': s['contract'], 'data': keccak(text='getMintStats(address)')[:4] + encode(['address'], [s['account']])}))
-        if minted + s['quantity'] > limit or supply + s['quantity'] > maximum:
-            raise ValueError('Public wallet limit or collection supply is insufficient')
+        if minted + s['quantity'] > limit:
+            raise OpenSeaUnavailable('This mint exceeds the receiving wallet’s remaining allowance.',409,mint_reason='wallet_limit')
+        if supply + s['quantity'] > maximum:
+            raise OpenSeaUnavailable('This mint exceeds the remaining collection supply.',409,mint_reason='supply_exhausted')
     else:
         if s.get('selected_phase'):
             from app.services.mint_stage_choice import pinned

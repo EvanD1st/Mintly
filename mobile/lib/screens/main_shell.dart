@@ -32,8 +32,10 @@ class _MainShellState extends ConsumerState<MainShell>
 
   void _openToday() {
     if (!mounted ||
-        PushService.instance.todayOwner != ref.read(apiServiceProvider).userId)
+        PushService.instance.todayOwner !=
+            ref.read(apiServiceProvider).userId) {
       return;
+    }
     Navigator.of(context).popUntil((route) => route.isFirst);
     _selectTab(0);
     ref.read(mintlyProvider.notifier).refreshFeed();

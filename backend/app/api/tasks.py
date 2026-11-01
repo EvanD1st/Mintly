@@ -171,6 +171,7 @@ async def task_response(db, task):
         drop_name=s['drop_name'], chain=s['chain'], chain_id=s['chain_id'], native_symbol=symbol(s['chain_id']), stage_name=s['stage_name'], icon_name='gem',
         time_wat_label=aware(task.scheduled_for_utc).astimezone(ZoneInfo('Africa/Lagos')).strftime('%d %b · %H:%M WAT'),
         transaction_hash=task.transaction_hash, explorer_url=task.explorer_url, failure_reason=task.failure_reason,
+        external_mint=task.external_mint,
         submitted_at=task.submitted_at, confirmed_at=task.confirmed_at, actual_total_cost_wei=task.actual_total_cost_wei,
         execution_mode=task.execution_mode, wallet_address=s['account'],progress=progress(task))
 

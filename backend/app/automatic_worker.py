@@ -243,6 +243,18 @@ async def step(session_factory=AsyncSessionLocal, sign=request_signature, *, now
         except Exception:
             log.warning('Mint diagnostics persistence unavailable task_id=%s',task_id)
     except Exception as error:
+        # Do chain I/O outside the execution lock, only after an explicit unsigned
+        # preparation rejection. Never reconcile a timeout/lost signing response.
+        events = mint_diagnostics.from_error(error)
+        from app.services.completed_mints import reconcile_rejection
+        async with session_factory() as db:
+            observed = await db.get(MintTask, task_id)
+            auth = await db.get(MintAuthorization, observed.authorization_id)
+            scope = auth.snapshot
+            can_reconcile = (observed.status in ('armed', 'preparing') and not observed.signed_tx_raw
+                and not observed.transaction_hash and not observed.broadcast_attempts)
+        reason = error.response.headers.get('X-Mintly-Reason') if isinstance(error, httpx.HTTPStatusError) else None
+        completed = await reconcile_rejection(scope, events, reason) if can_reconcile else None
         async with session_factory() as db:
             await automatic.lock_execution(db)
             task = await db.get(MintTask, task_id)
@@ -250,6 +262,20 @@ async def step(session_factory=AsyncSessionLocal, sign=request_signature, *, now
             if task.status not in ('armed', 'preparing') or task.signed_tx_raw:
                 await mint_diagnostics.save(db,task,'preparation',attempt_number,attempt_started,'response_lost_after_commit',
                     events=mint_diagnostics.from_error(error),status=error.response.status_code if isinstance(error,httpx.HTTPStatusError) else None,error=error)
+                await db.commit()
+                return True
+            if completed and not task.transaction_hash and not task.broadcast_attempts:
+                task.external_mint = completed
+                task.next_attempt_at = None
+                note = f"Already minted — {completed['stage_name']}. Your wallet used its allowance in a separate transaction. No additional transaction was sent by this task."
+                await finish(db, task, 'already_minted', note)
+                if task.plan_id:
+                    from app.models import MintPlan
+                    plan = await db.get(MintPlan, task.plan_id)
+                    if plan and plan.wallet_id == task.wallet_id:
+                        plan.next_check_at = None
+                await mint_diagnostics.save(db, task, 'preparation', attempt_number, attempt_started,
+                    'already_minted', events=events, status=error.response.status_code if isinstance(error, httpx.HTTPStatusError) else None, error=error)
                 await db.commit()
                 return True
             task.preparation_attempts += 1
@@ -262,13 +288,19 @@ async def step(session_factory=AsyncSessionLocal, sign=request_signature, *, now
                     events=mint_diagnostics.from_error(error),status=429,error=error)
                 await db.commit()
                 return True
-            permanent = isinstance(error, httpx.HTTPStatusError) and error.response.status_code == 409
+            # A recent mint may still be waiting for canonical confirmations.
+            # Keep the finite window available to reconcile it on the next check.
+            permanent = (isinstance(error, httpx.HTTPStatusError) and error.response.status_code == 409
+                and reason not in ('wallet_limit', 'allowance_or_supply_exhausted'))
             temporary=isinstance(error,(httpx.RequestError,httpx.HTTPStatusError)) and (
                 not isinstance(error,httpx.HTTPStatusError) or error.response.status_code in (429,500,502,503,504))
             exhausted=((not temporary and task.preparation_attempts>=6) if task.copy_rule_id else
                 task.preparation_attempts>=max(1,settings.OPENSEA_PREPARATION_MAX_ATTEMPTS))
             if permanent or exhausted:
                 note = 'Bounded preparation retries exhausted. No transaction broadcast.'
+                category = mint_diagnostics.category(events, None, error)
+                if exhausted and category in mint_diagnostics.PREPARATION_REASONS:
+                    note = mint_diagnostics.PREPARATION_REASONS[category] + ' Checks stopped. No transaction was sent.'
                 if permanent:
                     note = error.response.json().get('detail', 'Signer rejected readiness or policy.')
                 await finish(db, task, 'expired' if note == 'Task or signer policy expired' else 'failed', note)

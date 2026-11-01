@@ -85,6 +85,8 @@ class MintTask(Base):
     actual_total_cost_wei: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
     
     failure_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Separate from this task's signed transaction and spending/receipt accounting.
+    external_mint: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     explorer_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     execution_mode: Mapped[Optional[str]] = mapped_column(String(40), nullable=True, index=True)
     request_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)

@@ -197,7 +197,7 @@ def category(events,status,error=None):
     import httpx
     if isinstance(error,httpx.HTTPStatusError):
         reason=error.response.headers.get('X-Mintly-Reason')
-        if reason in ('wallet_approval_changed','pending_source_changed'):
+        if reason in PREPARATION_REASONS:
             return reason
     for row in reversed(events):
         code=row['http_status']

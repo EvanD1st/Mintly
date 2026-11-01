@@ -16,16 +16,16 @@ async def existing_mints(db, user, wallet, drops):
     from app.services.automatic import TERMINAL
     rows = (await db.execute(select(
         MintTask.id, MintTask.plan_id, MintTask.status, MintTask.scheduled_for_utc, MintTask.confirmed_at,
-        MintAuthorization.quantity, MintAuthorization.snapshot,
+        MintAuthorization.quantity, MintAuthorization.snapshot, MintTask.external_mint,
         Drop.chain_id, Drop.contract_address, Drop.mint_page_url, MintStage.stage_name,
     ).join(MintAuthorization, MintTask.authorization_id == MintAuthorization.id)
         .join(Drop, MintTask.drop_id == Drop.id)
         .join(MintStage, MintTask.stage_id == MintStage.id)
         .join(Wallet, MintTask.wallet_id == Wallet.id)
         .where(Wallet.user_id == user.id, Wallet.id == wallet.id,
-            MintTask.is_demo.is_(False), or_(MintTask.status == 'confirmed', MintTask.status.not_in(TERMINAL)))
+            MintTask.is_demo.is_(False), or_(MintTask.status.in_(('confirmed','already_minted')), MintTask.status.not_in(TERMINAL)))
         # A successful mint remains visible even after archiving or a later failed attempt.
-        .order_by(case((MintTask.status == 'confirmed', 0), else_=1),
+        .order_by(case((MintTask.status.in_(('confirmed','already_minted')), 0), else_=1),
             MintTask.confirmed_at.desc(), MintTask.scheduled_for_utc, MintTask.id))).mappings().all()
     result = {}
     for drop in drops:
@@ -43,7 +43,8 @@ async def existing_mints(db, user, wallet, drops):
                     matches = False
             if matches:
                 result[drop.id] = dict(id=row['id'], plan_id=row['plan_id'], wallet_id=wallet.id,
-                    status=row['status'], quantity=row['quantity'],
+                    status=row['status'], quantity=(row['external_mint'] or {}).get('quantity',row['quantity']),
+                    external_mint=row['external_mint'],
                     stage_name=scope.get('stage_name') or row['stage_name'],
                     scheduled_for_utc=aware(row['scheduled_for_utc']),
                     confirmed_at=aware(row['confirmed_at']) if row['confirmed_at'] else None)

@@ -49,7 +49,7 @@ async def seed_existing(db, user_id):
     for task, auth in rows:
         if await db.get(DailyDebit,task.id):
             continue
-        settled = task.status in ('confirmed','reverted','failed','expired','disarmed') and (
+        settled = task.status in ('confirmed','reverted','failed','expired','disarmed','already_minted') and (
             task.status in ('confirmed','reverted') or not task.signed_tx_raw)
         db.add(DailyDebit(task_id=task.id, user_id=user_id,
             day=day_key(task.included_at or task.submitted_at or task.scheduled_for_utc),

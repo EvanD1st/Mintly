@@ -110,11 +110,12 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
                   await api.markFeedSeen(editions);
                   if (mounted) await _refresh();
                 } catch (error) {
-                  if (context.mounted)
+                  if (context.mounted) {
                     MintlyNotice.show(
                       context,
                       SnackBar(content: Text('$error')),
                     );
+                  }
                 }
               },
               child: const Text('Mark additions as seen'),
@@ -306,8 +307,9 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
                           final uri = Uri.tryParse('${source['post_url']}');
                           if (uri != null &&
                               uri.scheme == 'https' &&
-                              uri.host == 'x.com')
+                              uri.host == 'x.com') {
                             await openExternalUrl(context, uri);
+                          }
                         },
                         child: const Text('View post'),
                       ),
@@ -324,8 +326,9 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
   ) {
     if (drop.automaticMint != null) return _automaticCard(context, drop);
     if (drop.walletCheck != null &&
-        drop.walletCheck?['status'] != 'unsupported')
+        drop.walletCheck?['status'] != 'unsupported') {
       return _verifiedCard(context, drop);
+    }
     final stage = drop.stages.isNotEmpty ? drop.stages.first : null;
     final price = stage == null || stage.priceEthStr.isEmpty
         ? 'Price on source'
@@ -387,9 +390,11 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
 
   Widget _automaticCard(BuildContext context, DropModel drop) {
     final mint = drop.automaticMint!;
-    final minted = mint['status'] == 'confirmed';
+    final external = mint['status'] == 'already_minted';
+    final minted = mint['status'] == 'confirmed' || external;
     final status = switch (mint['status']) {
       'confirmed' => 'Minted',
+      'already_minted' => 'Already minted — ${mint['stage_name']}',
       'armed' => 'Armed',
       'preparing' => 'Preparing mint',
       'prepared' => 'Mint prepared',
@@ -437,7 +442,11 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
               Text('Confirmed ${_wat(confirmed)} WAT')
             else if (!minted && scheduled != null)
               Text('Scheduled ${_wat(scheduled)} WAT'),
-            if (minted)
+            if (external)
+              const Text(
+                'This wallet minted in a separate transaction. Automatic retries and eligibility checks have stopped.',
+              )
+            else if (minted)
               const Text(
                 'Mint confirmed for this wallet. Eligibility checks have stopped.',
               ),

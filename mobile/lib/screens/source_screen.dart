@@ -76,7 +76,7 @@ class SourceScreen extends ConsumerWidget {
                     onPressed: () async {
                       try {
                         await api.retrySourcePost('${post['id']}');
-                        if (context.mounted)
+                        if (context.mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(
                               content: Text(
@@ -84,11 +84,13 @@ class SourceScreen extends ConsumerWidget {
                               ),
                             ),
                           );
+                        }
                       } catch (error) {
-                        if (context.mounted)
+                        if (context.mounted) {
                           ScaffoldMessenger.of(
                             context,
                           ).showSnackBar(SnackBar(content: Text('$error')));
+                        }
                       }
                     },
                   ),

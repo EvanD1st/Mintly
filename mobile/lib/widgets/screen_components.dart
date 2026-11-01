@@ -94,6 +94,7 @@ String statusLabel(String status) =>
       'prepared': 'Signed',
       'submitted': 'Pending',
       'confirmed': 'Confirmed',
+      'already_minted': 'Already minted',
       'uncertain': 'Tracking transaction',
       'failed': 'Failed',
       'skipped': 'Skipped',
@@ -154,7 +155,7 @@ class StatusBadge extends StatelessWidget {
   Widget build(BuildContext context) {
     final color = ['failed', 'reverted'].contains(status)
         ? const Color(0xFFFFAAA3)
-        : ['confirmed', 'armed', 'active'].contains(status)
+        : ['confirmed', 'already_minted', 'armed', 'active'].contains(status)
         ? Theme.of(context).colorScheme.primary
         : const Color(0xFFE9CC83);
     final filled = [
