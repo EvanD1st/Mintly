@@ -38,6 +38,7 @@ async def deliver_one():
 async def run():
     from app.services import wallet_alerts
     from app.services import daily_notices
+    from app.services import source_alerts
     import time
     last_alert_check=-1000
     while True:
@@ -50,6 +51,7 @@ async def run():
                 await wallet_alerts.poll()
                 last_alert_check=time.monotonic()
             await wallet_alerts.deliver()
+            await source_alerts.deliver()
         except Exception:
             pass
         await asyncio.sleep(15)

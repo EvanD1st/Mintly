@@ -43,6 +43,8 @@ class DropSchema(BaseModel):
     source_time_text: Optional[str] = None
     wallet_check: Optional[dict] = None
     automatic_mint: Optional[dict] = None
+    sources: list[dict] = []
+    additions: str | None = None
 
 
 class DropListResponse(BaseModel):
@@ -54,6 +56,7 @@ class DropListResponse(BaseModel):
     selected_wallet_id: Optional[str] = None
     wallets: List[dict] = []
     feed_status_text: str = ''
+    editions: list[dict] = []
 
 
 class EligibilityRecheckRequest(BaseModel):

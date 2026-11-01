@@ -84,6 +84,7 @@ class ApiService extends ChangeNotifier {
   String lastCheckedText = 'Wallet-specific eligibility is unverified';
   String? selectedFeedWallet;
   List<Map<String, dynamic>> feedWallets = [];
+  List<Map<String, dynamic>> feedEditions = [];
   int _feedRevision = 0;
 
   bool sessionRemembered = false;
@@ -739,6 +740,9 @@ class ApiService extends ChangeNotifier {
       throw const ApiException('Wallet selection changed.');
     }
     selectedFeedWallet = data['selected_wallet_id'] as String?;
+    feedEditions = (data['editions'] as List? ?? [])
+        .map((e) => Map<String, dynamic>.from(e))
+        .toList();
     feedWallets = (data['wallets'] as List? ?? [])
         .map((w) => Map<String, dynamic>.from(w))
         .toList();
@@ -755,12 +759,17 @@ class ApiService extends ChangeNotifier {
     _feedRevision++;
     selectedFeedWallet = null;
     feedWallets = [];
+    feedEditions = [];
   }
 
   Future<void> queueFeedChecks(List<DropModel> drops) async {
     final wallet = selectedFeedWallet;
     final unchecked = drops
-        .where((drop) => drop.automaticMint == null)
+        .where(
+          (drop) =>
+              drop.automaticMint == null &&
+              drop.walletCheck?['status'] != 'unsupported',
+        )
         .take(20)
         .toList();
     if (wallet == null || unchecked.isEmpty) return;
@@ -787,6 +796,19 @@ class ApiService extends ChangeNotifier {
 
   Future<Map<String, dynamic>> fetchSourceStatus() async =>
       (await _get('/source/status')) as Map<String, dynamic>;
+
+  Future<void> markFeedSeen(List<Map<String, dynamic>> editions) async {
+    await _post('/drops/seen', {
+      'editions': [
+        for (final e in editions)
+          {'id': e['id'], 'content_hash': e['content_hash']},
+      ],
+    });
+  }
+
+  Future<void> retrySourcePost(String id) async {
+    await _post('/source/posts/$id/retry', {});
+  }
 
   Future<Map<String, dynamic>> fetchWalletReadiness() async =>
       (await _get('/wallets/readiness?native_currencies=true'))

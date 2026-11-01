@@ -90,6 +90,8 @@ async def queue_checks(db,user,wallet,drops):
     from sqlalchemy.dialects.sqlite import insert as sqlite_insert
     insert=pg_insert if db.bind.dialect.name=='postgresql' else sqlite_insert
     for drop in drops:
+        if drop.canonical_id:
+            drop=await db.get(Drop,drop.canonical_id)
         if not supported(drop) or drop.id in existing:continue
         await db.execute(insert(FeedWalletCheck).values(user_id=user.id,wallet_id=wallet.id,drop_id=drop.id,
             status='queued',result={},attempts=0,next_attempt_at=now,created_at=now,updated_at=now)
@@ -115,6 +117,9 @@ async def step(factory):
         lease=row.lease_until
         key=(row.user_id,row.wallet_id,row.drop_id)
         wallet=await db.get(Wallet,row.wallet_id);drop=await db.get(Drop,row.drop_id);user=await db.get(User,row.user_id)
+        if drop and drop.canonical_id:
+            row.status='unverified';row.lease_until=None
+            await db.commit();return True
         if user and wallet and drop and await existing_mints(db, user, wallet, [drop]):
             # Old queued display checks must not poll active or already minted collections.
             row.status='unverified';row.lease_until=None

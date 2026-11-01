@@ -4,6 +4,7 @@ import '../widgets/main_navigation.dart';
 import '../state/app_state.dart';
 import '../widgets/network_budget_card.dart';
 import '../widgets/collection_thumbnail.dart';
+import '../services/push_service.dart';
 import 'discover_screen.dart';
 import 'queue_screen.dart';
 import 'history_screen.dart';
@@ -25,7 +26,17 @@ class _MainShellState extends ConsumerState<MainShell>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    PushService.instance.todayRequests.addListener(_openToday);
     WidgetsBinding.instance.addPostFrameCallback((_) => _showCopyUpdate());
+  }
+
+  void _openToday() {
+    if (!mounted ||
+        PushService.instance.todayOwner != ref.read(apiServiceProvider).userId)
+      return;
+    Navigator.of(context).popUntil((route) => route.isFirst);
+    _selectTab(0);
+    ref.read(mintlyProvider.notifier).refreshFeed();
   }
 
   Future<void> _showCopyUpdate() async {
@@ -66,6 +77,7 @@ class _MainShellState extends ConsumerState<MainShell>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    PushService.instance.todayRequests.removeListener(_openToday);
     super.dispose();
   }
 

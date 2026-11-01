@@ -20,6 +20,7 @@ class Drop(Base):
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
     source_post_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("source_posts.id"), nullable=True)
+    canonical_id: Mapped[Optional[str]] = mapped_column(String(64), ForeignKey('drops.id'), index=True)
     name: Mapped[str] = mapped_column(String(150), nullable=False, index=True)
     chain: Mapped[str] = mapped_column(String(50), default="Base", nullable=False)
     chain_id: Mapped[int] = mapped_column(Integer, default=8453, nullable=False)

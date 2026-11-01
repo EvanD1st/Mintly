@@ -6,7 +6,7 @@ from app.database import Base
 
 class DailyListNotice(Base):
     __tablename__ = 'daily_list_notices'
-    __table_args__ = (UniqueConstraint('list_date','device_id','user_id',name='uq_daily_notice_owner_device'),)
+    __table_args__ = (UniqueConstraint('source_post_id','device_id','user_id',name='uq_daily_notice_post_owner_device'),)
     id: Mapped[str] = mapped_column(String(64),primary_key=True)
     list_date: Mapped[date] = mapped_column(Date,index=True)
     device_id: Mapped[str] = mapped_column(ForeignKey('notification_devices.id'))

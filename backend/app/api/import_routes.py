@@ -50,7 +50,28 @@ async def import_drops_manually(
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Failed to fetch provided URL: {str(e)}")
 
-    # Parse drops from content
+    # Pasted daily lists use the same durable inbox and canonical merge as X polling.
+    from app.services.daily_list_parser import is_daily_list
+    if is_daily_list(content):
+        from app.services.x_feed import ensure_source,process_post
+        from app.models import FeedMention
+        from sqlalchemy import select
+        await ensure_source(db,'lakzonevn')
+        pid='manual_'+uuid.uuid4().hex[:12]
+        post=SourcePost(post_id=pid,author_username=req.source_author.lstrip('@').strip().lower(),
+            full_text=req.raw_content,expanded_text=content,posted_at=datetime.now(timezone.utc),
+            is_daily_list=True,is_manual_import=True,extracted_urls=[],parser_version=0)
+        db.add(post);await db.commit();await db.refresh(post)
+        try:await process_post(db,post.id)
+        except Exception:
+            await db.rollback()
+            raise HTTPException(503,'The original list is saved. Its links could not be processed yet; retry processing from Sources.') from None
+        rows=(await db.scalars(select(Drop).join(FeedMention,FeedMention.drop_id==Drop.id)
+            .where(FeedMention.post_id==post.id).options(selectinload(Drop.stages)))).unique().all()
+        return ManualImportResponse(post_id=pid,message=f'Saved list with {len(rows)} collection(s).',
+            parsed_drops_count=len(rows),drops=rows)
+
+    # Parse single collection links using the existing import path.
     parsed = DropPostParser.parse(content, datetime.now(timezone.utc))
     if not parsed:
         if not is_url:

@@ -15,7 +15,7 @@ if ! command -v docker >/dev/null || ! docker compose version >/dev/null 2>&1; t
     sudo -n systemctl enable --now docker
 fi
 DOCKER=(docker)
-if ! docker info >/dev/null 2>&1; then DOCKER=(sudo -n --preserve-env=MINTLY_ENV_FILE,MINTLY_RELEASE,MINTLY_FIREBASE_FILE,MINTLY_X_COOKIES_FILE,MINTLY_X_ACCOUNTS_DIR,MINTLY_OPENSEA_DIR,MINTLY_OPENSEA_AUTO_RENEW docker); fi
+if ! docker info >/dev/null 2>&1; then DOCKER=(sudo -n --preserve-env=MINTLY_ENV_FILE,MINTLY_RELEASE,MINTLY_FIREBASE_FILE,MINTLY_X_COOKIES_FILE,MINTLY_X_ACCOUNTS_DIR,MINTLY_SOURCE_ARCHIVE_DIR,MINTLY_OPENSEA_DIR,MINTLY_OPENSEA_AUTO_RENEW docker); fi
 
 export MINTLY_ENV_FILE="$APP_DIR/shared/.env"
 export MINTLY_RELEASE="${MINTLY_RELEASE:-local}"
@@ -67,6 +67,8 @@ if [[ -f "$APP_DIR/shared/firebase-service-account.json" ]]; then
 fi
 if sudo -n test -f "$APP_DIR/shared/x-session/accounts.db"; then
     export MINTLY_X_ACCOUNTS_DIR="$APP_DIR/shared/x-session"
+    export MINTLY_SOURCE_ARCHIVE_DIR="$APP_DIR/shared/source-archive"
+    sudo -n install -d -o 10001 -g 10001 -m 700 "$MINTLY_SOURCE_ARCHIVE_DIR"
     sudo -n chown -R 10001:10001 "$MINTLY_X_ACCOUNTS_DIR"
     sudo -n chmod 700 "$MINTLY_X_ACCOUNTS_DIR"
     sudo -n chmod 600 "$MINTLY_X_ACCOUNTS_DIR/accounts.db"

@@ -11,7 +11,9 @@ from app.config import settings
 
 
 class SourceUnavailable(Exception):
-    pass
+    def __init__(self,message,retry_after_seconds=60):
+        super().__init__(message)
+        self.retry_after_seconds=retry_after_seconds
 
 
 def _posted_at(value):

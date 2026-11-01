@@ -14,6 +14,7 @@ import 'dart:async';
 import 'saved_plan_screen.dart';
 import 'queue_screen.dart';
 import 'history_screen.dart';
+import '../services/external_url.dart';
 import '../widgets/network_budget_card.dart' show formatNative;
 
 class DiscoverScreen extends ConsumerStatefulWidget {
@@ -94,6 +95,30 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
             style: TextStyle(color: muted),
           ),
           const SizedBox(height: 18),
+          if (state.sourceStatusText.isNotEmpty)
+            Text(
+              state.sourceStatusText,
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          if (state.drops.any((d) => d.additions != null))
+            TextButton(
+              onPressed: () async {
+                final editions = api.feedEditions
+                    .map((e) => Map<String, dynamic>.from(e))
+                    .toList();
+                try {
+                  await api.markFeedSeen(editions);
+                  if (mounted) await _refresh();
+                } catch (error) {
+                  if (context.mounted)
+                    MintlyNotice.show(
+                      context,
+                      SnackBar(content: Text('$error')),
+                    );
+                }
+              },
+              child: const Text('Mark additions as seen'),
+            ),
           if (api.feedWallets.isNotEmpty)
             Card(
               child: ListTile(
@@ -141,7 +166,7 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
             Card(
               child: ListTile(
                 leading: const Icon(MintlyIcons.public),
-                title: const Text('@lakzonevn drops'),
+                title: const Text('Mint sources'),
                 subtitle: Text(state.sourceStatusText),
                 trailing: const Icon(MintlyIcons.chevronRight),
                 onTap: () => Navigator.of(
@@ -237,9 +262,70 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
     BuildContext context,
     MintlyNotifier notifier,
     DropModel drop,
+  ) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      if (drop.sources.isNotEmpty || drop.additions != null)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+          child: Wrap(
+            spacing: 8,
+            children: [
+              if (drop.additions != null)
+                Text(
+                  drop.additions == 'new'
+                      ? 'New addition'
+                      : 'Updated source details',
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.primary,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              Text(
+                drop.sources.map((s) => '@${s['author']}').toSet().join(' · '),
+              ),
+            ],
+          ),
+        ),
+      _dropBody(context, notifier, drop),
+      if (drop.sources.isNotEmpty)
+        ExpansionTile(
+          title: const Text('Source details'),
+          children: [
+            for (final source in drop.sources)
+              ListTile(
+                title: Text('@${source['author']}'),
+                subtitle: Text(
+                  '${source['price'] ?? 'Price not provided'}\n${source['time_wat'] ?? 'Time not verified'}'
+                  '${(source['stages'] as List? ?? []).isEmpty ? '' : '\n${(source['stages'] as List).map((s) => '${s['name']}: ${s['wat']}').join('\n')}'}',
+                ),
+                trailing: source['post_url'] == null
+                    ? null
+                    : TextButton(
+                        onPressed: () async {
+                          final uri = Uri.tryParse('${source['post_url']}');
+                          if (uri != null &&
+                              uri.scheme == 'https' &&
+                              uri.host == 'x.com')
+                            await openExternalUrl(context, uri);
+                        },
+                        child: const Text('View post'),
+                      ),
+              ),
+          ],
+        ),
+    ],
+  );
+
+  Widget _dropBody(
+    BuildContext context,
+    MintlyNotifier notifier,
+    DropModel drop,
   ) {
     if (drop.automaticMint != null) return _automaticCard(context, drop);
-    if (drop.walletCheck != null) return _verifiedCard(context, drop);
+    if (drop.walletCheck != null &&
+        drop.walletCheck?['status'] != 'unsupported')
+      return _verifiedCard(context, drop);
     final stage = drop.stages.isNotEmpty ? drop.stages.first : null;
     final price = stage == null || stage.priceEthStr.isEmpty
         ? 'Price on source'
