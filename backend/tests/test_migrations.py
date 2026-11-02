@@ -57,6 +57,34 @@ def test_fresh_database_migrates_to_head(monkeypatch):
             engine.dispose()
 
 
+def test_recovery_upgrade_preserves_existing_passwords_and_sessions(monkeypatch, tmp_path):
+    import sqlalchemy as sa
+    from datetime import datetime, timezone, timedelta
+    path = tmp_path / 'recovery-upgrade.db'
+    monkeypatch.setattr(settings, 'DATABASE_URL', f'sqlite+aiosqlite:///{path.as_posix()}')
+    command.upgrade(Config('alembic.ini'), '031_source_verification_retired')
+    engine = create_engine(f'sqlite:///{path.as_posix()}')
+    now = datetime.now(timezone.utc)
+    try:
+        with engine.begin() as conn:
+            meta = sa.MetaData()
+            users = sa.Table('users', meta, autoload_with=conn)
+            sessions = sa.Table('auth_sessions', meta, autoload_with=conn)
+            conn.execute(users.insert().values(id='retained-owner', username='retained-member',
+                password_hash='original-password-hash', role='member', is_active=True,
+                must_change_password=False, automation_paused=False, created_at=now, updated_at=now))
+            conn.execute(sessions.insert().values(id='retained-session', user_id='retained-owner',
+                token_hash='original-session-digest', expires_at=now + timedelta(days=1),
+                created_at=now, updated_at=now))
+        command.upgrade(Config('alembic.ini'), 'head')
+        with engine.connect() as conn:
+            assert conn.exec_driver_sql('SELECT password_hash FROM users').scalar_one() == 'original-password-hash'
+            assert conn.exec_driver_sql('SELECT user_id,token_hash FROM auth_sessions').one() == ('retained-owner', 'original-session-digest')
+            assert conn.exec_driver_sql('SELECT count(*) FROM account_recovery_codes').scalar_one() == 0
+    finally:
+        engine.dispose()
+
+
 def test_two_source_upgrade_preserves_ids_dismissals_and_delivery_history(monkeypatch,tmp_path):
     import sqlalchemy as sa
     from datetime import datetime,timezone

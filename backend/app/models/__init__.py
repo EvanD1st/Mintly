@@ -35,4 +35,5 @@ from app.models.collection_artwork import CollectionArtwork
 from app.models.feed import FeedWalletCheck, FeedWalletSelection
 from app.models.device_session import DeviceSession, DeviceRefreshUse
 from app.models.daily_notice import DailyListNotice
+from app.models.account_recovery import AccountRecoveryCode
 from app.models.feed_source import SourceRevision, FeedMention, FeedSeen, SourceAlert
