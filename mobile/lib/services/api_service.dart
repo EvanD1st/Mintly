@@ -229,30 +229,45 @@ class ApiService extends ChangeNotifier {
         }
       }
       if (!remembered && result['refresh_token'] is String) {
-        // A cancelled/failed vault write must not leave an unrecorded refresh family.
-        try {
-          await _client
+        if (RegExp(r'^MRC-[A-Za-z0-9_-]{32}$').hasMatch(password)) {
+          // The code was already consumed. Keep this authorized login without
+          // replaying it, and revoke the unsaved remembered credential.
+          final ordinary = await _client
               .post(
-                Uri.parse('$baseUrl/auth/device-revoke'),
-                headers: {'Content-Type': 'application/json'},
-                body: jsonEncode(_refreshBody(result, _requestId())),
+                Uri.parse('$baseUrl/auth/session-only'),
+                headers: {'Authorization': 'Bearer ${result['token']}'},
               )
               .timeout(const Duration(seconds: 10));
-        } catch (_) {}
-        final ordinary = await _client
-            .post(
-              Uri.parse('$baseUrl/auth/login'),
-              headers: {'Content-Type': 'application/json'},
-              body: jsonEncode({
-                'username': username.trim(),
-                'password': password,
-              }),
-            )
-            .timeout(const Duration(seconds: 15));
-        final fallback = Map<String, dynamic>.from(_decode(ordinary));
-        if (revision != _sessionRevision) return;
-        _sessionToken = fallback['token'] as String;
-        _user = Map<String, dynamic>.from(fallback['user']);
+          final fallback = Map<String, dynamic>.from(_decode(ordinary));
+          if (revision != _sessionRevision) return;
+          _sessionToken = fallback['token'] as String;
+          _user = Map<String, dynamic>.from(fallback['user']);
+        } else {
+          // A cancelled/failed vault write must not leave an unrecorded refresh family.
+          try {
+            await _client
+                .post(
+                  Uri.parse('$baseUrl/auth/device-revoke'),
+                  headers: {'Content-Type': 'application/json'},
+                  body: jsonEncode(_refreshBody(result, _requestId())),
+                )
+                .timeout(const Duration(seconds: 10));
+          } catch (_) {}
+          final ordinary = await _client
+              .post(
+                Uri.parse('$baseUrl/auth/login'),
+                headers: {'Content-Type': 'application/json'},
+                body: jsonEncode({
+                  'username': username.trim(),
+                  'password': password,
+                }),
+              )
+              .timeout(const Duration(seconds: 15));
+          final fallback = Map<String, dynamic>.from(_decode(ordinary));
+          if (revision != _sessionRevision) return;
+          _sessionToken = fallback['token'] as String;
+          _user = Map<String, dynamic>.from(fallback['user']);
+        }
       }
     }
     if (expiry is! String) unawaited(_store(() => _vault.clear()));
@@ -1321,6 +1336,15 @@ class ApiService extends ChangeNotifier {
     String adminPassword,
   ) async =>
       (await _post('/admin/users/$id/reset-password', {
+            'admin_password': adminPassword,
+          }))
+          as Map<String, dynamic>;
+
+  Future<Map<String, dynamic>> issueRecoveryCode(
+    String id,
+    String adminPassword,
+  ) async =>
+      (await _post('/admin/users/$id/recovery-code', {
             'admin_password': adminPassword,
           }))
           as Map<String, dynamic>;
