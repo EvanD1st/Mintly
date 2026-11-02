@@ -48,11 +48,14 @@ async def save_raw(db,item,name):
     if post.content_hash!=digest:
         post.full_text,post.expanded_text,post.content_hash=raw,expanded,digest
         post.next_process_at=None
+        post.verification_retired_at=None
+        post.processing_error=None
     await db.commit()
 
 
 async def process_post(db,pid):
     post=await db.get(SourcePost,pid);now=datetime.now(timezone.utc)
+    if post.verification_retired_at is not None:return 0
     if not post.content_hash:
         post.expanded_text=post.expanded_text or post.full_text
         post.content_hash=hashlib.sha256((post.full_text+'\n'+post.expanded_text).encode()).hexdigest()
@@ -101,7 +104,7 @@ async def process_post(db,pid):
     await db.rollback()
     await discovery_lock(db)
     post=await db.get(SourcePost,pid,populate_existing=True)
-    if post.content_hash!=digest:
+    if post.content_hash!=digest or post.verification_retired_at is not None:
         await db.rollback();return 0
     source=await db.scalar(select(SourceConnection).where(SourceConnection.source_name==post.author_username))
     if source and not source.is_monitoring and not post.is_manual_import:
@@ -200,10 +203,12 @@ async def sync_x_drops(db,adapter=None,source_name='lakzonevn'):
 
 async def process_pending(db,*,source_name=None,limit=1):
     from app.services.feed_sources import approved
+    from app.services.source_verification import retire_historical_verification
     now=datetime.now(timezone.utc)
+    await retire_historical_verification(db,now=now)
     count=0
     for _ in range(limit):
-        statement=select(SourcePost).where(approved(),or_(SourcePost.processed_hash.is_(None),
+        statement=select(SourcePost).where(approved(),SourcePost.verification_retired_at.is_(None),or_(SourcePost.processed_hash.is_(None),
             SourcePost.processed_hash!=SourcePost.content_hash,SourcePost.parser_version!=VERSION),
             or_(SourcePost.next_process_at.is_(None),SourcePost.next_process_at<=now))
         if source_name:statement=statement.where(SourcePost.author_username==source_name)
@@ -215,6 +220,7 @@ async def process_pending(db,*,source_name=None,limit=1):
             async with asyncio.timeout(75):count+=await process_post(db,pid)
         except Exception:
             await db.rollback();post=await db.get(SourcePost,pid)
-            post.processing_error='Saved post processing will retry.';post.next_process_at=now+timedelta(minutes=2)
+            if post.verification_retired_at is None:
+                post.processing_error='Saved post processing will retry.';post.next_process_at=now+timedelta(minutes=2)
             await db.commit()
     return count

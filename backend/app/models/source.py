@@ -45,6 +45,8 @@ class SourcePost(Base):
     processed_hash: Mapped[Optional[str]] = mapped_column(String(64))
     next_process_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     processing_error: Mapped[Optional[str]] = mapped_column(String(200))
+    # Historical verification can stop without claiming success or deleting evidence.
+    verification_retired_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     published_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     list_sequence: Mapped[Optional[int]] = mapped_column(Integer)
     notice_eligible: Mapped[bool] = mapped_column(Boolean, default=True, server_default='true')
