@@ -22,47 +22,11 @@ class _AdminScreenState extends ConsumerState<AdminScreen> {
       setState(() => _users = ref.read(apiServiceProvider).listUsers());
 
   Future<String?> _prompt(String title, {String? username}) async {
-    final input = TextEditingController();
-    final password = TextEditingController();
     final result = await showDialog<(String, String)>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text(title),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (username == null)
-              TextField(
-                controller: input,
-                autocorrect: false,
-                decoration: const InputDecoration(labelText: 'New username'),
-              ),
-            TextField(
-              controller: password,
-              obscureText: true,
-              autocorrect: false,
-              enableSuggestions: false,
-              decoration: const InputDecoration(
-                labelText: 'Your admin password',
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () =>
-                Navigator.pop(context, (input.text.trim(), password.text)),
-            child: const Text('Confirm'),
-          ),
-        ],
-      ),
+      builder: (context) =>
+          _AdminConfirmationDialog(title: title, newAccount: username == null),
     );
-    input.dispose();
-    password.dispose();
     if (result == null) return null;
     return '${result.$1}\n${result.$2}';
   }
@@ -261,5 +225,66 @@ class _AdminScreenState extends ConsumerState<AdminScreen> {
         );
       },
     ),
+  );
+}
+
+class _AdminConfirmationDialog extends StatefulWidget {
+  const _AdminConfirmationDialog({
+    required this.title,
+    required this.newAccount,
+  });
+  final String title;
+  final bool newAccount;
+
+  @override
+  State<_AdminConfirmationDialog> createState() =>
+      _AdminConfirmationDialogState();
+}
+
+class _AdminConfirmationDialogState extends State<_AdminConfirmationDialog> {
+  final _input = TextEditingController();
+  final _password = TextEditingController();
+
+  @override
+  void dispose() {
+    _input.dispose();
+    _password.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: Text(widget.title),
+    content: SingleChildScrollView(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (widget.newAccount)
+            TextField(
+              controller: _input,
+              autocorrect: false,
+              decoration: const InputDecoration(labelText: 'New username'),
+            ),
+          TextField(
+            controller: _password,
+            obscureText: true,
+            autocorrect: false,
+            enableSuggestions: false,
+            decoration: const InputDecoration(labelText: 'Your admin password'),
+          ),
+        ],
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('Cancel'),
+      ),
+      FilledButton(
+        onPressed: () =>
+            Navigator.pop(context, (_input.text.trim(), _password.text)),
+        child: const Text('Confirm'),
+      ),
+    ],
   );
 }
