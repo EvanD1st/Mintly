@@ -38,6 +38,7 @@ class TwscrapeSourceAdapter:
         if backoff>0:
             raise SourceUnavailable('X requested a backoff; saved daily lists are retained until the provider reset.',backoff)
         try:return await asyncio.wait_for(self._fetch(path,source_name,on_post,cursor=cursor,since=since,on_checkpoint=on_checkpoint),max(1,settings.X_DISCOVERY_TIMEOUT_SECONDS))
+        except SourceUnavailable:raise
         except Exception as error:raise SourceUnavailable(f'X discovery could not refresh ({type(error).__name__}); saved lists are retained.') from None
 
     async def _fetch(self,path,source_name='lakzonevn',on_post=None,*,cursor=None,since=None,on_checkpoint=None):
@@ -86,11 +87,21 @@ class TwscrapeSourceAdapter:
                     kv={'cursor':start} if start else None)) as pages:
                 async for response in pages:
                     received=True;payload=response.json();dates=[]
+                    # X repeats pinned posts on older pages. They are worth saving,
+                    # but their date cannot tell us how far pagination has reached.
+                    pinned_ids=set();pending=[payload]
+                    while pending:
+                        value=pending.pop()
+                        if isinstance(value,dict):
+                            if value.get('type')=='TimelinePinEntry':
+                                pinned_ids.update(tweet.id for tweet in parse_tweets(value))
+                            else:pending.extend(value.values())
+                        elif isinstance(value,list):pending.extend(value)
                     for tweet in parse_tweets(payload):
                         if not getattr(tweet,'user',None) or tweet.user.id!=user.id or tweet.user.username.lower()!=name.lower():continue
                         if getattr(tweet,'retweetedTweet',None) or getattr(tweet,'inReplyToTweetId',None) or getattr(tweet,'isQuoteStatus',False):continue
                         if tweet.date.tzinfo is None:continue
-                        dates.append(tweet.date)
+                        if tweet.id not in pinned_ids:dates.append(tweet.date)
                         raw=tweet.rawContent or '';text=raw
                         if len(raw)>100000 or not re.fullmatch(r'\d{1,30}',str(tweet.id)):continue
                         for link in tweet.links or []:
@@ -102,8 +113,16 @@ class TwscrapeSourceAdapter:
                     complete=not next_cursor or bool(since and dates and max(dates)<since)
                     if on_checkpoint:await on_checkpoint(None if complete else next_cursor,None if complete else since)
                     if complete:break
-            if not received:raise SourceUnavailable('X returned no timeline pages; saved posts and catch-up position are retained.')
+            if not received and not start:
+                raise SourceUnavailable('X returned no timeline pages; saved posts and catch-up position are retained.')
+            return received
         # Fresh lists are checked even when an older interrupted pagination pass remains.
-        if cursor:await page_pass(None,latest=True)
-        await page_pass(cursor)
+        if cursor:
+            await page_pass(None,latest=True)
+            if await page_pass(cursor):return []
+            # Twscrape suppresses empty terminal pages. A saved cursor can thus
+            # yield nothing forever. Rewalk from the top, retaining the original
+            # boundary until saved pages prove that catch-up is complete.
+            if on_checkpoint:await on_checkpoint(None,since)
+        await page_pass(None)
         return []
