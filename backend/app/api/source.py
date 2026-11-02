@@ -26,7 +26,8 @@ async def get_source_status(admin: User = Depends(require_admin), db: AsyncSessi
     last_sync = max((s['last_sync_at'] for s in sources if s['last_sync_at']),default=None)
     status = 'healthy' if all(s['status']=='healthy' and not s['delayed'] for s in sources) else 'needs_attention'
     errors=[s['last_error'] for s in sources if s['last_error']]
-    pending=(await db.scalars(select(SourcePost).where(approved(),SourcePost.processing_error.is_not(None))
+    pending=(await db.scalars(select(SourcePost).where(approved(),SourcePost.processing_error.is_not(None),
+        SourcePost.verification_retired_at.is_(None))
         .order_by(SourcePost.updated_at.desc()).limit(20))).all()
     if not active:
         summary = "Discovery monitoring paused by admin"
@@ -67,6 +68,8 @@ async def toggle_monitoring(
 async def retry_saved_post(post_id:str,admin=Depends(require_admin),db=Depends(get_db)):
     post=await db.scalar(select(SourcePost).where(SourcePost.id==post_id,approved()))
     if not post:raise HTTPException(404,'Saved source post not found.')
+    if post.verification_retired_at is not None:
+        raise HTTPException(409,'Verification retries for this historical list have been retired. Its saved entries and history are preserved.')
     post.processed_hash=None;post.next_process_at=None
     await db.commit();return {'queued':True}
 

@@ -111,7 +111,8 @@ async def health(db):
     day=now.astimezone(ZoneInfo('Africa/Lagos')).date()
     posts=(await db.execute(select(SourcePost.author_username,SourcePost.processing_error,
         SourcePost.posted_at,SourcePost.list_date,SourcePost.published_at).where(
-            SourcePost.author_username.in_(SOURCE_NAMES),or_(SourcePost.posted_at>=now-timedelta(days=2),SourcePost.list_date==day)))).all()
+            SourcePost.author_username.in_(SOURCE_NAMES),SourcePost.verification_retired_at.is_(None),
+            or_(SourcePost.posted_at>=now-timedelta(days=2),SourcePost.list_date==day)))).all()
     for name in SOURCE_NAMES:
         row=next((r for r in rows if r.source_name==name),None)
         delayed=not row or not row.last_sync_at or (now-aware(row.last_sync_at)).total_seconds()>900
