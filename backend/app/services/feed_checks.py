@@ -104,7 +104,7 @@ async def queue_checks(db,user,wallet,drops):
             .on_conflict_do_nothing(index_elements=['user_id','wallet_id','drop_id']))
         row=await db.get(FeedWalletCheck,(user.id,wallet.id,drop.id))
         if row.status in ('queued','checking') and (not row.lease_until or aware(row.lease_until)>now):continue
-        if row.checked_at and aware(row.checked_at)>now-timedelta(seconds=30) and row.expires_at and aware(row.expires_at)>now:continue
+        if row.expires_at and aware(row.expires_at)>now:continue
         if row.next_attempt_at and aware(row.next_attempt_at)>now:continue
         row.status='queued';row.next_attempt_at=now;row.attempts=0
     await db.commit()
