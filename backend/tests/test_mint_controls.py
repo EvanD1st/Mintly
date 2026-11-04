@@ -67,13 +67,24 @@ async def test_daily_cap_reserves_both_bots_and_does_not_reset_on_updates(copyin
     async with lab.factory() as db:
         assert len((await db.scalars(select(MintTask))).all())==1
         event=(await db.scalars(select(CopyEvent))).one()
-        assert event.status=='skipped' and 'Daily spending limit' in event.note
+        assert event.status=='detected' and event.task_id is None
+        assert event.last_error_category=='waiting_reserved_budget'
     before=(await lab.client.get('/api/automatic/daily-limit')).json()
     after=await limits('0.0007')
     assert after['reserved_wei']==before['reserved_wei'] and after['spent_wei']==before['spent_wei']
     assert (await lab.client.post('/api/tasks/arm',json={**lab.request,'idempotency_key':'second-within-same-day'})).status_code==429
     await lab.client.post('/api/tasks/'+armed.json()['id']+'/disarm')
     assert (await lab.client.get('/api/automatic/daily-limit')).json()['reserved_wei']=='0'
+    async with lab.factory() as db:
+        event=(await db.scalars(select(CopyEvent))).one()
+        event.next_attempt_at=datetime.now(timezone.utc)-timedelta(seconds=1)
+        await db.commit()
+        await copy_mints.process_copy_events(db,c['watch_id'],lab.w.eth.chain_id)
+        await db.refresh(event)
+        assert event.status=='armed' and event.task_id,event.note
+        assert len((await db.scalars(select(MintTask))).all())==2
+    after_retry=(await lab.client.get('/api/automatic/daily-limit')).json()
+    assert int(after_retry['spent_wei'])+int(after_retry['reserved_wei'])<=int(after_retry['limit_wei'])
 
 
 async def test_daily_limit_other_account_cannot_change_or_read_it(lab,limits):
