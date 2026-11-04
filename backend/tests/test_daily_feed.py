@@ -99,6 +99,19 @@ def test_stale_results_cannot_claim_ineligibility_or_enable_setup():
     result=feed_checks.presentation(cached([stage('bad','not_eligible')],expires_at=datetime.now(timezone.utc)-timedelta(seconds=1)))
     assert result['status']=='unverified' and not result['setup_enabled']
 
+def test_recent_eligible_result_can_open_review_but_cannot_authorize_setup():
+    now=datetime.now(timezone.utc)
+    check=cached([stage('public')],expires_at=now-timedelta(seconds=1))
+    check.checked_at=now-timedelta(minutes=2)
+    check.status='checking'
+    result=feed_checks.presentation(check,now)
+    assert result['review_enabled'] and not result['setup_enabled']
+    assert result['recommended_stage'] is None
+    assert result['last_recommended_stage']['id']=='public'
+    assert not feed_checks.presentation(check,now+timedelta(minutes=16))['review_enabled']
+    check.result={'stages':[stage('public','not_eligible')]}
+    assert not feed_checks.presentation(check,now)['review_enabled']
+
 @pytest.mark.parametrize('status',['queued','checking'])
 def test_refresh_keeps_valid_result_until_expiry_then_labels_history(status):
     now=datetime.now(timezone.utc)

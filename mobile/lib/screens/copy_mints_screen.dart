@@ -1369,7 +1369,7 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
       _paidOnly = true;
   bool _initialSettingsLoaded = false;
   String _quantityChoice = 'one';
-  int _days = 7;
+  int _days = 60;
   String _currency = 'ETH';
   List<Map<String, dynamic>> _currencyPolicies(Map<String, dynamic> wallet) =>
       (wallet['all_policies'] as List<Map<String, dynamic>>? ??
@@ -1411,7 +1411,7 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
     if (data == null) {
       _anyFreePhase = false;
       _restored = false;
-      if (_days == 0) _days = 7;
+      if (_days == 0) _days = 60;
       return;
     }
     final snapshot = data['snapshot'] as Map;
@@ -2083,7 +2083,7 @@ class _CopySettingsState extends ConsumerState<CopySettingsScreen> {
                                 value: 0,
                                 child: Text('Keep current expiry'),
                               ),
-                            for (final d in [1, 3, 7, 14, 30])
+                            for (final d in [1, 3, 7, 14, 30, 60])
                               DropdownMenuItem(
                                 value: d,
                                 child: Text('Up to $d day${d == 1 ? '' : 's'}'),

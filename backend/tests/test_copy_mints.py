@@ -57,6 +57,32 @@ async def copying(lab, monkeypatch):
     return dict(lab=lab, source=source, watch_id=watch_id, request=request, approve=approve, mint=mint, scan=scan)
 
 
+async def test_reserved_budget_waits_then_arms_once_after_settlement(copying):
+    c=copying;lab=c['lab']
+    await c['approve']()
+    async with lab.factory() as db:
+        rule=await db.get(CopyRule,c['request']['request_id'])
+        rule.reserved_wei=rule.budget_wei
+        await db.commit()
+    await c['mint']();await c['scan']()
+    async with lab.factory() as db:
+        event=await db.scalar(select(CopyEvent).where(CopyEvent.watch_id==c['watch_id']))
+        assert event.status=='detected' and event.task_id is None
+        assert event.last_error_category=='waiting_reserved_budget'
+        rule=await db.get(CopyRule,c['request']['request_id'])
+        assert rule.reserved_wei==rule.budget_wei
+        rule.reserved_wei=0
+        event.next_attempt_at=datetime.now(timezone.utc)-timedelta(seconds=1)
+        await db.commit()
+        await copy_mints.process_copy_events(db,c['watch_id'],lab.w.eth.chain_id)
+        await db.refresh(event)
+        assert event.task_id and event.status=='armed',event.note
+        task_id=event.task_id
+        await copy_mints.process_copy_events(db,c['watch_id'],lab.w.eth.chain_id)
+        await db.refresh(event)
+        assert event.task_id==task_id
+
+
 async def test_source_to_copy_receipt_limits_history_and_duplicate_signal(copying):
     c = copying; lab = c['lab']
     assert (await c['approve']())['status'] == 'active'

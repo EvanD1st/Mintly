@@ -96,8 +96,8 @@ async def start_checks(watch_id:str,req:CheckRequest,user=Depends(get_current_us
         raise HTTPException(404,'Receiving wallet not found.')
     if req.quantity_mode=='max_free' and not req.free_only:
         raise HTTPException(422,'Maximum quantity is available only for free mints.')
-    if req.expires_at.tzinfo is None or not datetime.now(timezone.utc)<aware(req.expires_at)<=datetime.now(timezone.utc)+timedelta(days=30):
-        raise HTTPException(422,'Choose a check period of up to 30 days.')
+    if req.expires_at.tzinfo is None or not datetime.now(timezone.utc)<aware(req.expires_at)<=datetime.now(timezone.utc)+timedelta(days=60):
+        raise HTTPException(422,'Choose a check period of up to 60 days.')
     price,fee=map(automatic.wei,(req.price_cap_eth,req.fee_cap_eth))
     chains=[c for c in watch.chains if symbol(c)==req.native_symbol]
     if not chains: raise HTTPException(422,'No followed network uses this native currency.')
@@ -390,7 +390,7 @@ async def save_rule(watch_id, req, user, db, *, group=None):
         raise HTTPException(409, 'This wallet approval cannot mint whitelist stages. Review its wallet permissions first.')
     expiry = aware(req.expires_at)
     if req.expires_at.tzinfo is None or not req.consent or not datetime.now(timezone.utc) < expiry <= min(
-            aware(grant.expires_at), datetime.now(timezone.utc) + timedelta(days=30)):
+            aware(grant.expires_at), datetime.now(timezone.utc) + timedelta(days=60)):
         raise HTTPException(422, 'Approve finite limits and an expiry within your wallet policy.')
     require_currency(grant.chain_id,req.native_symbol)
     price, fee = map(automatic.wei, (req.price_cap_eth, req.fee_cap_eth))

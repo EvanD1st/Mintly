@@ -10,6 +10,7 @@ from web3.exceptions import Web3RPCError
 from app.config import settings
 from app.models import CopyWatch, CopyRule, CopyEvent, MintTask, MintAuthorization, Drop, MintStage, ActivityEvent, CopyCheck
 from app.services import automatic
+from app.services import copy_budget_wait
 from app.services.mint_plans import aware
 from app.services.seadrop_mint import decode_mint, verify_presale, ALLOW_SELECTOR, SIGNED_SELECTOR
 from app.services.opensea import OpenSeaClient, OpenSeaUnavailable, CHAINS as OPENSEA_CHAINS
@@ -466,6 +467,8 @@ async def arm_event(db, event, rule, web3):
         event.status, event.note = 'skipped', 'Whitelist copying is off. Enable it in Copy settings.'
         return
     flexible_free = flexible_free_budget(r)
+    if quantity_mode(r)!='max_available' and not flexible_free:
+        await copy_budget_wait.wait_if_reserved(db,rule,r['total_cap_wei'])
     if quantity_mode(r)=='max_available' or flexible_free:
         from app.models import AutomaticGrant,User
         from app.services.daily_budget import usage, limit_owner
@@ -478,9 +481,13 @@ async def arm_event(db, event, rule, web3):
             daily=await usage(db,user.id,currency=symbol(rule.chain_id))
             ceiling=min(ceiling,owner.daily_limit_wei-sum(daily.values()))
             if owner.daily_limit_wei <= sum(daily.values()):
+                from app.services.copy_budget_wait import wait_if_reserved
+                await wait_if_reserved(db,rule,1)
                 from app.services.daily_budget import LIMIT_NOTE
                 raise HTTPException(429, LIMIT_NOTE)
         if ceiling <= 0:
+            from app.services.copy_budget_wait import wait_if_reserved
+            await wait_if_reserved(db,rule,1)
             event.status, event.note = 'skipped', budget_note(rule.chain_id, ceiling, r['total_cap_wei'], 'Available copy / wallet')
             return
         r={**r,'total_cap_wei':ceiling}
@@ -497,10 +504,14 @@ async def arm_event(db, event, rule, web3):
         event.status,event.note='skipped','No paid mint quantity fits the remaining spending budget.'
         return
     if rule.budget_wei - rule.spent_wei - rule.reserved_wei < r['total_cap_wei']:
+        from app.services.copy_budget_wait import wait_if_reserved
+        await wait_if_reserved(db,rule,r['total_cap_wei'])
         event.status, event.note = 'skipped', budget_note(rule.chain_id,
             rule.budget_wei - rule.spent_wei - rule.reserved_wei, r['total_cap_wei'])
         return
     if await group_remaining(db, rule) < r['total_cap_wei']:
+        from app.services.copy_budget_wait import wait_if_reserved
+        await wait_if_reserved(db,rule,r['total_cap_wei'])
         event.status, event.note = 'skipped', budget_note(rule.chain_id,
             await group_remaining(db, rule), r['total_cap_wei'], 'Shared copy')
         return
@@ -719,6 +730,10 @@ async def process_copy_events(db,watch_id,chain):
                     with mint_diagnostics.capture('','copy',event_id=event.id,owner_id=event.user_id) as events:
                         async with db.begin_nested():await arm_event(db,event,rule,web3)
                     event.last_error_category=None;event.last_upstream_status=None;event.next_attempt_at=None
+                except copy_budget_wait.ReservationWait:
+                    await db.refresh(event);await db.refresh(rule)
+                    from app.services.copy_budget_wait import defer
+                    defer(event,rule,min(end,aware(rule.expires_at)))
                 except free_copy.PhaseWait as wait:
                     await db.refresh(event)
                     event.note, event.next_attempt_at = wait.note, wait.next_attempt
@@ -744,7 +759,12 @@ async def process_copy_events(db,watch_id,chain):
                     await db.refresh(event);await db.refresh(rule)
                     from app.services.daily_budget import LIMIT_NOTE
                     if error.status_code==429 and error.detail==LIMIT_NOTE:
-                        event.status='skipped';event.note=LIMIT_NOTE;event.next_attempt_at=None;event.last_error_category='daily_limit'
+                        try:
+                            await copy_budget_wait.wait_if_reserved(db,rule,rule.snapshot['total_cap_wei'])
+                        except copy_budget_wait.ReservationWait:
+                            copy_budget_wait.defer(event,rule,min(end,aware(rule.expires_at)))
+                        else:
+                            event.status='skipped';event.note=LIMIT_NOTE;event.next_attempt_at=None;event.last_error_category='daily_limit'
                     elif error.status_code>=500 or error.status_code==429:
                         from app.services.copy_retry import next_copy_retry
                         event.next_attempt_at=next_copy_retry(datetime.now(timezone.utc),min(end,aware(rule.expires_at)),attempts,event.id)

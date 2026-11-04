@@ -798,7 +798,11 @@ class ApiService extends ChangeNotifier {
   }
 
   Future<MintPlanModel> prepareFeedPlan(DropModel drop) async {
-    final stage = drop.walletCheck?['recommended_stage'];
+    final stage =
+        drop.walletCheck?['recommended_stage'] ??
+        (drop.walletCheck?['review_enabled'] == true
+            ? (drop.walletCheck?['last_recommended_stage'])
+            : null);
     if (selectedFeedWallet == null || stage == null) {
       throw const ApiException('Check wallet eligibility first.');
     }
