@@ -163,6 +163,24 @@ async def fixtures(db,monkeypatch):
         mint_page_url='https://opensea.io/collection/test',is_demo=False))
     await db.commit();return users,wallets,await db.get(Drop,'feed')
 
+
+async def test_review_refresh_rejects_changed_stage_before_creating_plan(test_db,monkeypatch):
+    from app.api.drops import prepare_card,SetupCard
+    from fastapi import HTTPException
+    users,wallets,drop=await fixtures(test_db,monkeypatch)
+    drop.contract_address='0x'+'a'*40
+    now=datetime.now(timezone.utc)
+    test_db.add(FeedWalletCheck(user_id=users[0].id,wallet_id=wallets[0].id,drop_id=drop.id,
+        status='checking',result={'stages':[stage('public')]},checked_at=now-timedelta(minutes=2),
+        expires_at=now-timedelta(minutes=1),attempts=0))
+    await test_db.commit()
+    live=AsyncMock(return_value=({'stages':[stage('public','not_eligible')]},[]))
+    monkeypatch.setattr('app.services.mint_stage_choice.wallet_stages',live)
+    with pytest.raises(HTTPException) as error:
+        await prepare_card(drop.id,SetupCard(wallet_id=wallets[0].id,stage_uuid='public'),users[0],test_db)
+    assert error.value.status_code==409 and live.await_count==1
+    assert await test_db.scalar(select(func.count()).select_from(MintPlan))==0
+
 @pytest.mark.asyncio
 async def test_owned_queue_deduplicates_and_never_creates_plans(test_db,monkeypatch):
     users,wallets,drop=await fixtures(test_db,monkeypatch)
