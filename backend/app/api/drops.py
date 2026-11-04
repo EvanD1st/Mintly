@@ -170,8 +170,14 @@ async def prepare_card(drop_id: str, body: SetupCard, user: User = Depends(get_c
     check = await db.get(FeedWalletCheck, (user.id, wallet.id, drop.id))
     card = presentation(check)
     selected = next((s for s in card.get('stages', []) if s['id'] == body.stage_uuid), None)
-    if not card['setup_enabled'] or not selected or selected['eligibility'] != 'eligible' or selected['timing'] == 'ended':
+    if not (card['setup_enabled'] or card.get('review_enabled')) or not selected or selected['eligibility'] != 'eligible' or selected['timing'] == 'ended':
         raise HTTPException(409, 'Check this wallet’s qualifying stage again before setup.')
+    if not card['setup_enabled']:
+        from app.services.mint_stage_choice import wallet_stages
+        live_result,_=await wallet_stages(db,wallet,slug,drop.chain_id,drop.contract_address,read_only=True)
+        verified=next((s for s in live_result.get('stages',[]) if s['id']==body.stage_uuid),None)
+        if not verified or verified['eligibility']!='eligible' or verified['timing']=='ended' or verified.get('remaining')==0 or verified.get('price_wei') is None:
+            raise HTTPException(409,'This wallet’s stage changed. Refresh eligibility before setup.')
     saved = await import_open_sea_plan(ImportMintPlanRequest(url=drop.mint_page_url, wallet_id=wallet.id), user, db)
     plan = await db.get(MintPlan, saved['id'])
     from app.services.mint_stage_choice import stages, select_stage

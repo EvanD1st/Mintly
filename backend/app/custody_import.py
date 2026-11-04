@@ -99,7 +99,7 @@ async def config(user=Depends(get_current_user), native_currencies: bool=False):
     available()
     web3 = await automatic.provider()
     await web3.provider.disconnect()
-    return {'chain_id':settings.AUTOMATIC_CHAIN_ID, 'max_expiry_days':30,
+    return {'chain_id':settings.AUTOMATIC_CHAIN_ID, 'max_expiry_days':60,
         'phrase_wallet_setup': True,
         'multi_network_import': True,
         'automatic_collection_selection': True,
@@ -165,7 +165,7 @@ async def store_import(req, user, db):
     if req.wallet_id and (not wallet or wallet.user_id != user.id or wallet.is_demo):
         raise HTTPException(404, 'Linked wallet not found.')
     now = datetime.now(timezone.utc)
-    if not req.consent or req.expires_at.tzinfo is None or not now < req.expires_at <= now + timedelta(days=30):
+    if not req.consent or req.expires_at.tzinfo is None or not now < req.expires_at <= now + timedelta(days=60):
         raise ValueError('Invalid consent or expiry')
     account = Account.from_key(req.private_key.get_secret_value().strip())
     req.private_key = SecretStr('')

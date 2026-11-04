@@ -100,6 +100,10 @@ void main() {
                         .toIso8601String(),
                     'setup_enabled': status == 'eligible' || status == 'stale',
                     if (status == 'refreshing_history') ...{
+                      'review_enabled': true,
+                      'review_expires_at': now
+                          .add(const Duration(minutes: 10))
+                          .toIso8601String(),
                       'last_status': 'eligible',
                       'refreshing': true,
                       'last_recommended_stage': {
@@ -154,13 +158,19 @@ void main() {
       final button = tester.widget<FilledButton>(
         find.widgetWithText(FilledButton, 'Set up automatic mint'),
       );
-      expect(button.onPressed != null, status == 'eligible');
+      expect(
+        button.onPressed != null,
+        status == 'eligible' || status == 'refreshing_history',
+      );
       if (status == 'stale' || status == 'unverified') {
         expect(find.text('Not verified'), findsOneWidget);
       }
       if (status == 'refreshing_history') {
         expect(find.text('Last checked: eligible'), findsOneWidget);
-        expect(find.textContaining('Refreshing eligibility'), findsOneWidget);
+        expect(
+          find.textContaining('Refreshing in the background'),
+          findsOneWidget,
+        );
         expect(find.text('Not verified'), findsNothing);
       }
       if (status != 'eligible' && status != 'refreshing_history') {

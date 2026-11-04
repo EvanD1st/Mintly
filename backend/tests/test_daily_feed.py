@@ -99,6 +99,19 @@ def test_stale_results_cannot_claim_ineligibility_or_enable_setup():
     result=feed_checks.presentation(cached([stage('bad','not_eligible')],expires_at=datetime.now(timezone.utc)-timedelta(seconds=1)))
     assert result['status']=='unverified' and not result['setup_enabled']
 
+def test_recent_eligible_result_can_open_review_but_cannot_authorize_setup():
+    now=datetime.now(timezone.utc)
+    check=cached([stage('public')],expires_at=now-timedelta(seconds=1))
+    check.checked_at=now-timedelta(minutes=2)
+    check.status='checking'
+    result=feed_checks.presentation(check,now)
+    assert result['review_enabled'] and not result['setup_enabled']
+    assert result['recommended_stage'] is None
+    assert result['last_recommended_stage']['id']=='public'
+    assert not feed_checks.presentation(check,now+timedelta(minutes=16))['review_enabled']
+    check.result={'stages':[stage('public','not_eligible')]}
+    assert not feed_checks.presentation(check,now)['review_enabled']
+
 @pytest.mark.parametrize('status',['queued','checking'])
 def test_refresh_keeps_valid_result_until_expiry_then_labels_history(status):
     now=datetime.now(timezone.utc)
@@ -149,6 +162,24 @@ async def fixtures(db,monkeypatch):
     db.add(Drop(id='feed',source_post_id=post.id,name='Collection',chain='Base',chain_id=8453,
         mint_page_url='https://opensea.io/collection/test',is_demo=False))
     await db.commit();return users,wallets,await db.get(Drop,'feed')
+
+
+async def test_review_refresh_rejects_changed_stage_before_creating_plan(test_db,monkeypatch):
+    from app.api.drops import prepare_card,SetupCard
+    from fastapi import HTTPException
+    users,wallets,drop=await fixtures(test_db,monkeypatch)
+    drop.contract_address='0x'+'a'*40
+    now=datetime.now(timezone.utc)
+    test_db.add(FeedWalletCheck(user_id=users[0].id,wallet_id=wallets[0].id,drop_id=drop.id,
+        status='checking',result={'stages':[stage('public')]},checked_at=now-timedelta(minutes=2),
+        expires_at=now-timedelta(minutes=1),attempts=0))
+    await test_db.commit()
+    live=AsyncMock(return_value=({'stages':[stage('public','not_eligible')]},[]))
+    monkeypatch.setattr('app.services.mint_stage_choice.wallet_stages',live)
+    with pytest.raises(HTTPException) as error:
+        await prepare_card(drop.id,SetupCard(wallet_id=wallets[0].id,stage_uuid='public'),users[0],test_db)
+    assert error.value.status_code==409 and live.await_count==1
+    assert await test_db.scalar(select(func.count()).select_from(MintPlan))==0
 
 @pytest.mark.asyncio
 async def test_owned_queue_deduplicates_and_never_creates_plans(test_db,monkeypatch):

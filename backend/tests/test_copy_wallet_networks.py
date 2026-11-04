@@ -1,5 +1,6 @@
 """One receiving wallet, a shared budget, and safe funding retries on a real local EVM."""
 import json
+from datetime import datetime,timezone,timedelta
 import uuid
 import pytest
 from fastapi import HTTPException
@@ -107,7 +108,7 @@ async def test_partial_signer_registration_never_activates_any_network_and_retry
     assert retry.status_code == 200 and retry.json()['status'] == 'inactive'
 
 
-async def test_other_network_reservations_exhaust_the_shared_budget(wallet_networks):
+async def test_other_network_reservations_wait_without_overspending_shared_budget(wallet_networks):
     c, request = wallet_networks
     lab = c['lab']
     response = await approve_group(c, request)
@@ -118,8 +119,19 @@ async def test_other_network_reservations_exhaust_the_shared_budget(wallet_netwo
     await c['mint'](1)
     await c['scan']()
     event = (await lab.client.get('/api/copy-mints/activity')).json()['events'][0]
-    assert event['status'] == 'skipped' and event['task_id'] is None
-    assert 'Shared copy budget:' in event['note'] and 'available' in event['note']
+    assert event['status'] == 'detected' and event['task_id'] is None
+    assert 'reserved budget' in event['note']
+    async with lab.factory() as db:
+        sibling=await db.get(CopyRule,other['id'])
+        assert sibling.reserved_wei==500000000000001
+        assert not (await db.scalars(select(MintTask))).all()
+        sibling.reserved_wei=0
+        waiting=await db.get(CopyEvent,event['id'])
+        waiting.next_attempt_at=datetime.now(timezone.utc)-timedelta(seconds=1)
+        await db.commit()
+        await copy_mints.process_copy_events(db,c['watch_id'],lab.w.eth.chain_id)
+        await db.refresh(waiting)
+        assert waiting.status=='armed' and waiting.task_id,waiting.note
 
 
 async def test_independent_journal_blocks_overspend_even_when_database_sibling_accounting_is_reset(wallet_networks):

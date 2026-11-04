@@ -74,6 +74,11 @@ def presentation(check,now=None):
     eligible.sort(key=lambda s:(s['timing']!='open',s['starts_at'],s['id']))
     result['recommended_stage']=eligible[0] if fresh and eligible else None
     result['setup_enabled']=bool(fresh and eligible)
+    # A recent verified result may open a review while display checks refresh.
+    # This is not mint authorization: prepare-plan independently rechecks it.
+    review_until=aware(check.checked_at)+timedelta(minutes=15) if check.checked_at else None
+    result['review_enabled']=bool(eligible and review_until and review_until>now)
+    result['review_expires_at']=review_until
     # Historical summaries are display-only. Never authorize setup from stale data.
     result['last_status']='eligible' if eligible else ('not_eligible' if available
         and all(s['eligibility']=='not_eligible' or s.get('remaining')==0 or s.get('wallet_total_limit')==0 for s in available) else 'unverified')

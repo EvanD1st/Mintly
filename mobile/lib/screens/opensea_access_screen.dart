@@ -45,7 +45,7 @@ class _AccessState extends ConsumerState<OpenSeaAccessScreen> {
           if(_data!['enabled']!=true || _data!['status']!='active') ...[
             CheckboxListTile(contentPadding:EdgeInsets.zero,value:_consent,onChanged:_busy?null:(value)=>setState(()=>_consent=value==true),
               title:const Text('Allow read-only eligibility access'),
-              subtitle:const Text('I authorize Mintly to sign the OpenSea login message and renew read-only access within this permission period. I accept OpenSea’s Terms of Service and Privacy Policy.')),
+              subtitle:const Text('I authorize Mintly to sign the OpenSea login message and renew read-only access for up to 60 days, within my signing approval. I accept OpenSea’s Terms of Service and Privacy Policy.')),
             Wrap(children:[
               TextButton(onPressed:()=>openExternalUrl(context,Uri.parse('https://opensea.io/tos')),child:const Text('OpenSea terms')),
               TextButton(onPressed:()=>openExternalUrl(context,Uri.parse('https://opensea.io/privacy')),child:const Text('Privacy policy')),

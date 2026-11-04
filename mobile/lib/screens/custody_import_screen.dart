@@ -49,7 +49,7 @@ class _CustodyImportScreenState extends ConsumerState<CustodyImportScreen>
   late final String _requestId;
   late DateTime _expiry;
   Uint8List? _walletKey;
-  int _days = 7, _generation = 0;
+  int _days = 60, _generation = 0;
   bool _limits = false,
       _moreLimits = false,
       _consent = false,
@@ -512,7 +512,7 @@ class _CustodyImportScreenState extends ConsumerState<CustodyImportScreen>
                       labelText: 'Allow automatic minting for',
                     ),
                     items: [
-                      for (final days in [1, 7, 30])
+                      for (final days in [1, 7, 30, 60])
                         DropdownMenuItem(
                           value: days,
                           child: Text('$days day${days == 1 ? '' : 's'}'),

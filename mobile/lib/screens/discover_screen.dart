@@ -491,9 +491,15 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
         checked != null &&
         DateTime.now().toUtc().difference(checked.toUtc()) <
             const Duration(seconds: 60);
+    final reviewUntil = DateTime.tryParse(
+      check['review_expires_at'] as String? ?? '',
+    );
+    final canReview =
+        check['review_enabled'] == true &&
+        reviewUntil != null &&
+        reviewUntil.toUtc().isAfter(DateTime.now().toUtc());
     final enabled =
-        fresh &&
-        check['setup_enabled'] == true &&
+        ((fresh && check['setup_enabled'] == true) || canReview) &&
         !_preparing.contains(drop.id);
     final status = fresh && check['status'] != 'unverified'
         ? switch (check['status']) {
@@ -557,12 +563,19 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
                 'Checked ${_wat(checked)} WAT',
                 style: Theme.of(context).textTheme.bodySmall,
               ),
-            if (!verified && check['refreshing'] == true)
-              const Text(
-                'Refreshing eligibility… Setup is available after verification.',
-              )
-            else if (check['note'] != null)
-              Text('${check['note']}'),
+            SizedBox(
+              height: 44,
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  !verified && check['refreshing'] == true
+                      ? 'Refreshing in the background. Eligibility is checked again before setup.'
+                      : '${check['note'] ?? 'Eligibility is rechecked before setup.'}',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ),
             const SizedBox(height: 10),
             FilledButton(
               onPressed: enabled

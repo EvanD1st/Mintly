@@ -62,7 +62,7 @@ async def change(wallet_id:str,req:AccessRequest,user=Depends(get_current_user),
             AutomaticGrant.user_id==user.id,AutomaticGrant.status=='enabled'))).all()
         expiries=[aware(g.expires_at) for g in grants if aware(g.expires_at)>datetime.now(timezone.utc)]
         if not expiries:raise HTTPException(409,'Renew this wallet’s signing approval before connecting eligibility access.')
-        expiry=min(max(expiries),datetime.now(timezone.utc)+timedelta(days=7))
+        expiry=min(max(expiries),datetime.now(timezone.utc)+timedelta(days=60))
     else:expiry=datetime.now(timezone.utc)
     row=await db.get(OpenSeaAccess,wallet_id)
     if not row:
