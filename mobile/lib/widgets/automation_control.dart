@@ -55,6 +55,7 @@ class _AutomationControlState extends ConsumerState<AutomationControl> {
           .read(apiServiceProvider)
           .setAutomationPaused(paused);
       if (mounted) {
+        ref.invalidate(todayAutomationProvider);
         setState(() {
           _status = Future.value(status);
         });
