@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/drop_model.dart';
 import '../models/network_metadata.dart';
+import '../models/today_automation_status.dart';
 
 class TodayAutomationCard extends StatelessWidget {
   const TodayAutomationCard({
@@ -10,7 +11,7 @@ class TodayAutomationCard extends StatelessWidget {
     required this.hasWallet,
     required this.onManage,
   });
-  final AsyncValue<List<Map<String, dynamic>>> status;
+  final AsyncValue<TodayAutomationStatus> status;
   final bool hasWallet;
   final VoidCallback onManage;
 
@@ -31,7 +32,8 @@ class TodayAutomationCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    final rows = status.valueOrNull;
+    final rows = status.valueOrNull?.approvals;
+    final paused = status.valueOrNull?.paused == true;
     final networks = <int, Map<String, dynamic>>{};
     for (final row in rows ?? <Map<String, dynamic>>[]) {
       final chain = int.tryParse('${(row['snapshot'] as Map?)?['chain_id']}');
@@ -46,6 +48,8 @@ class TodayAutomationCard extends StatelessWidget {
         ? 'Choose a wallet first'
         : rows == null
         ? (status.hasError ? 'Status unavailable' : 'Checking status')
+        : paused
+        ? 'Paused'
         : active > 0
         ? 'On · $active ${active == 1 ? 'network' : 'networks'}'
         : pending
@@ -79,7 +83,9 @@ class TodayAutomationCard extends StatelessWidget {
               style: TextStyle(
                 fontSize: 22,
                 fontWeight: FontWeight.w700,
-                color: active > 0 ? colors.primary : colors.onSurface,
+                color: active > 0 && !paused
+                    ? colors.primary
+                    : colors.onSurface,
               ),
             ),
             const SizedBox(height: 8),
@@ -105,7 +111,7 @@ class TodayAutomationCard extends StatelessWidget {
                         '${networkNames[entry.key] ?? 'Chain ${entry.key}'}${_waiting(entry.value)
                             ? ' · Waiting'
                             : _active(entry.value)
-                            ? ''
+                            ? (paused ? ' · Paused' : '')
                             : entry.value['status'] == 'registering'
                             ? ' · Pending'
                             : ' · Off'}',
@@ -114,7 +120,15 @@ class TodayAutomationCard extends StatelessWidget {
                     ),
                 ],
               ),
-            if (waiting > 0)
+            if (paused)
+              const Padding(
+                padding: EdgeInsets.only(top: 10),
+                child: Text(
+                  'All automation is paused. Resume it from Wallet when you are ready.',
+                  style: TextStyle(fontSize: 12),
+                ),
+              ),
+            if (waiting > 0 && !paused)
               Padding(
                 padding: const EdgeInsets.only(top: 10),
                 child: Text(

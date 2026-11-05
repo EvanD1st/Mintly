@@ -31,6 +31,20 @@ async def test_standing_approval_is_independently_pinned_without_decrypting_a_ke
     assert (x.grant.spent_wei,x.grant.reserved_wei)==(123,456)
 
 
+@pytest.mark.parametrize('paused', [False, True])
+async def test_status_reports_global_pause_without_changing_saved_approval(approved, paused):
+    from app.api.feed_automation import status
+    x = approved
+    x.owner.automation_paused = paused
+    await x.db.commit()
+    original = copy.deepcopy(x.approval.snapshot)
+    result = await status(user=x.owner, db=x.db)
+    assert result['automation_paused'] is paused
+    assert result['approvals'][0]['status'] == 'active'
+    await x.db.refresh(x.approval)
+    assert x.approval.status == 'active' and x.approval.snapshot == original
+
+
 @pytest.mark.parametrize('change',[{'fee_cap_wei':200},{'quantity':2},{'free_only':False}])
 async def test_existing_standing_approval_cannot_be_widened_or_replaced_in_place(approved,change):
     x=approved

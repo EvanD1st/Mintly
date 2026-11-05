@@ -10,6 +10,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:mintly/models/drop_model.dart';
+import 'package:mintly/models/today_automation_status.dart';
 import 'package:mintly/screens/discover_screen.dart';
 import 'package:mintly/services/api_service.dart';
 import 'package:mintly/state/app_state.dart';
@@ -38,6 +39,27 @@ Map<String, dynamic> approval(
 };
 
 void main() {
+  testWidgets('global pause overrides active network approvals', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: TodayAutomationCard(
+            status: AsyncData(
+              TodayAutomationStatus([approval(1)], paused: true),
+            ),
+            hasWallet: true,
+            onManage: () {},
+          ),
+        ),
+      ),
+    );
+    expect(find.text('Paused'), findsOneWidget);
+    expect(find.text('Ethereum · Paused'), findsOneWidget);
+    expect(find.textContaining('On ·'), findsNothing);
+    expect(find.textContaining('Resume it from Wallet'), findsOneWidget);
+  });
   testWidgets(
     'automation distinguishes enabled, waiting and switched-off networks',
     (tester) async {
@@ -46,12 +68,14 @@ void main() {
         MaterialApp(
           home: Scaffold(
             body: TodayAutomationCard(
-              status: AsyncData([
-                approval(1),
-                approval(8453),
-                approval(4663, waiting: true),
-                approval(57073, status: 'revoked'),
-              ]),
+              status: AsyncData(
+                TodayAutomationStatus([
+                  approval(1),
+                  approval(8453),
+                  approval(4663, waiting: true),
+                  approval(57073, status: 'revoked'),
+                ]),
+              ),
               hasWallet: true,
               onManage: () => managed = true,
             ),
@@ -134,6 +158,7 @@ void main() {
           return http.Response(
             jsonEncode({
               'approvals': [approval(8453, wallet: 'new')],
+              'automation_paused': true,
             }),
             200,
             headers: {'content-type': 'application/json; charset=utf-8'},
@@ -153,7 +178,8 @@ void main() {
       addTearDown(keepB.close);
       final pending = container.read(a.future);
       final current = await container.read(b.future);
-      expect(current.single['snapshot']['wallet_id'], 'new');
+      expect(current.approvals.single['snapshot']['wallet_id'], 'new');
+      expect(current.paused, isTrue);
       old.complete(
         http.Response(
           jsonEncode({
@@ -165,7 +191,7 @@ void main() {
       );
       await pending;
       expect(
-        container.read(b).requireValue.single['snapshot']['chain_id'],
+        container.read(b).requireValue.approvals.single['snapshot']['chain_id'],
         8453,
       );
     },
