@@ -249,3 +249,21 @@ async def test_other_user_cannot_read_or_disable_standing_approval(free_feed):
     assert response.status_code==404
     async with lab.factory() as db:
         assert (await db.get(FeedMintApproval,f['approval']['id'])).status=='active'
+
+async def test_inflight_list_keeps_original_wat_day_during_preparation(free_feed):
+    from app.services.feed_sources import daily_collections
+    f=free_feed;lab=f['lab']
+    day=datetime.now(ZoneInfo('Africa/Lagos')).date()-timedelta(days=1)
+    async with lab.factory() as db:
+        post=await db.get(SourcePost,f['post']);post.list_date=day
+        row=await db.get(FeedMintApproval,f['approval']['id']);row.created_at=datetime.now(timezone.utc)-timedelta(days=1)
+        await db.commit()
+        user=await db.get(User,lab.user.id);wallet=await db.get(Wallet,lab.wallet.id)
+        groups=await daily_collections(db,day,user.id);groups[0]['list_date']=day
+        check=await db.get(FeedWalletCheck,(user.id,wallet.id,lab.drop.id))
+        assert await feed_automation.arm(db,row,groups[0],check,user,wallet)
+        task=(await db.scalars(select(MintTask))).one();auth=await db.get(MintAuthorization,task.authorization_id)
+        assert auth.snapshot['feed_source']['list_date']==day.isoformat()
+        journal=CustodyVault().journal()
+        try:await feed_automation.verify_task(db,journal,task,auth.snapshot,lab.grant)
+        finally:journal.close()

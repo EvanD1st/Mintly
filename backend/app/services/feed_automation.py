@@ -2,7 +2,7 @@
 import asyncio,json,uuid,logging
 from datetime import datetime,timedelta,timezone
 from zoneinfo import ZoneInfo
-from sqlalchemy import select
+from sqlalchemy import select,func
 from fastapi import HTTPException
 from app.models import FeedMintApproval,AutomaticGrant,Wallet,User,FeedWalletCheck,MintTask,MintAuthorization,ActivityEvent
 from app.services import automatic,feed_checks
@@ -157,11 +157,12 @@ async def arm(db,row,group,check,user,wallet):
     from app.services.parser import format_wei_to_eth
     from types import SimpleNamespace
     r=row.snapshot
+    list_day=group.get('list_date') or datetime.now(timezone.utc).astimezone(ZoneInfo('Africa/Lagos')).date()
     # A cancelled or failed opportunity must not be silently recreated on every
     # feed refresh. Explicit per-collection review remains available to the user.
     previous=await db.scalar(select(MintTask.id).join(MintAuthorization,MintTask.authorization_id==MintAuthorization.id).where(
         MintAuthorization.snapshot['feed_approval_id'].as_string()==row.id,
-        MintAuthorization.snapshot['contract'].as_string()==check.result['contract_address']))
+        func.lower(MintAuthorization.snapshot['contract'].as_string())==check.result['contract_address'].lower()))
     if previous:return
     grant=await automatic.grant_for(db,row.grant_id,user.id)
     if grant.budget_wei-grant.spent_wei-grant.reserved_wei<r['fee_cap_wei']:
@@ -197,7 +198,7 @@ async def arm(db,row,group,check,user,wallet):
         conditional_eligibility=stage_kind(phase['type'])!='public' and aware(plan.starts_at)>now,
         schedule_mode='phase_open',user_consent_confirmed=True,
         idempotency_key='free-list-'+automatic.digest([row.id,r['chain_id'],s['contract'].lower()]),
-        feed_approval_id=row.id,feed_source={'drop_id':group['drop'].id,'list_date':now.astimezone(ZoneInfo('Africa/Lagos')).date().isoformat(),'post_id':next(p.id for p,_ in group['mentions'] if (p.author_username or '').lower() in r['sources'])})
+        feed_approval_id=row.id,feed_source={'drop_id':group['drop'].id,'list_date':list_day.isoformat(),'post_id':next(p.id for p,_ in group['mentions'] if (p.author_username or '').lower() in r['sources'])})
     await arm_mint_task(req,user,db)
     return phase
 
@@ -216,7 +217,7 @@ async def step(factory):
         groups=[g for g in groups if g['drop'].chain_id==row.snapshot['chain_id'] and any((p.author_username or '').lower() in row.snapshot['sources'] for p,_ in g['mentions'])]
         await feed_checks.queue_checks(db,user,wallet,[g['drop'] for g in groups])
         from types import SimpleNamespace
-        candidates=[{'drop':SimpleNamespace(id=g['drop'].id),'mentions':[(SimpleNamespace(id=p.id,author_username=p.author_username),None) for p,_ in g['mentions']]} for g in groups]
+        candidates=[{'drop':SimpleNamespace(id=g['drop'].id),'list_date':now.astimezone(ZoneInfo('Africa/Lagos')).date(),'mentions':[(SimpleNamespace(id=p.id,author_username=p.author_username),None) for p,_ in g['mentions']]} for g in groups]
         approval_id=row.id
     for group in candidates:
         async with factory() as db:
