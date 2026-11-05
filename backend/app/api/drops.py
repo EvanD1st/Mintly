@@ -63,7 +63,7 @@ async def list_drops(
     admin_source_text = source_text
     if user.role == 'admin':
         admin_source_text += ' · Operator X session details are available in Mint sources.'
-    metadata,editions=await source_metadata(db,groups,user.id) if daily_only else ({},[])
+    metadata,editions=await source_metadata(db,groups,user.id,day) if daily_only else ({},[])
     cards = []
     checks = {c.drop_id:c for c in (await db.scalars(select(FeedWalletCheck).where(
         FeedWalletCheck.user_id==user.id,FeedWalletCheck.wallet_id==wallet.id,
@@ -73,6 +73,8 @@ async def list_drops(
         card = DropSchema.model_validate(drop)
         if daily_only:
             card.sources=metadata[drop.id]['sources'];card.additions=metadata[drop.id]['additions']
+            card.list_context=metadata[drop.id]['list_context'];card.today_schedule=metadata[drop.id]['today_schedule']
+            if card.today_schedule:card.source_time_text=card.today_schedule
             check = checks.get(drop.id)
             card.wallet_check = presentation(check, now) if wallet else dict(status='unverified',
                 setup_enabled=False, stages=[], note='Link a wallet to check eligibility.')

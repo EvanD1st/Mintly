@@ -297,6 +297,22 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
             ],
           ),
         ),
+      if (drop.listContext != null || drop.todaySchedule != null)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (drop.listContext != null)
+                Text(
+                  drop.listContext!,
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+              if (drop.todaySchedule != null)
+                Text('Today: ${drop.todaySchedule}'),
+            ],
+          ),
+        ),
       _dropBody(context, notifier, drop),
       if (drop.sources.isNotEmpty)
         DisclosureSection(
@@ -342,9 +358,11 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
     final price = stage == null || stage.priceEthStr.isEmpty
         ? 'Price on source'
         : '${stage.priceEthStr} ${drop.nativeCurrency}';
-    final schedule = stage == null
-        ? 'Schedule on source'
-        : '${_wat(stage.startTimeUtc)} WAT';
+    final schedule =
+        drop.todaySchedule ??
+        (stage == null
+            ? 'Schedule on source'
+            : '${_wat(stage.startTimeUtc)} WAT');
     return Card(
       child: ListTile(
         leading: CollectionThumbnail(

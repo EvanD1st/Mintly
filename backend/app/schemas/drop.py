@@ -45,6 +45,8 @@ class DropSchema(BaseModel):
     automatic_mint: Optional[dict] = None
     sources: list[dict] = []
     additions: str | None = None
+    list_context: str | None = None
+    today_schedule: str | None = None
 
 
 class DropListResponse(BaseModel):

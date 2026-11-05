@@ -59,6 +59,8 @@ void main() {
                   {
                     'id': 'shared-card',
                     'name': 'Shared collection',
+                    'list_context': 'From yesterday’s list',
+                    'today_schedule': 'GTD 00:00 WAT · FCFS 01:00 WAT',
                     'chain': 'Base',
                     'chain_id': 8453,
                     'mint_page_url': 'https://opensea.io/collection/shared',
@@ -96,7 +98,11 @@ void main() {
                 'A merged confirmed card must not check, prepare or arm again.',
               );
             }
-            return http.Response(jsonEncode(result), 200);
+            return http.Response(
+              jsonEncode(result),
+              200,
+              headers: {'content-type': 'application/json; charset=utf-8'},
+            );
           }),
         );
         await api.login('member', 'password');
@@ -112,6 +118,11 @@ void main() {
         );
         await tester.pumpAndSettle();
         expect(find.text('Shared collection'), findsOneWidget);
+        expect(find.text('From yesterday’s list'), findsOneWidget);
+        expect(
+          find.text('Today: GTD 00:00 WAT · FCFS 01:00 WAT'),
+          findsOneWidget,
+        );
         expect(
           find.text(status == 'confirmed' ? 'Minted' : 'Already minted — GTD'),
           findsOneWidget,
