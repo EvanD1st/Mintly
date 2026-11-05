@@ -82,7 +82,7 @@ async def daily_collections(db,day,user_id=None):
     return groups
 
 
-async def source_metadata(db,groups,user_id):
+async def source_metadata(db,groups,user_id,day=None):
     ids={p.id for g in groups for p,_ in g['mentions']}
     seen={s.post_id:s.content_hash for s in (await db.scalars(select(FeedSeen).where(FeedSeen.user_id==user_id,FeedSeen.post_id.in_(ids)))).all()} if ids else {}
     result={};editions={}
@@ -99,7 +99,20 @@ async def source_metadata(db,groups,user_id):
             sources.append({'author':DISPLAY_NAMES.get(p.author_username.lower(),p.author_username),
                 'post_url':None if p.is_manual_import else f'https://x.com/{p.author_username}/status/{p.post_id}',
                 'price':details.get('price'),'time_wat':details.get('time_wat'),'stages':details.get('stages',[])})
-        result[group['drop'].id]={'sources':sources,'additions':('updated' if known else 'new') if unseen else None}
+        context=None;schedule=[]
+        if day:
+            dates=[p.list_date for p,_ in mentions if p.list_date]
+            if dates and max(dates)<day:
+                context='From yesterday’s list' if max(dates)==day-timedelta(days=1) else 'From an earlier list'
+            for _,details in mentions:
+                for stage in details.get('stages',[]):
+                    try:opening=datetime.fromisoformat(stage['starts_at']).astimezone(ZoneInfo('Africa/Lagos'))
+                    except (KeyError,TypeError,ValueError):continue
+                    if opening.date()==day:
+                        label=f"{stage['name']} {opening.strftime('%H:%M')} WAT"
+                        if label not in schedule:schedule.append(label)
+        result[group['drop'].id]={'sources':sources,'additions':('updated' if known else 'new') if unseen else None,
+            'list_context':context,'today_schedule':' · '.join(schedule) or None}
     return result,list(editions.values())
 
 

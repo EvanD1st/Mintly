@@ -225,3 +225,10 @@ async def test_midnight_wat_visibility_does_not_reannounce_previous_list(test_db
     assert old.list_date==date(2026,10,31)
     assert len(await feed_sources.daily_collections(test_db,date(2026,11,1)))==2
     assert [p.id for p in await daily_notices.available(test_db,date(2026,11,1))]==[post.id]
+    groups=await feed_sources.daily_collections(test_db,date(2026,11,1))
+    metadata,_=await feed_sources.source_metadata(test_db,groups,'viewer',date(2026,11,1))
+    by_name={g['drop'].name:metadata[g['drop'].id] for g in groups}
+    assert by_name['Earlier list collection']['list_context']=='From yesterday’s list'
+    assert by_name['Late collection']['list_context'] is None
+    assert all(m['today_schedule']=='Source listing 00:30 WAT' for m in by_name.values())
+    assert not await feed_sources.daily_collections(test_db,date(2026,11,2))

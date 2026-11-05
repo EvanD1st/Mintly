@@ -75,6 +75,8 @@ class DropModel {
   final String? sourceTimeText;
   final List<Map<String, dynamic>> sources;
   final String? additions;
+  final String? listContext;
+  final String? todaySchedule;
 
   DropModel({
     required this.id,
@@ -97,6 +99,8 @@ class DropModel {
     this.sourceTimeText,
     this.sources = const [],
     this.additions,
+    this.listContext,
+    this.todaySchedule,
   });
 
   factory DropModel.fromJson(Map<String, dynamic> json) {
@@ -123,6 +127,8 @@ class DropModel {
           .map((s) => Map<String, dynamic>.from(s))
           .toList(),
       additions: json['additions'] as String?,
+      listContext: json['list_context'] as String?,
+      todaySchedule: json['today_schedule'] as String?,
       stages: rawStages
           .map((s) => MintStageModel.fromJson(s as Map<String, dynamic>))
           .toList(),
