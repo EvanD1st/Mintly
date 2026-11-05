@@ -20,7 +20,8 @@ class Approve(BaseModel):
 @router.get('')
 async def status(user=Depends(get_current_user),db=Depends(get_db)):
     rows=(await db.scalars(select(FeedMintApproval).where(FeedMintApproval.user_id==user.id).order_by(FeedMintApproval.created_at.desc()))).all()
-    return {'approvals':[feed_automation.public(r) for r in rows]}
+    return {'approvals':[feed_automation.public(r) for r in rows],
+        'enabled_once':await feed_automation.enabled_once(db,user)}
 
 @router.post('')
 async def approve(req:Approve,user=Depends(get_current_user),db=Depends(get_db)):
