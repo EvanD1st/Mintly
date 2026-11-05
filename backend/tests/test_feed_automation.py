@@ -1,4 +1,5 @@
 import copy,json,uuid
+from unittest.mock import AsyncMock
 from datetime import datetime,timedelta,timezone
 from types import SimpleNamespace
 import pytest
@@ -49,3 +50,15 @@ async def test_private_revocation_survives_database_reactivation(approved):
 async def test_expired_approval_is_displayed_as_expired_not_enabled(approved):
     x=approved;x.approval.expires_at=datetime.now(timezone.utc)-timedelta(seconds=1)
     assert feed_automation.public(x.approval)['status']=='expired'
+
+async def test_due_wallets_are_drained_without_a_five_second_delay_each(monkeypatch):
+    import asyncio
+    factory=object();calls=[]
+    monkeypatch.setattr(feed_automation,'step',AsyncMock(side_effect=[True,False]))
+    async def sleep(delay):
+        calls.append(delay)
+        if len(calls)==2:raise asyncio.CancelledError()
+    monkeypatch.setattr(feed_automation.asyncio,'sleep',sleep)
+    with pytest.raises(asyncio.CancelledError):await feed_automation.loop(factory)
+    assert calls==[0.1,5]
+

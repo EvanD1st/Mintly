@@ -243,6 +243,9 @@ async def step(factory):
 
 async def loop(factory):
     while True:
-        try:await step(factory)
+        worked=False
+        try:worked=await step(factory)
         except Exception as error:logging.getLogger('mintly.free_drops').warning('Free-drop checks deferred (%s).',type(error).__name__)
-        await asyncio.sleep(5)
+        # Drain due wallets without adding five seconds per account. Provider
+        # calls still pass through the shared pacing and eligibility queues.
+        await asyncio.sleep(0.1 if worked else 5)
