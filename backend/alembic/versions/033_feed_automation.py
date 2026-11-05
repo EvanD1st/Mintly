@@ -17,6 +17,7 @@ def upgrade():
         sa.Column('status',sa.String(24),nullable=False),sa.Column('snapshot',sa.JSON(),nullable=False),
         sa.Column('context_hash',sa.String(64),nullable=False),sa.Column('expires_at',sa.DateTime(timezone=True),nullable=False),
         sa.Column('created_at',sa.DateTime(timezone=True),nullable=False),
+        sa.Column('updated_at',sa.DateTime(timezone=True),nullable=False),
         sa.Column('last_checked_at',sa.DateTime(timezone=True)),sa.Column('note',sa.Text()))
     op.create_index('ix_feed_mint_approvals_user_id','feed_mint_approvals',['user_id'])
     op.create_index('ix_feed_mint_approvals_wallet_id','feed_mint_approvals',['wallet_id'])
