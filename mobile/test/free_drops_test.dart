@@ -140,13 +140,25 @@ void main() {
       await tester.tap(find.text('Turn off free-drop automation'));
       await tester.pumpAndSettle();
       expect(
+        find.text('NFTs per collection: Maximum allowed for this wallet'),
+        findsOneWidget,
+      );
+      expect(
         tester.widget<TextField>(find.byType(TextField).at(0)).controller!.text,
-        '3',
+        '0.000500000000000000',
       );
       expect(
         tester.widget<TextField>(find.byType(TextField).at(0)).enabled,
         isTrue,
       );
+      expect(api.submitted, isEmpty);
+      await tester.tap(find.byType(CheckboxListTile));
+      await tester.pump();
+      await tester.tap(find.text('Enable automatic free mints'));
+      await tester.pumpAndSettle();
+      expect(api.submitted.single['quantity_mode'], 'wallet_max');
+      expect(api.submitted.single['quantity'], 65535);
+      expect(api.approvals.first['snapshot']['quantity'], 3);
     },
   );
 }
