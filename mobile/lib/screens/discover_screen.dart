@@ -1,5 +1,6 @@
 import '../widgets/collection_thumbnail.dart';
 import '../widgets/mintly_notice.dart';
+import '../widgets/today_overview.dart';
 import '../theme/compatible_icons.dart';
 import 'package:flutter/material.dart';
 import '../widgets/screen_components.dart';
@@ -29,6 +30,7 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
   final _removing = <String>{};
   Timer? _timer;
   bool _refreshing = false;
+  DateTime? _lastAutomationRefresh;
   final _preparing = <String>{};
 
   @override
@@ -56,6 +58,15 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
     _refreshing = true;
     try {
       await ref.read(mintlyProvider.notifier).refreshFeed(walletId: walletId);
+      if (!mounted) return;
+      final now = DateTime.now().toUtc();
+      if (walletId != null ||
+          _lastAutomationRefresh == null ||
+          now.difference(_lastAutomationRefresh!) >
+              const Duration(seconds: 30)) {
+        _lastAutomationRefresh = now;
+        ref.invalidate(todayAutomationProvider);
+      }
     } catch (_) {
       /* Stored cards remain visible during an outage. */
     } finally {
@@ -72,6 +83,13 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
     final state = ref.watch(mintlyProvider);
     final notifier = ref.read(mintlyProvider.notifier);
     final api = ref.watch(apiServiceProvider);
+    final automation = ref.watch(
+      todayAutomationProvider((
+        api.userId,
+        api.sessionRevision,
+        api.selectedFeedWallet,
+      )),
+    );
     final muted = Theme.of(
       context,
     ).colorScheme.onSurface.withValues(alpha: .65);
@@ -79,9 +97,10 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
       onRefresh: () async {
         ref.invalidate(collectionArtworkProvider);
         await notifier.loadInitialData();
+        ref.invalidate(todayAutomationProvider);
       },
       child: ListView(
-        padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
         children: [
           Text(
             DateFormat('EEEE, d MMMM')
@@ -90,50 +109,27 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
             style: TextStyle(color: muted, fontSize: 11, letterSpacing: 1.5),
           ),
           const SizedBox(height: 6),
-          Text('Today', style: Theme.of(context).textTheme.headlineMedium),
-          TextButton(
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const FreeDropsScreen()),
-            ),
-            child: const Text('Auto-mint eligible free drops'),
-          ),
-          const SizedBox(height: 5),
           Text(
-            'Welcome, ${api.username}. Review source details before using MetaMask.',
-            style: TextStyle(color: muted),
+            'Today',
+            style: Theme.of(context).textTheme.headlineLarge?.copyWith(
+              fontWeight: FontWeight.w800,
+              letterSpacing: -.8,
+            ),
           ),
-          const SizedBox(height: 18),
-          if (!api.isAdmin && api.feedStatusText.isNotEmpty)
-            Text(
-              api.feedStatusText,
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-          if (state.drops.any((d) => d.additions != null))
-            TextButton(
-              onPressed: () async {
-                final editions = api.feedEditions
-                    .map((e) => Map<String, dynamic>.from(e))
-                    .toList();
-                try {
-                  await api.markFeedSeen(editions);
-                  if (mounted) await _refresh();
-                } catch (error) {
-                  if (context.mounted) {
-                    MintlyNotice.show(
-                      context,
-                      SnackBar(content: Text('$error')),
-                    );
-                  }
-                }
-              },
-              child: const Text('Mark additions as seen'),
-            ),
+          const SizedBox(height: 4),
+          Text(
+            'Your wallet. Today’s mints. All times in WAT.',
+            style: TextStyle(color: muted, fontSize: 13),
+          ),
+          const SizedBox(height: 14),
           if (api.feedWallets.isNotEmpty)
             Card(
               child: ListTile(
                 leading: const Icon(Icons.account_balance_wallet_outlined),
-                title: const Text('Check eligibility for wallet'),
+                title: const Text(
+                  'Minting wallet',
+                  style: TextStyle(fontSize: 12),
+                ),
                 subtitle: Text(
                   api.feedWallets.firstWhere(
                         (w) => w['id'] == api.selectedFeedWallet,
@@ -171,13 +167,64 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
                 },
               ),
             ),
+          TodayAutomationCard(
+            status: automation,
+            hasWallet: api.selectedFeedWallet != null,
+            onManage: () async {
+              await Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const FreeDropsScreen()),
+              );
+              if (mounted) ref.invalidate(todayAutomationProvider);
+            },
+          ),
+          const SizedBox(height: 12),
+          TodayMintSummary(drops: state.drops),
+          const SizedBox(height: 10),
+          if (!api.isAdmin && api.feedStatusText.isNotEmpty)
+            DisclosureSection(
+              title: const Text('List updates'),
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                  child: Text(
+                    api.feedStatusText,
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ),
+              ],
+            ),
+          if (state.drops.any((d) => d.additions != null))
+            TextButton(
+              onPressed: () async {
+                final editions = api.feedEditions
+                    .map((e) => Map<String, dynamic>.from(e))
+                    .toList();
+                try {
+                  await api.markFeedSeen(editions);
+                  if (mounted) await _refresh();
+                } catch (error) {
+                  if (context.mounted) {
+                    MintlyNotice.show(
+                      context,
+                      SnackBar(content: Text('$error')),
+                    );
+                  }
+                }
+              },
+              child: const Text('Mark additions as seen'),
+            ),
           const SizedBox(height: 12),
           if (api.isAdmin)
             Card(
               child: ListTile(
                 leading: const Icon(MintlyIcons.public),
                 title: const Text('Mint sources'),
-                subtitle: Text(state.sourceStatusText),
+                subtitle: Text(
+                  state.sourceStatusText,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
                 trailing: const Icon(MintlyIcons.chevronRight),
                 onTap: () => Navigator.of(
                   context,
@@ -185,13 +232,14 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
               ),
             ),
           if (api.isAdmin) const SizedBox(height: 18),
-          Row(
+          Wrap(
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 12,
             children: [
-              Expanded(
-                child: Text(
-                  'Current drops',
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
+              Text(
+                'Current drops',
+                style: Theme.of(context).textTheme.titleLarge,
               ),
               TextButton.icon(
                 onPressed: () => Navigator.of(
@@ -239,7 +287,7 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
               child: Padding(
                 padding: const EdgeInsets.all(16),
                 child: Text(
-                  'Some data could not refresh. Pull down to retry.\n${state.error}',
+                  'Could not refresh everything. Your saved list is still here. Pull down to retry.',
                 ),
               ),
             ),
@@ -272,76 +320,93 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
     BuildContext context,
     MintlyNotifier notifier,
     DropModel drop,
-  ) => Column(
-    crossAxisAlignment: CrossAxisAlignment.stretch,
-    children: [
-      if (drop.sources.isNotEmpty || drop.additions != null)
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-          child: Wrap(
-            spacing: 8,
-            children: [
-              if (drop.additions != null)
-                Text(
-                  drop.additions == 'new'
-                      ? 'New addition'
-                      : 'Updated source details',
-                  style: TextStyle(
-                    color: Theme.of(context).colorScheme.primary,
-                    fontWeight: FontWeight.bold,
+  ) => Card(
+    margin: const EdgeInsets.only(bottom: 14),
+    clipBehavior: Clip.antiAlias,
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (drop.sources.isNotEmpty || drop.additions != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+            child: Wrap(
+              spacing: 8,
+              children: [
+                if (drop.additions != null)
+                  Text(
+                    drop.additions == 'new'
+                        ? 'New addition'
+                        : 'Updated source details',
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.primary,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
-                ),
-              Text(
-                drop.sources.map((s) => '@${s['author']}').toSet().join(' · '),
-              ),
-            ],
-          ),
-        ),
-      if (drop.listContext != null || drop.todaySchedule != null)
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (drop.listContext != null)
                 Text(
-                  drop.listContext!,
-                  style: const TextStyle(fontWeight: FontWeight.bold),
+                  drop.sources
+                      .map((s) => '@${s['author']}')
+                      .toSet()
+                      .join(' · '),
                 ),
-              if (drop.todaySchedule != null)
-                Text('Today: ${drop.todaySchedule}'),
+              ],
+            ),
+          ),
+        if (drop.listContext != null || drop.todaySchedule != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (drop.listContext != null)
+                  Text(
+                    drop.listContext!,
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                if (drop.todaySchedule != null)
+                  Text('Today: ${drop.todaySchedule}'),
+              ],
+            ),
+          ),
+        Theme(
+          data: Theme.of(context).copyWith(
+            cardTheme: Theme.of(context).cardTheme.copyWith(
+              margin: EdgeInsets.zero,
+              color: Colors.transparent,
+              elevation: 0,
+              shape: const RoundedRectangleBorder(),
+            ),
+          ),
+          child: _dropBody(context, notifier, drop),
+        ),
+        if (drop.sources.isNotEmpty)
+          DisclosureSection(
+            title: const Text('Source details'),
+            children: [
+              for (final source in drop.sources)
+                ListTile(
+                  title: Text('@${source['author']}'),
+                  subtitle: Text(
+                    '${source['price'] ?? 'Price not provided'}\n${source['time_wat'] ?? 'Time not verified'}'
+                    '${(source['stages'] as List? ?? []).isEmpty ? '' : '\n${(source['stages'] as List).map((s) => '${s['name']}: ${s['wat']}').join('\n')}'}',
+                  ),
+                  trailing: source['post_url'] == null
+                      ? null
+                      : TextButton(
+                          onPressed: () async {
+                            final uri = Uri.tryParse('${source['post_url']}');
+                            if (uri != null &&
+                                uri.scheme == 'https' &&
+                                uri.host == 'x.com') {
+                              await openExternalUrl(context, uri);
+                            }
+                          },
+                          child: const Text('View post'),
+                        ),
+                ),
             ],
           ),
-        ),
-      _dropBody(context, notifier, drop),
-      if (drop.sources.isNotEmpty)
-        DisclosureSection(
-          title: const Text('Source details'),
-          children: [
-            for (final source in drop.sources)
-              ListTile(
-                title: Text('@${source['author']}'),
-                subtitle: Text(
-                  '${source['price'] ?? 'Price not provided'}\n${source['time_wat'] ?? 'Time not verified'}'
-                  '${(source['stages'] as List? ?? []).isEmpty ? '' : '\n${(source['stages'] as List).map((s) => '${s['name']}: ${s['wat']}').join('\n')}'}',
-                ),
-                trailing: source['post_url'] == null
-                    ? null
-                    : TextButton(
-                        onPressed: () async {
-                          final uri = Uri.tryParse('${source['post_url']}');
-                          if (uri != null &&
-                              uri.scheme == 'https' &&
-                              uri.host == 'x.com') {
-                            await openExternalUrl(context, uri);
-                          }
-                        },
-                        child: const Text('View post'),
-                      ),
-              ),
-          ],
-        ),
-    ],
+      ],
+    ),
   );
 
   Widget _dropBody(

@@ -105,7 +105,10 @@ class _FreeDropsState extends ConsumerState<FreeDropsScreen> {
           _select(
             _policies.firstWhere(
               (p) => p['id'] == selected,
-              orElse: () => _policies.first,
+              orElse: () => _policies.firstWhere(
+                (p) => p['wallet_id'] == api.selectedFeedWallet,
+                orElse: () => _policies.first,
+              ),
             ),
           );
         }
@@ -170,6 +173,7 @@ class _FreeDropsState extends ConsumerState<FreeDropsScreen> {
         };
       }
       await ref.read(apiServiceProvider).approveFreeDrops(_pending!);
+      ref.invalidate(todayAutomationProvider);
       await _load();
     } catch (e) {
       if (mounted) setState(() => _error = '$e');
@@ -186,6 +190,7 @@ class _FreeDropsState extends ConsumerState<FreeDropsScreen> {
     });
     try {
       await ref.read(apiServiceProvider).revokeFreeDrops('${_current!['id']}');
+      ref.invalidate(todayAutomationProvider);
       await _load();
     } catch (e) {
       if (mounted) setState(() => _error = '$e');

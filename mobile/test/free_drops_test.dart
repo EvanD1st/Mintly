@@ -59,6 +59,42 @@ class FreeDropApi extends ApiService {
   }
 }
 
+class SelectedWalletApi extends FreeDropApi {
+  SelectedWalletApi() {
+    selectedFeedWallet = 'today-wallet';
+    approvals.add({
+      'id': 'today-approval',
+      'status': 'active',
+      'expires_at': expiry,
+      'snapshot': {
+        'wallet_id': 'today-wallet',
+        'chain_id': 8453,
+        'grant_id': 'today-grant',
+        'quantity': 65535,
+        'quantity_mode': 'wallet_max',
+        'fee_cap_wei': '700000000000000',
+      },
+    });
+  }
+  @override
+  Future<List<Map<String, dynamic>>> fetchAutomaticPolicies() async => [
+    ...await super.fetchAutomaticPolicies(),
+    {
+      'id': 'today-grant',
+      'wallet_id': 'today-wallet',
+      'chain_id': 8453,
+      'status': 'enabled',
+      'expires_at': expiry,
+      'native_symbol': 'ETH',
+    },
+  ];
+  @override
+  Future<List<Map<String, dynamic>>> fetchWallets() async => [
+    ...await super.fetchWallets(),
+    {'id': 'today-wallet', 'label': 'Today wallet'},
+  ];
+}
+
 void main() {
   Future<void> open(WidgetTester tester, FreeDropApi api) async {
     tester.view.physicalSize = const Size(1000, 2000);
@@ -74,6 +110,27 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  testWidgets(
+    'Manage opens Today wallet and its saved approval without submitting',
+    (tester) async {
+      final api = SelectedWalletApi();
+      await open(tester, api);
+      expect(
+        tester
+            .widget<DropdownButtonFormField<String>>(
+              find.byType(DropdownButtonFormField<String>),
+            )
+            .initialValue,
+        'today-grant',
+      );
+      expect(find.text('Enabled'), findsOneWidget);
+      expect(
+        tester.widget<TextField>(find.byType(TextField).first).controller!.text,
+        '0.000700000000000000',
+      );
+      expect(api.submitted, isEmpty);
+    },
+  );
   testWidgets(
     'standing approval needs explicit consent and retries unchanged settings',
     (tester) async {

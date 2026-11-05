@@ -5,6 +5,21 @@ import '../models/activity_model.dart';
 import '../models/mint_plan_model.dart';
 import '../services/api_service.dart';
 
+// Each account/session/wallet has a separate snapshot; an old response cannot
+// become the newly selected wallet's automation status.
+final todayAutomationProvider = FutureProvider.autoDispose
+    .family<List<Map<String, dynamic>>, (String, int, String?)>((
+      ref,
+      key,
+    ) async {
+      if (key.$1.isEmpty || key.$3 == null) return [];
+      final data = await ref.read(apiServiceProvider).fetchFreeDropApprovals();
+      return (data['approvals'] as List)
+          .map((row) => Map<String, dynamic>.from(row as Map))
+          .where((row) => (row['snapshot'] as Map?)?['wallet_id'] == key.$3)
+          .toList();
+    });
+
 class MintlyState {
   final List<DropModel> drops;
   final String filter;
