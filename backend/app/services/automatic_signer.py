@@ -196,13 +196,29 @@ async def prepare_task(db, task_id, vault=None):
                 (auth.max_price_per_token_wei, auth.max_fee_wei, auth.total_spend_cap_wei)
             or s['expiry'] != int(aware(task.expires_at_utc).timestamp())):
         raise ValueError('Authorization ownership, account or task scope mismatch')
-    if s.get('execute_at') is not None:
+    from app.services import phase_tracking
+    follows_opening=phase_tracking.tracking(s)
+    if s.get('execute_at') is not None and not follows_opening:
         if int(aware(task.scheduled_for_utc).timestamp()) != s['execute_at']:
             raise ValueError('Task mint time differs from the reviewed authorization')
         if int(datetime.now(timezone.utc).timestamp()) < s['execute_at']:
             return {'task_id':task.id, 'status':'armed', 'note':'Waiting for the selected mint time.'}
     vault = vault or CustodyVault()
     policy = vault.policy(grant)
+    approved_snapshot=copy.deepcopy(s)
+    if follows_opening:
+        # Never alter an already signed intent, including a lost DB commit.
+        private=vault.journal()
+        try:previous_signature=private.execute('SELECT 1 FROM signed WHERE task=?',(task.id,)).fetchone()
+        finally:private.close()
+        if not previous_signature:
+            s=await phase_tracking.resolve(s)
+            if datetime.now(timezone.utc).timestamp()<s['start']:
+                task.scheduled_for_utc=datetime.fromtimestamp(s['start'],timezone.utc)
+                task.schedule_checked_at=datetime.now(timezone.utc)
+                task.schedule_note='Following the verified opening of your approved phase.'
+                await db.commit()
+                return {'task_id':task.id,'status':'armed','note':task.schedule_note}
     if (not automatic.allows_collection(policy, s['contract'])
             or s['mint_kind'] not in policy['mint_kinds'] or s['expiry'] > policy['expires_at']
             or not 0 < s['total_cap_wei'] <= policy['max_task_wei']
@@ -284,6 +300,12 @@ async def prepare_task(db, task_id, vault=None):
                     raise ValueError('This source transaction nonce already triggered a signed copy')
         elif task.copy_rule_id or task.copy_stage_key:
             raise ValueError('Copy task lacks a verified source')
+        if s.get('feed_approval_id'):
+            from app.services import feed_automation
+            await feed_automation.verify_task(db,journal,task,s,grant)
+            from app.services.free_copy import require_unminted
+            try:await require_unminted(web3,s['contract'],s['account'])
+            except HTTPException as error:raise OpenSeaUnavailable(error.detail,409,mint_reason='wallet_limit') from None
         block = await web3.eth.get_block('latest')
         now = max(int(datetime.now(timezone.utc).timestamp()), block.timestamp)
         if now >= min(s['expiry'], policy['expires_at']):
@@ -291,7 +313,7 @@ async def prepare_task(db, task_id, vault=None):
         if block.timestamp < s['start']:
             return {'task_id': task.id, 'status': 'armed', 'note': 'Waiting for chain time.'}
         await verify_account(web3, policy)
-        intent = intent_for(s, grant)
+        intent = intent_for(approved_snapshot, grant)
         previous = journal.execute('SELECT * FROM signed WHERE task=?', (task.id,)).fetchone()
         if previous:
             if previous['intent'] != intent:
@@ -324,14 +346,18 @@ async def prepare_task(db, task_id, vault=None):
             address = to_checksum_address(s['account'])
             if await web3.eth.get_balance(address, 'pending') <= s['price_wei'] * s['quantity']:
                 raise ValueError('Insufficient funds for mint value and gas')
-            if copy_key:
+            if copy_key or s.get('feed_approval_id'):
+                from app.services import copy_mints
                 await copy_mints.no_mixed_stage_copy(db, s, task_id=task.id)
                 verify_collection_copy_journal(journal, s, task.id)
+            elif journal.execute('SELECT task FROM copy_collections WHERE address=? AND chain=? AND contract=? AND kind=? AND task<>? LIMIT 1',
+                    (address.lower(),s['chain_id'],s['contract'].lower(),'any_free',task.id)).fetchone():
+                raise ValueError('A free-phase mint for this collection is already signed. No second mint was sent.')
             execution = None
             cached = _preflights.pop(task.id, None)
-            if cached and cached[1] == intent and time.monotonic() - cached[0] <= 90:
+            if cached and cached[1] == intent and time.monotonic() - cached[0] <= 90 and not follows_opening:
                 execution = cached[2]
-            if not execution:
+            if not execution and not follows_opening:
                 execution=mint_instruction_cache.get(journal,task.id,intent)
             if not execution:
                 execution=s.get('execution')
@@ -398,6 +424,9 @@ async def prepare_task(db, task_id, vault=None):
                 journal.execute('INSERT INTO copy_signed(task,rule,stage) VALUES(?,?,?)', (task.id, task.copy_rule_id, copy_key))
                 journal.execute('INSERT INTO copy_collections(task,address,chain,contract,kind) VALUES(?,?,?,?,?)',
                     (task.id, address.lower(), s['chain_id'], s['contract'].lower(), 'any_free' if s.get('copy_any_free_phase') else s['mint_kind']))
+            if s.get('feed_approval_id'):
+                journal.execute('INSERT INTO copy_collections(task,address,chain,contract,kind) VALUES(?,?,?,?,?)',
+                    (task.id,address.lower(),s['chain_id'],s['contract'].lower(),'any_free'))
             journal.commit()  # fsync BEFORE returning or persisting anything broadcastable to the worker
         reservation = await db.get(AutomaticNonce, task.id)
         if not reservation:
@@ -446,12 +475,48 @@ async def prepare(task_id: str, db=Depends(get_db)):
                           'Task or signer policy expired', 'Public stage changed on chain',
                           'Independent signer budget exhausted or reserved by uncertain submissions',
                           'Independent shared copy budget exhausted or reserved',
-                          'Whitelist copy already signed. Public mint skipped.', 'Public copy already signed. Whitelist mint skipped.'}
+                          'A free-phase mint for this collection is already signed. No second mint was sent.',
+                          'Whitelist copy already signed. Public mint skipped.', 'Public copy already signed. Whitelist mint skipped.',
+                          'This collection already has a signed mint for your wallet. No second mint was sent.'}
             detail = str(error) if str(error) in actionable else 'Independent signer rejected task policy, identity, budget or chain readiness.'
             raise HTTPException(409, detail,headers=mint_diagnostics.headers(events)) from None
         except Exception:
             await db.rollback()
             raise HTTPException(503, 'Signer or RPC temporarily unavailable; no fresh-nonce retry is permitted.',headers=mint_diagnostics.headers(events)) from None
+
+
+@app.post('/feed-approvals/{approval_id}/register',dependencies=[Depends(authenticate)])
+async def register_feed(approval_id:str,db=Depends(get_db)):
+    from app.services import feed_automation
+    await automatic.lock_execution(db)
+    journal=CustodyVault().journal()
+    try:
+        result=await feed_automation.pin(db,journal,approval_id,CustodyVault())
+        await db.commit();return result
+    except Exception:
+        await db.rollback();raise HTTPException(409,'The signer could not confirm this free-drop approval.') from None
+    finally:journal.close()
+
+
+@app.post('/feed-approvals/{approval_id}/revoke',dependencies=[Depends(authenticate)])
+async def revoke_feed(approval_id:str,db=Depends(get_db)):
+    from app.models import FeedMintApproval
+    from app.services import feed_automation
+    await automatic.lock_execution(db)
+    row=await db.get(FeedMintApproval,approval_id)
+    if not row:raise HTTPException(404,'Standing approval not found.')
+    await feed_automation.revoke(db,row,CustodyVault());await db.commit()
+    return {'status':'revoked'}
+
+
+@app.post('/tasks/{task_id}/refresh-schedule',dependencies=[Depends(authenticate)])
+async def refresh_schedule(task_id:str,db=Depends(get_db)):
+    from app.services.phase_tracking import refresh_task,PhaseChanged
+    try:return await refresh_task(db,task_id,CustodyVault())
+    except PhaseChanged as error:
+        await db.rollback();raise HTTPException(409,str(error)) from None
+    except Exception:
+        await db.rollback();raise HTTPException(503,'Schedule checks are temporarily unavailable; approval unchanged.') from None
 
 
 @app.post('/account-limits/{user_id}/register',dependencies=[Depends(authenticate)])
@@ -605,7 +670,7 @@ def verify_collection_copy_journal(journal, snapshot, task_id):
     address, chain, contract = snapshot['account'].lower(), snapshot['chain_id'], snapshot['contract'].lower()
     entries = journal.execute('SELECT s.*, c.task AS copy_task FROM signed s LEFT JOIN copy_signed c ON c.task=s.task '
         'LEFT JOIN copy_collections n ON n.task=s.task WHERE s.address=? AND s.chain=? AND n.task IS NULL '
-        + ('' if snapshot.get('copy_any_free_phase') else 'AND c.task IS NOT NULL'), (address, chain)).fetchall()
+        + ('' if snapshot.get('copy_any_free_phase') or snapshot.get('feed_approval_id') else 'AND c.task IS NOT NULL'), (address, chain)).fetchall()
     for entry in entries:
         raw = bytes.fromhex(entry['raw'].removeprefix('0x'))
         tx = Transaction.from_bytes(raw)
@@ -618,11 +683,13 @@ def verify_collection_copy_journal(journal, snapshot, task_id):
         journal.execute('INSERT INTO copy_collections(task,address,chain,contract,kind) VALUES(?,?,?,?,?)',
             (entry['task'], address, chain, nft.lower(), mint['kind'] if entry['copy_task'] else 'regular'))
     journal.commit()
-    opposite = ('public','allowlist','signed','any_free','regular') if snapshot.get('copy_any_free_phase') else (
+    opposite = ('public','allowlist','signed','any_free','regular') if snapshot.get('copy_any_free_phase') or snapshot.get('feed_approval_id') else (
         ('allowlist','signed','any_free') if snapshot['mint_kind'] == 'public' else ('public','any_free'))
     marks = ','.join('?' for _ in opposite)
     if journal.execute('SELECT task FROM copy_collections WHERE address=? AND chain=? AND contract=? '
             f'AND task<>? AND kind IN ({marks}) LIMIT 1', (address, chain, contract, task_id, *opposite)).fetchone():
+        if snapshot.get('feed_approval_id'):
+            raise ValueError('This collection already has a signed mint for your wallet. No second mint was sent.')
         raise ValueError('Whitelist copy already signed. Public mint skipped.' if snapshot['mint_kind'] == 'public'
             else 'Public copy already signed. Whitelist mint skipped.')
 

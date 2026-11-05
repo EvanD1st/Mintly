@@ -37,6 +37,7 @@ class _AutomaticReviewState extends ConsumerState<AutomaticReviewScreen> {
   final _expiry = TextEditingController();
   late DateTime _mintAt;
   bool _consent = false, _busy = false, _advanced = false;
+  bool _customTime = false;
   Map<String, dynamic>? _review, _request;
   String? _error;
 
@@ -84,6 +85,7 @@ class _AutomaticReviewState extends ConsumerState<AutomaticReviewScreen> {
   }
 
   void _setStage() {
+    _customTime = false;
     _price.text = _stage.priceEthStr;
     _expiry.text = _stage.endTimeUtc?.toUtc().toIso8601String() ?? '';
     _review = null;
@@ -101,7 +103,7 @@ class _AutomaticReviewState extends ConsumerState<AutomaticReviewScreen> {
   DateTime _defaultMintTime() {
     final now = DateTime.now().toUtc();
     if (_scheduledWhitelist && _stage.startTimeUtc.toUtc().isAfter(now)) {
-      return _stage.startTimeUtc.toUtc().add(const Duration(seconds: 15));
+      return _stage.startTimeUtc.toUtc();
     }
     return WatTime.defaultForStage(_stage.startTimeUtc, now);
   }
@@ -200,6 +202,7 @@ class _AutomaticReviewState extends ConsumerState<AutomaticReviewScreen> {
     if (picked == null || !mounted) return;
     setState(() {
       _mintAt = picked;
+      _customTime = true;
       _review = null;
       _request = null;
       _consent = false;
@@ -251,6 +254,9 @@ class _AutomaticReviewState extends ConsumerState<AutomaticReviewScreen> {
         'quantity': quantity,
         'maximum_total_eth': _total.text.trim(),
         'scheduled_for_utc': _mintAt.toIso8601String(),
+        'schedule_mode': !_customTime && widget.copyEventId == null
+            ? 'phase_open'
+            : 'fixed',
         if (_advanced && _gas.text.trim().isNotEmpty)
           'gas_limit_eth': _gas.text.trim(),
       };
@@ -346,9 +352,25 @@ class _AutomaticReviewState extends ConsumerState<AutomaticReviewScreen> {
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
-          Row(children:[CollectionThumbnail(name:widget.drop.name,
-            reference:widget.copyEventId!=null?'copy:${widget.copyEventId}':widget.plan!=null?'plan:${widget.plan!.id}':'drop:${widget.drop.id}'),
-            const SizedBox(width:12),Expanded(child:Text(widget.drop.name,style:Theme.of(context).textTheme.headlineSmall))]),
+          Row(
+            children: [
+              CollectionThumbnail(
+                name: widget.drop.name,
+                reference: widget.copyEventId != null
+                    ? 'copy:${widget.copyEventId}'
+                    : widget.plan != null
+                    ? 'plan:${widget.plan!.id}'
+                    : 'drop:${widget.drop.id}',
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  widget.drop.name,
+                  style: Theme.of(context).textTheme.headlineSmall,
+                ),
+              ),
+            ],
+          ),
           const SizedBox(height: 12),
           const Text(
             'Choose your wallet, NFT quantity, WAT mint time and maximum total spend. Mintly verifies the exact stage and signing approval before you confirm.',
@@ -434,18 +456,21 @@ class _AutomaticReviewState extends ConsumerState<AutomaticReviewScreen> {
                     ? null
                     : () => setState(() {
                         _mintAt = _defaultMintTime();
+                        _customTime = false;
+                        _review = null;
+                        _request = null;
                         _consent = false;
                       }),
-                child: Text(
-                  _scheduledWhitelist
-                      ? 'Use opening time + 15 seconds'
-                      : 'Use stage opening time',
-                ),
+                child: Text('Use stage opening time'),
               ),
             const Text(
               'Time is always WAT. Confirmation can be later than the selected time.',
               style: TextStyle(fontSize: 12),
             ),
+            if (!_customTime && widget.copyEventId == null)
+              const Text(
+                'Follows this same phase’s verified opening if its time changes, within your approved deadline. Price and spending limits stay fixed.',
+              ),
             TextField(
               controller: _quantity,
               enabled: !_busy,
@@ -571,8 +596,10 @@ class _AutomaticReviewState extends ConsumerState<AutomaticReviewScreen> {
             CheckboxListTile(
               value: _consent,
               onChanged: _busy ? null : (v) => setState(() => _consent = v!),
-              title: const Text(
-                'I authorize this exact automatic mint and its displayed limits.',
+              title: Text(
+                snapshot['schedule_mode'] == 'phase_open'
+                    ? 'I authorize this phase at its verified opening, including opening-time changes within the displayed deadline and limits.'
+                    : 'I authorize this exact automatic mint and its displayed limits.',
               ),
             ),
             FilledButton(

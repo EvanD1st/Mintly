@@ -115,8 +115,13 @@ services:
     <<: *custody
     networks: [default, custody-control]
     command: python -m app.automatic_worker
+    environment:
+      <<: *custody-env
+      OPENSEA_KEY_FILE: /run/opensea/key.json
+      OPENSEA_KEY_READ_ONLY: "true"
     volumes:
       - ${CUSTODY_TOKEN_DIR:?Set protected token directory}:/run/custody-token:ro
+      - ${MINTLY_OPENSEA_DIR:?Set protected API key directory}:/run/opensea:ro
     healthcheck:
       test: ["CMD", "python", "-c", "import pathlib,time; assert time.time()-pathlib.Path('/tmp/mintly-automatic.heartbeat').stat().st_mtime < 120"]
       interval: 30s

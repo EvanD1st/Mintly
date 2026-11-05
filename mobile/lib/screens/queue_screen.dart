@@ -462,6 +462,8 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
               'Runs automatically at the selected time.',
               style: TextStyle(fontSize: 10),
             ),
+          if (task.scheduleNote != null)
+            Text(task.scheduleNote!, style: const TextStyle(fontSize: 11)),
           if (task.failureReason != null)
             Text(
               task.failureReason!,

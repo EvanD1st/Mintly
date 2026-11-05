@@ -23,6 +23,7 @@ class MintTaskModel {
   final String? transactionHash;
   final String? explorerUrl;
   final String? failureReason;
+  final String? scheduleNote;
   final Map<String, dynamic>? externalMint;
   final Map<String, dynamic>? progress;
 
@@ -48,6 +49,7 @@ class MintTaskModel {
     this.transactionHash,
     this.explorerUrl,
     this.failureReason,
+    this.scheduleNote,
     this.externalMint,
     this.progress,
   });
@@ -76,6 +78,7 @@ class MintTaskModel {
       transactionHash: json['transaction_hash'],
       explorerUrl: json['explorer_url'],
       failureReason: json['failure_reason'],
+      scheduleNote: json['schedule_note'],
       externalMint: json['external_mint'] is Map<String, dynamic>
           ? json['external_mint'] as Map<String, dynamic>
           : null,

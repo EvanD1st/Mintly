@@ -293,6 +293,15 @@ class MintlyWorker:
             await session.commit()
             return
         try:
+            from app.services import automatic
+            tracked=(await session.execute(select(MintTask,MintAuthorization).join(MintAuthorization,MintTask.authorization_id==MintAuthorization.id)
+                .where(MintTask.plan_id==plan.id,MintTask.status.not_in(automatic.TERMINAL),
+                    MintAuthorization.snapshot['schedule_mode'].as_string()=='phase_open').limit(1))).first()
+            if tracked:
+                task,auth=tracked
+                plan.status='armed';plan.status_note=task.schedule_note or 'Automatically armed. Following the verified phase opening within your approved deadline.'
+                plan.starts_at=task.scheduled_for_utc;plan.next_check_at=now+timedelta(seconds=60)
+                await session.commit();return
             await refresh_mint_plan(plan, wallet, now=now, db=session)
         except OpenSeaUnavailable as error:
             plan.status = "error"

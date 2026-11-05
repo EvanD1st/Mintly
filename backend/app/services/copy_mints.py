@@ -407,8 +407,8 @@ async def no_mixed_stage_copy(db, snapshot, *, task_id=None):
             continue
         if task.status in ('failed','expired','disarmed') and not task.signed_tx_raw:
             continue
-        if snapshot.get('copy_any_free_phase') or other.get('copy_any_free_phase'):
-            raise HTTPException(409, 'This wallet already has a pending or completed mint for this collection. Copy skipped.')
+        if snapshot.get('copy_any_free_phase') or other.get('copy_any_free_phase') or snapshot.get('feed_approval_id') or other.get('feed_approval_id'):
+            raise HTTPException(409, 'This wallet already has a pending or completed mint for this collection. No second mint was armed.')
         if not task.copy_stage_key:
             continue
         if (other['chain_id'] == snapshot['chain_id'] and other['account'].lower() == snapshot['account'].lower()

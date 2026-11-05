@@ -355,11 +355,14 @@ async def other_mint_due(db, task_id):
 async def run():
     automatic.enabled()
     advance = asyncio.create_task(preflight_loop())
+    from app.services.feed_automation import loop as free_drops_loop
+    free_drops=asyncio.create_task(free_drops_loop(AsyncSessionLocal))
     try:
         await execution_loop()
     finally:
         advance.cancel()
-        await asyncio.gather(advance, return_exceptions=True)
+        free_drops.cancel()
+        await asyncio.gather(advance,free_drops, return_exceptions=True)
 
 
 async def preflight_step(session_factory=AsyncSessionLocal, check=None, *, now=None):
@@ -416,10 +419,42 @@ async def preflight_step(session_factory=AsyncSessionLocal, check=None, *, now=N
 async def preflight_loop():
     while True:
         try:
+            await schedule_step()
             await preflight_step()
         except Exception:
             log.info('Advance checks temporarily unavailable.')
         await asyncio.sleep(5)
+
+
+async def schedule_step(session_factory=AsyncSessionLocal,check=None,*,now=None):
+    """Watch all explicit phase-opening approvals, including openings moved earlier."""
+    now=now or datetime.now(timezone.utc)
+    async with session_factory() as db:
+        ids=(await db.scalars(select(MintTask.id).join(MintAuthorization,MintTask.authorization_id==MintAuthorization.id)
+            .join(Wallet,Wallet.id==MintTask.wallet_id).join(User,User.id==Wallet.user_id)
+            .where(MintTask.status=='armed',MintTask.execution_mode==automatic.MODE,
+                MintTask.signed_tx_raw.is_(None),MintTask.transaction_hash.is_(None),
+                MintTask.expires_at_utc>now,User.automation_paused.is_(False),User.is_active.is_(True),User.deleted_at.is_(None),
+                MintAuthorization.snapshot['schedule_mode'].as_string()=='phase_open',
+                or_(MintTask.schedule_checked_at.is_(None),MintTask.schedule_checked_at<now-timedelta(seconds=30)))
+            .order_by(MintTask.schedule_checked_at,MintTask.scheduled_for_utc).limit(8))).all()
+    if check is None:
+        token=Path(settings.AUTOMATIC_SIGNER_TOKEN_FILE).read_text().strip()
+        async def check(task_id):
+            async with httpx.AsyncClient(timeout=15,trust_env=False) as client:
+                result=await client.post(settings.AUTOMATIC_SIGNER_URL+f'/tasks/{task_id}/refresh-schedule',headers={'Authorization':'Bearer '+token})
+                result.raise_for_status()
+    for task_id in ids:
+        try:await check(task_id)
+        except Exception:
+            async with session_factory() as db:
+                await automatic.lock_execution(db)
+                task=await db.get(MintTask,task_id)
+                if task and task.status=='armed' and not task.signed_tx_raw:
+                    task.schedule_checked_at=now
+                    task.schedule_note='Opening check delayed. Your approved limits remain unchanged.'
+                await db.commit()
+    return bool(ids)
 
 
 async def execution_loop():

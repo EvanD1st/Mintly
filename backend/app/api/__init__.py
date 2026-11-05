@@ -17,6 +17,7 @@ from app.api.history import router as history_router
 from app.api.copy_mints import router as copy_router
 from app.api.opensea_access import router as opensea_access_router
 from app.api.artwork import router as artwork_router
+from app.api.feed_automation import router as feed_automation_router
 
 api_router = APIRouter(prefix="/api")
 api_router.include_router(auth_router)
@@ -27,6 +28,7 @@ protected.include_router(history_router)
 protected.include_router(artwork_router)
 protected.include_router(copy_router)
 protected.include_router(automatic_router)
+protected.include_router(feed_automation_router)
 protected.include_router(drops_router)
 protected.include_router(import_router)
 protected.include_router(tasks_router)
