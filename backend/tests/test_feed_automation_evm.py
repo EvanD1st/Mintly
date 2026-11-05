@@ -69,6 +69,67 @@ async def test_daily_list_to_armed_free_task_with_real_independent_approval(free
         assert await db.scalar(select(func.count()).select_from(MintTask))==1
 
 
+@pytest.mark.parametrize('limit,outside_count',[(20,0),(150,0),(20,3)])
+async def test_one_tap_mints_verified_remaining_wallet_maximum_not_cached_default(free_feed,monkeypatch,limit,outside_count):
+    from app.services.feed_sources import daily_collections
+    f=free_feed;lab=f['lab']
+    assert (await lab.client.delete('/api/automatic/free-drops/'+f['approval']['id'])).status_code==200
+    enabled=await lab.client.post('/api/automatic/free-drops/enable',json={
+        'request_id':str(uuid.uuid4()),'wallet_id':lab.wallet.id,'consent':True})
+    assert enabled.status_code==200,enabled.text
+    approval=enabled.json()['approvals'][0]
+    assert approval['snapshot']['quantity_mode']=='wallet_max'
+    lab.w.provider.make_request('hardhat_impersonateAccount',[lab.nft.address])
+    lab.w.eth.wait_for_transaction_receipt(lab.sea.functions.updatePublicDrop((0,lab.start,lab.end,limit,500,True)).transact({'from':lab.nft.address}))
+    lab.w.provider.make_request('hardhat_stopImpersonatingAccount',[lab.nft.address])
+    f['metadata'].return_value['stages'][0]['max_per_wallet']=str(limit)
+    lab.w.provider.make_request('evm_setNextBlockTimestamp',[lab.start]);lab.w.provider.make_request('evm_mine',[])
+    if outside_count:
+        outside=lab.sea.functions.mintPublic(lab.nft.address,lab.w.eth.accounts[1],lab.owner.address,outside_count).build_transaction({
+            'from':lab.owner.address,'value':0,'gas':3000000,'gasPrice':lab.w.eth.gas_price,
+            'nonce':lab.w.eth.get_transaction_count(lab.owner.address),'chainId':31337})
+        signed=lab.owner.sign_transaction(outside)
+        assert lab.w.eth.wait_for_transaction_receipt(lab.w.eth.send_raw_transaction(signed.raw_transaction)).status==1
+    expected=min(limit,100)-outside_count  # This test NFT has a collection supply cap of 100.
+    async with lab.factory() as db:
+        row=await db.get(FeedMintApproval,approval['id']);user=await db.get(User,lab.user.id);wallet=await db.get(Wallet,lab.wallet.id)
+        groups=await daily_collections(db,datetime.now(timezone.utc).astimezone(ZoneInfo('Africa/Lagos')).date(),user.id)
+        check=await db.get(FeedWalletCheck,(user.id,wallet.id,lab.drop.id))
+        assert check.result['stages'][0]['remaining']==20  # Deliberately stale.
+        assert await feed_automation.arm(db,row,groups[0],check,user,wallet)
+        task=(await db.scalars(select(MintTask))).one();task_id=task.id
+        auth=await db.get(MintAuthorization,task.authorization_id)
+        assert auth.quantity==expected
+        assert auth.snapshot['price_wei']==0
+        assert auth.snapshot['fee_cap_wei']==approval['snapshot']['fee_cap_wei']
+    class Clock(datetime):
+        @classmethod
+        def now(cls,tz=None):return datetime.fromtimestamp(lab.w.eth.get_block('latest').timestamp,tz)
+    monkeypatch.setattr('app.services.automatic_signer.datetime',Clock)
+    prepared=await lab.signer_client.post(f'/tasks/{task_id}/prepare')
+    if outside_count:
+        # Existing duplicate protection still stops a second mint, even if the
+        # wallet's stage limit is not exhausted by its external transaction.
+        assert prepared.status_code==409,prepared.text
+        assert 'already minted' in prepared.text.lower()
+        assert lab.nft.functions.totalSupply().call()==outside_count
+        return
+    if limit>100:
+        # The collection supply allows 100, but this many tokens exceed the
+        # separately approved gas cap. Neither quantity nor gas consent moves.
+        assert prepared.status_code==409 and 'gas or total debit' in prepared.text,prepared.text
+        async with lab.factory() as db:
+            task=await db.get(MintTask,task_id)
+            assert task.signed_tx_raw is None
+            assert (await db.get(MintAuthorization,task.authorization_id)).quantity==expected
+        return
+    assert prepared.status_code==200,prepared.text
+    async with lab.factory() as db:
+        task=await db.get(MintTask,task_id)
+        assert lab.w.eth.wait_for_transaction_receipt(lab.w.eth.send_raw_transaction(task.signed_tx_raw)).status==1
+    assert lab.nft.functions.totalSupply().call()==expected
+
+
 async def arm_free(f):
     lab=f['lab']
     source={'drop_id':lab.drop.id,'post_id':f['post'],'list_date':datetime.now(timezone.utc).astimezone(ZoneInfo('Africa/Lagos')).date().isoformat()}
@@ -164,12 +225,19 @@ from test_copy_presales import presale
 from test_copy_mints import copying
 
 
+@pytest.mark.parametrize('maximum',[False,True])
 @pytest.mark.parametrize('kind',['allowlist','signed'])
-async def test_free_wl_and_fcfs_use_receiving_wallet_proof_and_confirm(presale,free_feed,monkeypatch,kind):
+async def test_free_wl_and_fcfs_use_receiving_wallet_proof_and_confirm(presale,free_feed,monkeypatch,kind,maximum):
     from app.models import OpenSeaAccess
     from app.services.feed_sources import daily_collections
     c,state,configure,_=presale
     f=free_feed;lab=f['lab']
+    if maximum:
+        assert (await lab.client.delete('/api/automatic/free-drops/'+f['approval']['id'])).status_code==200
+        enabled=await lab.client.post('/api/automatic/free-drops/enable',json={
+            'request_id':str(uuid.uuid4()),'wallet_id':lab.wallet.id,'consent':True})
+        assert enabled.status_code==200,enabled.text
+        f['approval']=enabled.json()['approvals'][0]
     state.kind=kind;state.own_price=0;state.own_index=8;configure()
     metadata=copy.deepcopy(f['metadata'].return_value)
     metadata['collection_slug']='presale-copy'
@@ -217,7 +285,7 @@ async def test_free_wl_and_fcfs_use_receiving_wallet_proof_and_confirm(presale,f
         task=await db.get(MintTask,task_id)
         receipt=lab.w.eth.wait_for_transaction_receipt(lab.w.eth.send_raw_transaction(task.signed_tx_raw))
         assert receipt.status==1
-    assert lab.nft.functions.totalSupply().call()==2
+    assert lab.nft.functions.totalSupply().call()==(7 if maximum else 2)
 
 
 async def test_reservation_shortage_waits_then_arms_without_increasing_budget(free_feed):

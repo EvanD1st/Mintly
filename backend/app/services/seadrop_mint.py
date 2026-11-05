@@ -27,7 +27,7 @@ SIGNED_TYPES = {'MintParams':[{'name':n,'type':'bool' if n=='restrictFeeRecipien
 
 def decode_mint(tx,contract,wallet,quantity):
     try:
-        if tx['to'].lower()!=SEADROP_V1_ADDRESS.lower() or not 1<=quantity<=100:
+        if tx['to'].lower()!=SEADROP_V1_ADDRESS.lower() or not 1<=quantity<=65535:
             raise ValueError()
         data=bytes.fromhex(tx['data'][2:])
         selector=data[:4].hex()

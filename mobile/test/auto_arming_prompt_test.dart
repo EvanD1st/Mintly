@@ -54,6 +54,17 @@ class PromptApi extends FreeDropApi {
     enabledOnce = true;
   }
 
+  final quickRequests = <String>[];
+  Completer<void>? enabling;
+  @override
+  Future<void> enableFreeDrops(String requestId, String? walletId) async {
+    quickRequests.add(requestId);
+    if (enabling != null) await enabling!.future;
+    if (this.fail) throw Exception('Set up a signing wallet first.');
+    enabledOnce = true;
+    approvals.add({'id': 'quick', 'status': 'active'});
+  }
+
   @override
   Future<Map<String, dynamic>> fetchWalletReadiness() async => {
     'unavailable': true,
@@ -103,44 +114,86 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets(
-    'Not now repeats on the next opening but not on every Today visit',
-    (tester) async {
-      final api = PromptApi();
-      final container = await open(tester, api);
-      expect(find.text('Turn on Auto-Arming'), findsOneWidget);
-      expect(find.textContaining('You still pay gas.'), findsOneWidget);
-      await tester.tap(find.text('Not now'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Copy').last);
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Today').last);
-      await tester.pumpAndSettle();
-      expect(find.text('Turn on Auto-Arming'), findsNothing);
-      await resume(tester);
-      expect(find.text('Turn on Auto-Arming'), findsOneWidget);
-      await close(tester);
-      await tester.pumpWidget(shell(container));
-      await tester.pumpAndSettle();
-      expect(find.text('Turn on Auto-Arming'), findsOneWidget);
-      expect(api.submitted, isEmpty);
-      await close(tester);
-    },
-  );
-  testWidgets('Turn on opens settings and does not count as enabling', (
+  testWidgets('X repeats on the next opening but not on every Today visit', (
+    tester,
+  ) async {
+    final api = PromptApi();
+    final container = await open(tester, api);
+    expect(find.text('Turn on Auto-Arming'), findsOneWidget);
+    expect(find.textContaining('You still pay gas.'), findsOneWidget);
+    await tester.tap(find.byTooltip('Close Auto-Arming'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Copy').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Today').last);
+    await tester.pumpAndSettle();
+    expect(find.text('Turn on Auto-Arming'), findsNothing);
+    await resume(tester);
+    expect(find.text('Turn on Auto-Arming'), findsOneWidget);
+    await close(tester);
+    await tester.pumpWidget(shell(container));
+    await tester.pumpAndSettle();
+    expect(find.text('Turn on Auto-Arming'), findsOneWidget);
+    expect(api.submitted, isEmpty);
+    await close(tester);
+  });
+  testWidgets('Turn on enables directly and never opens another screen', (
     tester,
   ) async {
     final api = PromptApi();
     await open(tester, api);
+    expect(find.text('Not now'), findsNothing);
     await tester.tap(find.text('Turn on'));
     await tester.pumpAndSettle();
-    expect(find.text('Free drops automation'), findsOneWidget);
-    expect(api.enabledOnce, isFalse);
-    expect(api.submitted, isEmpty);
-    await tester.pageBack();
+    expect(api.enabledOnce, isTrue);
+    expect(api.quickRequests, hasLength(1));
+    expect(find.text('Free drops automation'), findsNothing);
+    expect(find.text('Auto-Arming is on.'), findsOneWidget);
+    await close(tester);
+  });
+  testWidgets('failed enable stays in popup and retries the same request', (
+    tester,
+  ) async {
+    final api = PromptApi()..fail = true;
+    await open(tester, api);
+    await tester.tap(find.text('Turn on'));
     await tester.pumpAndSettle();
-    await resume(tester);
-    expect(find.text('Turn on Auto-Arming'), findsOneWidget);
+    expect(find.text('Set up a signing wallet first.'), findsOneWidget);
+    expect(api.enabledOnce, isFalse);
+    api.fail = false;
+    await tester.tap(find.text('Turn on'));
+    await tester.pumpAndSettle();
+    expect(api.quickRequests, hasLength(2));
+    expect(api.quickRequests[0], api.quickRequests[1]);
+    expect(api.enabledOnce, isTrue);
+    await close(tester);
+  });
+  testWidgets('pending enable prevents duplicate taps and dismissal', (
+    tester,
+  ) async {
+    final done = Completer<void>();
+    final api = PromptApi()..enabling = done;
+    await open(tester, api);
+    await tester.tap(find.text('Turn on'));
+    await tester.pump();
+    expect(find.text('Turning on...'), findsOneWidget);
+    expect(
+      tester
+          .widget<IconButton>(find.widgetWithIcon(IconButton, Icons.close))
+          .onPressed,
+      isNull,
+    );
+    expect(
+      tester
+          .widget<FilledButton>(
+            find.widgetWithText(FilledButton, 'Turning on...'),
+          )
+          .onPressed,
+      isNull,
+    );
+    expect(api.quickRequests, hasLength(1));
+    done.complete();
+    await tester.pumpAndSettle();
     await close(tester);
   });
   testWidgets(
@@ -150,17 +203,8 @@ void main() {
       final container = await open(tester, api);
       await tester.tap(find.text('Turn on'));
       await tester.pumpAndSettle();
-      await tester.enterText(find.byType(TextField).at(1), '0.0005');
-      await tester.tap(find.byType(CheckboxListTile));
-      await tester.pump();
-      await tester.tap(find.text('Enable automatic free mints'));
-      await tester.pumpAndSettle();
       expect(api.enabledOnce, isTrue);
-      await tester.tap(find.text('Turn off free-drop automation'));
-      await tester.pumpAndSettle();
-      expect(api.approvals.first['status'], 'revoked');
-      await tester.pageBack();
-      await tester.pumpAndSettle();
+      await api.revokeFreeDrops('quick');
       await resume(tester);
       expect(find.text('Turn on Auto-Arming'), findsNothing);
       await close(tester);
@@ -176,7 +220,7 @@ void main() {
     await open(tester, PromptApi());
     await resume(tester);
     expect(find.byType(AlertDialog), findsOneWidget);
-    await tester.tap(find.text('Not now'));
+    await tester.tap(find.byTooltip('Close Auto-Arming'));
     await tester.pumpAndSettle();
     expect(find.byType(AlertDialog), findsNothing);
     await close(tester);
@@ -216,6 +260,22 @@ void main() {
     expect(find.text('Turn on Auto-Arming'), findsOneWidget);
     await close(tester);
   });
+  testWidgets('an old account popup cannot enable the newly selected account', (
+    tester,
+  ) async {
+    final api = PromptApi();
+    await open(tester, api);
+    api.switchTo('other', enabled: false);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Turn on'));
+    await tester.pumpAndSettle();
+    expect(api.quickRequests, isEmpty);
+    expect(
+      find.text('Unlock this account before turning on Auto-Arming.'),
+      findsOneWidget,
+    );
+    await close(tester);
+  });
   testWidgets('switching accounts checks the new account independently', (
     tester,
   ) async {
@@ -225,7 +285,7 @@ void main() {
     api.switchTo('other', enabled: false);
     await tester.pumpAndSettle();
     expect(find.text('Turn on Auto-Arming'), findsOneWidget);
-    await tester.tap(find.text('Not now'));
+    await tester.tap(find.byTooltip('Close Auto-Arming'));
     await tester.pumpAndSettle();
     api.switchTo('member', enabled: true);
     await tester.pumpAndSettle();
@@ -253,7 +313,7 @@ void main() {
       final container = await open(tester, api);
       expect(find.text('Turn on Auto-Arming'), findsOneWidget);
       expect(api.copyChecks, 0);
-      await tester.tap(find.text('Not now'));
+      await tester.tap(find.byTooltip('Close Auto-Arming'));
       await tester.pumpAndSettle();
       expect(find.text('New: copy any eligible free phase'), findsNothing);
       await close(tester);

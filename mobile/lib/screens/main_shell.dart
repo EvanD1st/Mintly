@@ -1,3 +1,4 @@
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../widgets/main_navigation.dart';
@@ -10,7 +11,6 @@ import 'queue_screen.dart';
 import 'history_screen.dart';
 import 'copy_mints_screen.dart';
 import 'wallet_screen.dart';
-import 'free_drops_screen.dart';
 
 class MainShell extends ConsumerStatefulWidget {
   const MainShell({super.key});
@@ -83,29 +83,23 @@ class _MainShellState extends ConsumerState<MainShell>
       _autoPromptPresented = true;
       final open = await showDialog<bool>(
         context: context,
+        barrierDismissible: false,
         animationStyle: const AnimationStyle(
           duration: Duration(milliseconds: 240),
           reverseDuration: Duration(milliseconds: 180),
           curve: Curves.easeOutCubic,
         ),
-        builder: (context) => AlertDialog(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(24),
-          ),
-          title: const Text('Turn on Auto-Arming'),
-          content: const Text(
-            'Mintly can automatically arm free mints you qualify for from Today’s list. You still pay gas.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Not now'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Turn on'),
-            ),
-          ],
+        builder: (context) => _AutoArmingDialog(
+          enable: (requestId) async {
+            if (!mounted ||
+                ref.read(apiServiceProvider).userId != owner ||
+                api.screenLocked) {
+              throw Exception(
+                'Unlock this account before turning on Auto-Arming.',
+              );
+            }
+            await api.enableFreeDrops(requestId, api.selectedFeedWallet);
+          },
         ),
       );
       if (!mounted || ref.read(apiServiceProvider).userId != owner) return;
@@ -114,9 +108,9 @@ class _MainShellState extends ConsumerState<MainShell>
       if (open == true &&
           mounted &&
           ref.read(apiServiceProvider).userId == owner) {
-        await Navigator.of(
+        ScaffoldMessenger.of(
           context,
-        ).push(MaterialPageRoute(builder: (_) => const FreeDropsScreen()));
+        ).showSnackBar(const SnackBar(content: Text('Auto-Arming is on.')));
       }
     } catch (_) {
       // Keep Today usable offline. A failed check never counts as enabling it.
@@ -243,4 +237,101 @@ class _MainShellState extends ConsumerState<MainShell>
       ),
     );
   }
+}
+
+class _AutoArmingDialog extends StatefulWidget {
+  const _AutoArmingDialog({required this.enable});
+  final Future<void> Function(String requestId) enable;
+  @override
+  State<_AutoArmingDialog> createState() => _AutoArmingDialogState();
+}
+
+class _AutoArmingDialogState extends State<_AutoArmingDialog> {
+  bool _busy = false;
+  String? _error;
+  late final String _requestId;
+  @override
+  void initState() {
+    super.initState();
+    final bytes = List.generate(16, (_) => Random.secure().nextInt(256));
+    bytes[6] = (bytes[6] & 15) | 64;
+    bytes[8] = (bytes[8] & 63) | 128;
+    final hex = bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+    _requestId =
+        '${hex.substring(0, 8)}-${hex.substring(8, 12)}-${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20)}';
+  }
+
+  Future<void> _enable() async {
+    if (_busy) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await widget.enable(_requestId);
+      if (mounted) {
+        Navigator.pop(context, true);
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _error = error.toString().replaceFirst('Exception: ', '');
+        });
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => PopScope(
+    canPop: !_busy,
+    child: AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+      title: Row(
+        children: [
+          const Expanded(child: Text('Turn on Auto-Arming')),
+          IconButton(
+            tooltip: 'Close Auto-Arming',
+            onPressed: _busy ? null : () => Navigator.pop(context, false),
+            icon: const Icon(Icons.close),
+          ),
+        ],
+      ),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Mintly will arm free mints from Today for your selected wallet, using the maximum NFTs it can mint. Your saved gas limits apply. You still pay gas.',
+            ),
+            if (_busy)
+              const Padding(
+                padding: EdgeInsets.only(top: 12),
+                child: LinearProgressIndicator(),
+              ),
+            if (_error != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: Text(
+                  _error!,
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                ),
+              ),
+          ],
+        ),
+      ),
+      actions: [
+        FilledButton(
+          onPressed: _busy ? null : _enable,
+          child: Text(_busy ? 'Turning on...' : 'Turn on'),
+        ),
+      ],
+    ),
+  );
 }

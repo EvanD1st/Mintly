@@ -323,7 +323,7 @@ class OpenSeaClient:
         """Read-only preparation: OpenSea returns calldata; this never signs or sends it."""
         self.last_mint_reason=None
         self.last_retry_after=None
-        if not SLUG_RE.fullmatch(slug) or not is_address(wallet_address) or type(quantity) is not int or not 1 <= quantity <= 100:
+        if not SLUG_RE.fullmatch(slug) or not is_address(wallet_address) or type(quantity) is not int or not 1 <= quantity <= 65535:
             raise OpenSeaUnavailable("Invalid drop or wallet address.", 400)
         cached=_verified_mints.get((slug,wallet_address.lower(),quantity))
         if cached and cached[0]>time.monotonic():return 200,copy.deepcopy(cached[1])

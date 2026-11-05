@@ -12,6 +12,14 @@ from app.services.opensea import collection_slug
 from app.services.networks import symbol
 
 ENABLED_ONCE='free_list_enabled_once_v1'
+MAX_WALLET_QUANTITY=65535  # SeaDrop's uint16 wallet allowance.
+
+
+def quantity_allowed(snapshot,quantity):
+    mode=snapshot.get('quantity_mode','fixed')
+    return (mode=='wallet_max' and snapshot['quantity']==MAX_WALLET_QUANTITY and 1<=quantity<=MAX_WALLET_QUANTITY
+        or mode=='fixed' and 1<=quantity==snapshot['quantity']<=100)
+
 
 
 async def remember_enabled(db,user_id):
@@ -56,7 +64,7 @@ async def pin(db,journal,approval_id,vault):
         or s['account'].lower()!=policy['account'].lower() or s['chain_id']!=policy['chain_id']
         or s['expiry']!=int(aware(row.expires_at).timestamp()) or s['expiry']>policy['expires_at']
         or s['expiry']<=datetime.now(timezone.utc).timestamp()
-        or not 1<=s['quantity']<=100 or not 0<s['fee_cap_wei']<=policy['max_task_wei']
+        or not quantity_allowed(s,s['quantity']) or not 0<s['fee_cap_wei']<=policy['max_task_wei']
         or s['sources']!=list(SOURCE_NAMES) or s['free_only'] is not True):
         raise ValueError('Standing approval differs from the independently provisioned limits.')
     tables(journal)
@@ -76,7 +84,7 @@ async def verify_task(db,journal,task,s,grant):
     r=json.loads(pin['snapshot'])
     if (r['user_id']!=grant.user_id or r['wallet_id']!=grant.wallet_id or r['grant_id']!=grant.id
         or r['chain_id']!=s['chain_id'] or r['account'].lower()!=s['account'].lower()
-        or s['price_wei']!=0 or s['price_cap_wei']!=0 or s['quantity']!=r['quantity']
+        or s['price_wei']!=0 or s['price_cap_wei']!=0 or not quantity_allowed(r,s['quantity'])
         or not 0<s['fee_cap_wei']<=s['total_cap_wei']<=r['fee_cap_wei'] or s['expiry']>r['expiry']
         or not s.get('phase_identity') or s.get('schedule_mode')!='phase_open'):
         raise ValueError('Free-list mint exceeds the standing approval.')
@@ -126,6 +134,8 @@ async def create(db,user,req):
     s={'id':approval_id,'user_id':user.id,'wallet_id':grant.wallet_id,'grant_id':grant.id,
         'chain_id':grant.chain_id,'account':grant.account,'quantity':req.quantity,'fee_cap_wei':fee,
         'expiry':int(req.expires_at.timestamp()),'sources':list(SOURCE_NAMES),'free_only':True}
+    if getattr(req,'quantity_mode','fixed')=='wallet_max':s['quantity_mode']='wallet_max'
+    if not quantity_allowed(s,s['quantity']):raise HTTPException(422,'Invalid quantity approval.')
     row=await db.get(FeedMintApproval,approval_id)
     if row:
         if row.user_id!=user.id or row.context_hash!=automatic.digest(s):raise HTTPException(409,'Approval request was already used with different settings.')
@@ -143,6 +153,55 @@ async def create(db,user,req):
     await remember_enabled(db,user.id)
     db.add(ActivityEvent(user_id=user.id,event_type='free_list_approved',label='Free drops automation enabled',detail=row.note,is_demo=False,icon_name='gem'))
     await db.commit();return public(row)
+
+
+async def enable_for_today_wallet(db,user,req):
+    from app.models import FeedWalletSelection
+    from app.services.parser import format_wei_to_eth
+    from types import SimpleNamespace
+    if not req.consent:raise HTTPException(422,'Tap Turn on to approve free mints at your wallet maximum using saved gas limits.')
+    await automatic.require_running(db,user.id)
+    selection=await db.get(FeedWalletSelection,user.id)
+    wallet_id=req.wallet_id or (selection.wallet_id if selection else None)
+    query=select(Wallet).where(Wallet.user_id==user.id,Wallet.archived_at.is_(None),Wallet.is_demo.is_(False))
+    wallet=await db.scalar(query.where(Wallet.id==wallet_id)) if wallet_id else await db.scalar(query.order_by(Wallet.is_default.desc(),Wallet.id).limit(1))
+    if not wallet:raise HTTPException(409,'Choose a signing wallet on Today first.')
+    now=datetime.now(timezone.utc)
+    grants=(await db.scalars(select(AutomaticGrant).where(AutomaticGrant.user_id==user.id,
+        AutomaticGrant.wallet_id==wallet.id,AutomaticGrant.status=='enabled',AutomaticGrant.expires_at>now)
+        .order_by(AutomaticGrant.expires_at.desc(),AutomaticGrant.id))).all()
+    by_chain={}
+    for grant in grants:
+        if grant.chain_id not in by_chain:by_chain[grant.chain_id]=grant
+    if not by_chain:raise HTTPException(409,'Set up or renew this wallet’s signing approval in Wallet first.')
+    enabled=[];errors=[]
+    for chain,grant in by_chain.items():
+        try:
+            existing=await db.scalar(select(FeedMintApproval).where(FeedMintApproval.user_id==user.id,
+                FeedMintApproval.wallet_id==wallet.id,FeedMintApproval.status.in_(('active','registering','revoking')),
+                FeedMintApproval.expires_at>now,FeedMintApproval.snapshot['chain_id'].as_integer()==chain))
+            if existing:
+                if existing.snapshot.get('quantity_mode')!='wallet_max':
+                    raise HTTPException(409,'Auto-Arming already has a saved fixed quantity. Turn that approval off before changing its limits.')
+                if existing.status=='revoking':raise HTTPException(409,'Finish turning off the previous approval before enabling again.')
+                grant=await automatic.grant_for(db,existing.grant_id,user.id)
+                if existing.status=='active':
+                    await remember_enabled(db,user.id);await db.commit();enabled.append(public(existing));continue
+                s=existing.snapshot
+                key=existing.id;fee=s['fee_cap_wei'];expiry=aware(existing.expires_at)
+            else:
+                key=str(uuid.uuid5(uuid.UUID(req.request_id),grant.id))
+                fee=int(grant.scope['max_task_wei'])
+                expiry=min(aware(grant.expires_at),now+timedelta(days=60))
+            enabled.append(await create(db,user,SimpleNamespace(request_id=key,grant_id=grant.id,
+                quantity=MAX_WALLET_QUANTITY,quantity_mode='wallet_max',fee_cap=format_wei_to_eth(fee),
+                expires_at=expiry,native_symbol=symbol(chain),consent=True)))
+        except HTTPException as error:
+            await db.rollback();errors.append((error.status_code,str(error.detail)));break
+    if errors:
+        prefix='Auto-Arming is on for some networks. ' if enabled else ''
+        raise HTTPException(503 if enabled else errors[0][0],prefix+errors[0][1])
+    return {'approvals':enabled,'enabled_once':True,'wallet_id':wallet.id}
 
 
 async def revoke(db,row,vault):
@@ -195,7 +254,7 @@ async def arm(db,row,group,check,user,wallet):
     display=feed_checks.presentation(check)
     if not display['setup_enabled']:return
     phases=[p for p in display['stages'] if p['eligibility']=='eligible' and p['timing']!='ended'
-        and p.get('price_wei')=='0' and p.get('remaining') is not None and p['remaining']>=r['quantity']
+        and p.get('price_wei')=='0' and p.get('remaining') is not None and (p['remaining']>0 if r.get('quantity_mode')=='wallet_max' else p['remaining']>=r['quantity'])
         and stage_kind(p['type']) in grant.scope['mint_kinds']]
     phases.sort(key=lambda p:(p['timing']!='open',stage_kind(p['type'])=='public',p['starts_at'],p['id']))
     if not phases:return
@@ -206,16 +265,26 @@ async def arm(db,row,group,check,user,wallet):
     await db.commit()
     saved=await prepare_card(group['drop'].id,SetupCard(wallet_id=wallet.id,stage_uuid=phase['id']),user,db)
     plan=await db.get(MintPlan,saved['id'])
+    quantity=r['quantity']
+    if r.get('quantity_mode')=='wallet_max':
+        # Refresh OpenSea and on-chain wallet consumption rather than using a
+        # collection-wide default or the cached feed allowance.
+        from app.services.mint_stage_choice import stages
+        fresh,_=await stages(db,plan,user.id)
+        selected=next((p for p in fresh['stages'] if p['id']==phase['id']),None)
+        if not selected or selected['eligibility']!='eligible' or selected.get('price_wei')!='0':return
+        quantity=selected.get('remaining')
+        if not isinstance(quantity,int) or not quantity_allowed(r,quantity):return
     # No active task exists (checked above). Refresh even an unchanged UUID:
     # a budget wait may have outlived the saved plan's original schedule.
-    await select_stage(db,plan,SimpleNamespace(stage_uuid=phase['id'],quantity=r['quantity']),user.id)
+    await select_stage(db,plan,SimpleNamespace(stage_uuid=phase['id'],quantity=quantity),user.id)
     from app.api.mint_plans import automatic_context
     await automatic_context(plan.id,user,db)
     grant=await automatic.grant_for(db,row.grant_id,user.id)
     now=datetime.now(timezone.utc)
     req=ArmTaskRequest(native_symbol=symbol(r['chain_id']),
         guided=True,plan_id=plan.id,wallet_id=wallet.id,grant_id=grant.id,drop_id=plan.automatic_drop_id,
-        stage_id=plan.automatic_stage_id,quantity=r['quantity'],mint_kind=stage_kind(phase['type']),
+        stage_id=plan.automatic_stage_id,quantity=quantity,mint_kind=stage_kind(phase['type']),
         price_cap_eth='0',fee_cap_eth=format_wei_to_eth(r['fee_cap_wei']),total_cap_eth=format_wei_to_eth(r['fee_cap_wei']),
         expires_at=min(aware(plan.ends_at),aware(row.expires_at)),scheduled_for_utc=max(aware(plan.starts_at),now+timedelta(seconds=1)),
         conditional_eligibility=stage_kind(phase['type'])!='public' and aware(plan.starts_at)>now,

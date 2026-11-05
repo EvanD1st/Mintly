@@ -223,7 +223,7 @@ async def prepare_task(db, task_id, vault=None):
             or s['mint_kind'] not in policy['mint_kinds'] or s['expiry'] > policy['expires_at']
             or not 0 < s['total_cap_wei'] <= policy['max_task_wei']
             or not 0 < s['fee_cap_wei'] <= s['total_cap_wei']
-            or not 1 <= s['quantity'] <= 100 or not 0 <= s['price_wei'] <= s['price_cap_wei']):
+            or not 1 <= s['quantity'] <= (65535 if s.get('feed_approval_id') else 100) or not 0 <= s['price_wei'] <= s['price_cap_wei']):
         raise ValueError('Independent signer policy limits exceeded')
     web3 = await automatic.provider_for(grant.chain_id)
     journal = vault.journal()
