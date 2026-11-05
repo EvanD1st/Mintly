@@ -117,3 +117,89 @@ async def test_successful_signer_confirmation_records_enabled_once_atomically(ex
     await x.db.refresh(x.owner)
     assert x.owner.feature_notices[feed_automation.ENABLED_ONCE] is True
     assert x.journal.execute('SELECT count(*) FROM signed').fetchone()[0]==0
+
+
+async def test_one_tap_uses_only_selected_wallet_saved_limits_and_pins_maximum(extension,monkeypatch):
+    x=extension;monkeypatch.setattr(automatic,'enabled',lambda *args:None)
+    async def confirm(key,operation='register'):
+        result=await feed_automation.pin(x.db,x.journal,key,x.vault)
+        await x.db.commit();return result
+    monkeypatch.setattr(feed_automation,'broker',confirm)
+    original=copy.deepcopy(x.grant.scope),x.grant.context_hash,x.grant.budget_wei,x.grant.reserved_wei
+    req=SimpleNamespace(request_id=str(uuid.uuid4()),wallet_id=x.wallet.id,consent=True)
+    result=await feed_automation.enable_for_today_wallet(x.db,x.owner,req)
+    snapshot=result['approvals'][0]['snapshot']
+    assert snapshot['quantity_mode']=='wallet_max' and snapshot['quantity']==65535
+    assert snapshot['fee_cap_wei']==x.grant.scope['max_task_wei']
+    assert snapshot['wallet_id']==x.wallet.id and snapshot['expiry']==int(x.old.timestamp())
+    assert original==(x.grant.scope,x.grant.context_hash,x.grant.budget_wei,x.grant.reserved_wei)
+    req.request_id=str(uuid.uuid4())
+    again=await feed_automation.enable_for_today_wallet(x.db,x.owner,req)
+    assert again['approvals'][0]['id']==result['approvals'][0]['id']
+    assert x.journal.execute('SELECT count(*) FROM feed_approvals').fetchone()[0]==1
+    assert x.journal.execute('SELECT count(*) FROM signed').fetchone()[0]==0
+
+
+async def test_one_tap_failed_confirmation_retries_identical_pending_approval(extension,monkeypatch):
+    from fastapi import HTTPException
+    x=extension;monkeypatch.setattr(automatic,'enabled',lambda *args:None)
+    monkeypatch.setattr(feed_automation,'broker',AsyncMock(side_effect=RuntimeError('Unavailable')))
+    req=SimpleNamespace(request_id=str(uuid.uuid4()),wallet_id=x.wallet.id,consent=True)
+    with pytest.raises(HTTPException) as error:await feed_automation.enable_for_today_wallet(x.db,x.owner,req)
+    assert error.value.status_code==503
+    row=(await x.db.scalars(select(FeedMintApproval))).one()
+    original=copy.deepcopy(row.snapshot)
+    assert not await feed_automation.enabled_once(x.db,x.owner)
+    async def confirm(key,operation='register'):
+        result=await feed_automation.pin(x.db,x.journal,key,x.vault)
+        await x.db.commit();return result
+    monkeypatch.setattr(feed_automation,'broker',confirm)
+    req.request_id=str(uuid.uuid4())
+    result=await feed_automation.enable_for_today_wallet(x.db,x.owner,req)
+    assert result['approvals'][0]['snapshot']==original
+    assert await feed_automation.enabled_once(x.db,x.owner)
+
+
+async def test_one_tap_requires_consent_and_owned_signing_wallet(extension):
+    from fastapi import HTTPException
+    x=extension
+    req=SimpleNamespace(request_id=str(uuid.uuid4()),wallet_id=x.wallet.id,consent=False)
+    with pytest.raises(HTTPException) as error:await feed_automation.enable_for_today_wallet(x.db,x.owner,req)
+    assert error.value.status_code==422
+    req.consent=True;req.wallet_id='someone-else'
+    with pytest.raises(HTTPException) as error:await feed_automation.enable_for_today_wallet(x.db,x.owner,req)
+    assert error.value.status_code==409
+    assert (await x.db.scalars(select(FeedMintApproval))).all()==[]
+
+
+async def test_one_tap_does_not_widen_existing_fixed_approval(approved):
+    from fastapi import HTTPException
+    x=approved;original=copy.deepcopy(x.approval.snapshot),x.approval.context_hash
+    req=SimpleNamespace(request_id=str(uuid.uuid4()),wallet_id=x.wallet.id,consent=True)
+    with pytest.raises(HTTPException) as error:await feed_automation.enable_for_today_wallet(x.db,x.owner,req)
+    assert error.value.status_code==409
+    await x.db.refresh(x.approval)
+    assert original==(x.approval.snapshot,x.approval.context_hash)
+
+
+def test_maximum_quantity_does_not_widen_fixed_approvals():
+    assert not feed_automation.quantity_allowed({'quantity':2},3)
+    assert feed_automation.quantity_allowed({'quantity':2},2)
+    maximum={'quantity':65535,'quantity_mode':'wallet_max'}
+    assert feed_automation.quantity_allowed(maximum,200)
+    assert not feed_automation.quantity_allowed(maximum,0)
+    assert not feed_automation.quantity_allowed(maximum,65536)
+
+
+def test_large_free_quantity_calldata_is_supported_but_manual_consent_stays_bounded():
+    from eth_abi import encode
+    from pydantic import ValidationError
+    from app.schemas.task import DraftTaskRequest
+    from app.services.seadrop_mint import decode_mint,BASE_TYPES
+    from app.services.signer.base import SEADROP_V1_ADDRESS,MINT_PUBLIC_SELECTOR
+    nft='0x'+'1'*40;wallet='0x'+'2'*40;fee='0x'+'3'*40
+    tx={'to':SEADROP_V1_ADDRESS,'value':'0','data':'0x'+MINT_PUBLIC_SELECTOR+encode(BASE_TYPES,[nft,fee,wallet,200]).hex()}
+    assert decode_mint(tx,nft,wallet,200)['quantity']==200
+    req=dict(wallet_id='wallet',drop_id='drop',stage_id='stage',quantity=200,fee_cap_eth='0.001')
+    with pytest.raises(ValidationError):DraftTaskRequest(**req)
+    assert DraftTaskRequest(**req,feed_approval_id='separately-verified').quantity==200

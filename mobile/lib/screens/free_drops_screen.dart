@@ -18,7 +18,7 @@ class _FreeDropsState extends ConsumerState<FreeDropsScreen> {
   List<Map<String, dynamic>> _policies = [], _approvals = [], _wallets = [];
   Map<String, dynamic>? _policy, _current, _pending;
   DateTime? _approvalExpiry;
-  bool _loading = true, _busy = false, _consent = false;
+  bool _loading = true, _busy = false, _consent = false, _maximum = false;
   String? _error;
   @override
   void initState() {
@@ -66,13 +66,15 @@ class _FreeDropsState extends ConsumerState<FreeDropsScreen> {
     final expiry = DateTime.parse('${policy['expires_at']}').toUtc();
     final ceiling = DateTime.now().toUtc().add(const Duration(days: 60));
     _approvalExpiry = expiry.isBefore(ceiling) ? expiry : ceiling;
-    _quantity.text = '${s?['quantity'] ?? 1}';
+    _maximum = _current == null || s?['quantity_mode'] == 'wallet_max';
+    _quantity.text = _maximum ? '65535' : '${s?['quantity'] ?? 1}';
     _gas.text = s == null ? '' : _units(s['fee_cap_wei']);
     if (_current?['status'] == 'registering') {
       _pending = {
         'request_id': _current!['id'],
         'grant_id': s!['grant_id'],
         'quantity': s['quantity'],
+        if (_maximum) 'quantity_mode': 'wallet_max',
         'fee_cap': _gas.text,
         'native_symbol': policy['native_symbol'] ?? 'ETH',
         'expires_at': _current!['expires_at'],
@@ -138,11 +140,13 @@ class _FreeDropsState extends ConsumerState<FreeDropsScreen> {
       final count = int.tryParse(_quantity.text);
       if (count == null ||
           count < 1 ||
-          count > 100 ||
+          count > (_maximum ? 65535 : 100) ||
           !RegExp(r'^\d+(\.\d{1,18})?$').hasMatch(_gas.text.trim()) ||
           double.tryParse(_gas.text.trim()) == 0) {
-        throw const FormatException(
-          'Enter a quantity from 1 to 100 and a positive maximum gas spend.',
+        throw FormatException(
+          _maximum
+              ? 'Enter a positive maximum gas spend.'
+              : 'Enter a quantity from 1 to 100 and a positive maximum gas spend.',
         );
       }
       if (_pending == null) {
@@ -158,6 +162,7 @@ class _FreeDropsState extends ConsumerState<FreeDropsScreen> {
           'request_id': id,
           'grant_id': _policy!['id'],
           'quantity': count,
+          if (_maximum) 'quantity_mode': 'wallet_max',
           'fee_cap': _gas.text.trim(),
           'native_symbol': _policy!['native_symbol'] ?? 'ETH',
           'expires_at': _approvalExpiry!.toIso8601String(),
@@ -237,14 +242,22 @@ class _FreeDropsState extends ConsumerState<FreeDropsScreen> {
                       () => _select(_policies.firstWhere((p) => p['id'] == id)),
                     ),
             ),
-            TextField(
-              controller: _quantity,
-              enabled: !_busy && _current == null && _pending == null,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                labelText: 'NFTs per collection',
+            if (_maximum)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 12),
+                child: Text(
+                  'NFTs per collection: Maximum allowed for this wallet',
+                ),
+              )
+            else
+              TextField(
+                controller: _quantity,
+                enabled: !_busy && _current == null && _pending == null,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: 'NFTs per collection',
+                ),
               ),
-            ),
             TextField(
               controller: _gas,
               enabled: !_busy && _current == null && _pending == null,

@@ -46,6 +46,8 @@ class FreeDropApi extends ApiService {
         'chain_id': 1,
         'grant_id': 'g',
         'quantity': request['quantity'],
+        if (request['quantity_mode'] != null)
+          'quantity_mode': request['quantity_mode'],
         'fee_cap_wei': '500000000000000',
       },
     });
@@ -82,8 +84,11 @@ void main() {
         tester.widget<FilledButton>(find.byType(FilledButton)).onPressed,
         isNull,
       );
-      await tester.enterText(find.byType(TextField).at(0), '2');
-      await tester.enterText(find.byType(TextField).at(1), '0.0005');
+      expect(
+        find.text('NFTs per collection: Maximum allowed for this wallet'),
+        findsOneWidget,
+      );
+      await tester.enterText(find.byType(TextField).first, '0.0005');
       await tester.tap(find.byType(CheckboxListTile));
       await tester.pump();
       await tester.tap(find.text('Enable automatic free mints'));
@@ -98,7 +103,8 @@ void main() {
       await tester.pumpAndSettle();
       expect(api.submitted.length, 2);
       expect(api.submitted[1], api.submitted[0]);
-      expect(api.submitted.first['quantity'], 2);
+      expect(api.submitted.first['quantity'], 65535);
+      expect(api.submitted.first['quantity_mode'], 'wallet_max');
       expect(api.submitted.first['consent'], isTrue);
       expect(find.text('Enabled'), findsOneWidget);
     },

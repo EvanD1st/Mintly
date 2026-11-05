@@ -193,7 +193,7 @@ async def make_snapshot(db, req, user_id, *, presale_mint=None):
                 or p[2:4] != (int(aware(stage.start_time_utc).timestamp()), int(aware(stage.end_time_utc).timestamp()))):
             raise HTTPException(409, 'Whitelist preparation differs from the receiving wallet or stage.')
         stage_price, stage_limit = p[0], p[1]
-    if not stage.end_time_utc or not 1 <= req.quantity <= min(100, stage_limit):
+    if not stage.end_time_utc or not 1 <= req.quantity <= min(65535 if getattr(req,'feed_approval_id',None) else 100, stage_limit):
         raise HTTPException(409, 'Stage needs an exact end time and sufficient quantity limit.')
     start, end = aware(stage.start_time_utc), aware(stage.end_time_utc)
     expiry = aware(req.expires_at) if req.expires_at else min(end, aware(grant.expires_at))
@@ -259,9 +259,10 @@ async def make_snapshot(db, req, user_id, *, presale_mint=None):
         except PhaseChanged as error:raise HTTPException(409,str(error)) from None
     if getattr(req,'feed_approval_id',None):
         from app.models import FeedMintApproval
+        from app.services.feed_automation import quantity_allowed
         approval=await db.get(FeedMintApproval,req.feed_approval_id,populate_existing=True)
         if (not approval or approval.status!='active' or approval.user_id!=user_id or approval.grant_id!=grant.id
-            or approval.wallet_id!=wallet.id or approval.snapshot['quantity']!=req.quantity
+            or approval.wallet_id!=wallet.id or not quantity_allowed(approval.snapshot,req.quantity)
             or price!=0 or stage_price!=0 or not 0<total<=approval.snapshot['fee_cap_wei']
             or int(expiry.timestamp())>approval.snapshot['expiry'] or snapshot.get('schedule_mode')!='phase_open'):
             raise HTTPException(409,'This task exceeds its free-drop standing approval.')

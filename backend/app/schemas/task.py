@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from typing import Optional, List, Literal
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from app.schemas.drop import DropSchema, MintStageSchema
 
 
@@ -17,7 +17,7 @@ class DraftTaskRequest(BaseModel):
     wallet_id: str
     drop_id: str
     stage_id: str
-    quantity: int = Field(..., ge=1, le=100, strict=True)
+    quantity: int = Field(..., ge=1, le=65535, strict=True)
     fee_cap_eth: str = Field(..., pattern=r"^[0-9]+(\.[0-9]+)?$")
     grant_id: str | None = None
     mint_kind: str = Field(default='public', pattern='^(public|allowlist|signed)$')
@@ -27,6 +27,12 @@ class DraftTaskRequest(BaseModel):
     scheduled_for_utc: datetime | None = None
     conditional_eligibility: bool = False
     onchain_stage_index: int | None = Field(default=None, ge=1, strict=True)
+
+    @model_validator(mode='after')
+    def bounded_quantity(self):
+        if self.quantity>100 and not self.feed_approval_id:
+            raise ValueError('Quantity exceeds the supported manual mint limit.')
+        return self
 
 
 class DraftTaskResponse(BaseModel):

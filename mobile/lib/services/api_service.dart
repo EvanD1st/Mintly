@@ -1023,6 +1023,14 @@ class ApiService extends ChangeNotifier {
   Future<Map<String, dynamic>> fetchFreeDropApprovals() async =>
       Map<String, dynamic>.from(await _get('/automatic/free-drops'));
 
+  Future<void> enableFreeDrops(String requestId, String? walletId) async {
+    await _post('/automatic/free-drops/enable', {
+      'request_id': requestId,
+      'wallet_id': walletId,
+      'consent': true,
+    }, timeout: const Duration(seconds: 60));
+  }
+
   Future<void> approveFreeDrops(Map<String, dynamic> request) async {
     await _post(
       '/automatic/free-drops',

@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 from fastapi import APIRouter,Depends,HTTPException
 from pydantic import BaseModel,Field,StrictBool
 from sqlalchemy import select
@@ -11,11 +12,21 @@ router=APIRouter(prefix='/automatic/free-drops',tags=['automatic'])
 class Approve(BaseModel):
     request_id:str=Field(pattern=r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
     grant_id:str
-    quantity:int=Field(default=1,ge=1,le=100,strict=True)
+    quantity:int=Field(default=1,ge=1,le=65535,strict=True)
+    quantity_mode:Literal['fixed','wallet_max']='fixed'
     fee_cap:str=Field(pattern=r'^[0-9]+(\.[0-9]+)?$',max_length=40)
     native_symbol:str='ETH'
     expires_at:datetime
     consent:StrictBool=False
+
+class Enable(BaseModel):
+    request_id:str=Field(pattern=r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
+    wallet_id:str | None=None
+    consent:StrictBool=False
+
+@router.post('/enable')
+async def enable(req:Enable,user=Depends(get_current_user),db=Depends(get_db)):
+    return await feed_automation.enable_for_today_wallet(db,user,req)
 
 @router.get('')
 async def status(user=Depends(get_current_user),db=Depends(get_db)):
