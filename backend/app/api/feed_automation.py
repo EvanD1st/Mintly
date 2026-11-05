@@ -32,6 +32,7 @@ async def enable(req:Enable,user=Depends(get_current_user),db=Depends(get_db)):
 async def status(user=Depends(get_current_user),db=Depends(get_db)):
     rows=(await db.scalars(select(FeedMintApproval).where(FeedMintApproval.user_id==user.id).order_by(FeedMintApproval.created_at.desc()))).all()
     return {'approvals':[feed_automation.public(r) for r in rows],
+        'automation_paused':user.automation_paused,
         'enabled_once':await feed_automation.enabled_once(db,user)}
 
 @router.post('')
