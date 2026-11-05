@@ -62,3 +62,58 @@ async def test_due_wallets_are_drained_without_a_five_second_delay_each(monkeypa
     with pytest.raises(asyncio.CancelledError):await feed_automation.loop(factory)
     assert calls==[0.1,5]
 
+
+async def test_enabled_once_is_account_scoped_and_survives_turning_off(approved):
+    from app.models import User
+    x=approved
+    x.owner.feature_notices={'free_phase_copy_v1':True};await x.db.commit()
+    assert await feed_automation.enabled_once(x.db,x.owner)
+    await x.db.refresh(x.owner)
+    assert x.owner.feature_notices=={'free_phase_copy_v1':True,feed_automation.ENABLED_ONCE:True}
+    x.approval.status='revoked';await x.db.commit()
+    assert await feed_automation.enabled_once(x.db,x.owner)
+    admin=await x.db.scalar(select(User).where(User.username=='admin'))
+    assert not await feed_automation.enabled_once(x.db,admin)
+
+
+async def test_previously_enabled_then_disabled_user_is_not_prompted(approved):
+    from app.models import ActivityEvent
+    x=approved;x.approval.status='revoked'
+    x.db.add(ActivityEvent(user_id=x.owner.id,event_type='free_list_approved',label='Enabled',detail='Confirmed approval',is_demo=False))
+    await x.db.commit()
+    assert await feed_automation.enabled_once(x.db,x.owner)
+    events=(await x.db.scalars(select(ActivityEvent).where(ActivityEvent.user_id==x.owner.id))).all()
+    for event in events:await x.db.delete(event)
+    await x.db.delete(x.approval);await x.db.commit()
+    assert await feed_automation.enabled_once(x.db,x.owner)
+
+
+async def test_failed_confirmation_and_cancelled_setup_do_not_dismiss_prompt(extension,monkeypatch):
+    from fastapi import HTTPException
+    x=extension
+    monkeypatch.setattr(automatic,'enabled',lambda *args:None)
+    monkeypatch.setattr(feed_automation,'broker',AsyncMock(side_effect=RuntimeError('Unavailable')))
+    req=SimpleNamespace(request_id=str(uuid.uuid4()),consent=True,grant_id=x.grant.id,native_symbol='ETH',
+        fee_cap='0.0000000000000001',quantity=1,expires_at=x.old)
+    with pytest.raises(HTTPException) as error:await feed_automation.create(x.db,x.owner,req)
+    assert error.value.status_code==503
+    assert not await feed_automation.enabled_once(x.db,x.owner)
+    row=await x.db.get(FeedMintApproval,req.request_id);row.status='revoked';await x.db.commit()
+    assert not await feed_automation.enabled_once(x.db,x.owner)
+
+
+async def test_successful_signer_confirmation_records_enabled_once_atomically(extension,monkeypatch):
+    x=extension
+    monkeypatch.setattr(automatic,'enabled',lambda *args:None)
+    async def confirm(key,operation='register'):
+        result=await feed_automation.pin(x.db,x.journal,key,x.vault)
+        await x.db.commit()
+        return result
+    monkeypatch.setattr(feed_automation,'broker',confirm)
+    req=SimpleNamespace(request_id=str(uuid.uuid4()),consent=True,grant_id=x.grant.id,native_symbol='ETH',
+        fee_cap='0.0000000000000001',quantity=1,expires_at=x.old)
+    result=await feed_automation.create(x.db,x.owner,req)
+    assert result['status']=='active'
+    await x.db.refresh(x.owner)
+    assert x.owner.feature_notices[feed_automation.ENABLED_ONCE] is True
+    assert x.journal.execute('SELECT count(*) FROM signed').fetchone()[0]==0

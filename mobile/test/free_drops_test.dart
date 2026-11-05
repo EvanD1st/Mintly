@@ -6,6 +6,7 @@ import 'package:mintly/services/api_service.dart';
 import 'package:mintly/state/app_state.dart';
 
 class FreeDropApi extends ApiService {
+  FreeDropApi({super.client});
   final approvals = <Map<String, dynamic>>[];
   final submitted = <Map<String, dynamic>>[];
   bool fail = false;

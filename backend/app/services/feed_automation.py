@@ -11,6 +11,28 @@ from app.services.feed_sources import daily_collections,SOURCE_NAMES
 from app.services.opensea import collection_slug
 from app.services.networks import symbol
 
+ENABLED_ONCE='free_list_enabled_once_v1'
+
+
+async def remember_enabled(db,user_id):
+    owner=await db.scalar(select(User).where(User.id==user_id).with_for_update().execution_options(populate_existing=True))
+    owner.feature_notices={**(owner.feature_notices or {}),ENABLED_ONCE:True}
+
+
+async def enabled_once(db,user):
+    if (user.feature_notices or {}).get(ENABLED_ONCE):return True
+    # Preserve the experience of people who enabled the feature before this
+    # prompt shipped, including those who subsequently turned it off.
+    evidence=await db.scalar(select(ActivityEvent.id).where(ActivityEvent.user_id==user.id,
+        ActivityEvent.event_type=='free_list_approved').limit(1))
+    if not evidence:
+        evidence=await db.scalar(select(FeedMintApproval.id).where(FeedMintApproval.user_id==user.id,
+            FeedMintApproval.status=='active').limit(1))
+    if not evidence:return False
+    await remember_enabled(db,user.id)
+    await db.commit()
+    return True
+
 
 def tables(journal):
     journal.execute('CREATE TABLE IF NOT EXISTS feed_approvals (id TEXT PRIMARY KEY,intent TEXT NOT NULL,snapshot TEXT NOT NULL,revoked INTEGER NOT NULL DEFAULT 0)')
@@ -118,6 +140,7 @@ async def create(db,user,req):
     await automatic.lock_execution(db);await db.refresh(row)
     if row.status!='registering' or confirmed.get('context_hash')!=row.context_hash:raise HTTPException(409,'Standing approval changed during confirmation.')
     row.status='active';row.note='Watching Today for eligible free phases. Gas limits apply.'
+    await remember_enabled(db,user.id)
     db.add(ActivityEvent(user_id=user.id,event_type='free_list_approved',label='Free drops automation enabled',detail=row.note,is_demo=False,icon_name='gem'))
     await db.commit();return public(row)
 
