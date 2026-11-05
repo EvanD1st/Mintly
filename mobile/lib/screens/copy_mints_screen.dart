@@ -324,6 +324,7 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
       final data = await api.fetchCopyMints();
       if (!mounted || generation != _generation) return;
       ref.invalidate(networkBudgetsProvider);
+      ref.read(networkBudgetsProvider);
       if (!silent) ref.invalidate(collectionArtworkProvider);
       final watches = (data['watches'] as List).cast<Map>();
       if (_filter != null && !watches.any((w) => w['id'] == _filter)) {

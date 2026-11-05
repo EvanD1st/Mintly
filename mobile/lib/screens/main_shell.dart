@@ -99,6 +99,7 @@ class _MainShellState extends ConsumerState<MainShell>
               );
             }
             await api.enableFreeDrops(requestId, api.selectedFeedWallet);
+            ref.invalidate(todayAutomationProvider);
           },
         ),
       );
@@ -203,7 +204,11 @@ class _MainShellState extends ConsumerState<MainShell>
 
   void _selectTab(int index) {
     setState(() => _currentIndex = index);
-    if (index == 2 || index == 4) ref.invalidate(networkBudgetsProvider);
+    if (index == 2 || index == 4) {
+      ref.invalidate(networkBudgetsProvider);
+      // Start the refresh before the destination mounts another budget card.
+      ref.read(networkBudgetsProvider);
+    }
     if (index == 1) ref.read(mintlyProvider.notifier).loadInitialData();
     if (index == 0) {
       WidgetsBinding.instance.addPostFrameCallback((_) {

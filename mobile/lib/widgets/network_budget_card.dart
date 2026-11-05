@@ -76,7 +76,14 @@ List<NetworkAllowance> networkAllowances(
 final networkBudgetsProvider = FutureProvider<List<Map<String, dynamic>>>((
   ref,
 ) async {
-  final api = ref.watch(apiServiceProvider);
+  // Feed refreshes and notice acknowledgements also notify ApiService. Only
+  // account changes should discard this shared allowance snapshot.
+  ref.watch(
+    apiServiceProvider.select(
+      (api) => (api.userId, api.sessionRevision, api.isLiveBackendConnected),
+    ),
+  );
+  final api = ref.read(apiServiceProvider);
   if (!api.isLiveBackendConnected) return [];
   return api.fetchAutomaticPolicies();
 });
@@ -91,291 +98,300 @@ class _NetworkBudgetCardState extends ConsumerState<NetworkBudgetCard> {
   int? _chain;
   final _networkMenuKey = GlobalKey<PopupMenuButtonState<int>>();
   @override
-  Widget build(BuildContext context) => AppPanel(
-    padding: const EdgeInsets.all(14),
-    child: FutureBuilder<List<Map<String, dynamic>>>(
-      future: ref.watch(networkBudgetsProvider.future),
-      builder: (context, snapshot) {
-        final entries = networkAllowances(
-          snapshot.data ?? [],
-          DateTime.now().toUtc(),
-        );
-        final selected =
-            entries.where((e) => e.chainId == _chain).firstOrNull ??
-            entries.firstOrNull;
-        final total = selected == null
-            ? BigInt.zero
-            : selected.available + selected.spent + selected.reserved;
-        final fraction = total == BigInt.zero
-            ? 0.0
-            : (selected!.available * BigInt.from(10000) ~/ total).toDouble() /
-                  10000;
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                const Expanded(
-                  child: Text(
-                    'Spending budget',
-                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
-                  ),
-                ),
-                SizedBox(
-                  width: 28,
-                  height: 28,
-                  child: IconButton(
-                    tooltip: 'Refresh budget',
-                    constraints: const BoxConstraints.tightFor(
-                      width: 28,
-                      height: 28,
-                    ),
-                    padding: EdgeInsets.zero,
-                    onPressed: () => ref.invalidate(networkBudgetsProvider),
-                    icon: const RefreshGlyph(size: 17),
-                  ),
-                ),
-              ],
-            ),
-            if (snapshot.connectionState != ConnectionState.done &&
-                selected == null)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 12),
-                child: LinearProgressIndicator(),
-              )
-            else if (snapshot.hasError)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 12),
-                child: Text('Budget unavailable. Tap refresh to retry.'),
-              )
-            else if (selected == null)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 12),
-                child: Text('No active spending allowance'),
-              )
-            else ...[
-              LayoutBuilder(
-                builder: (context, constraints) {
-                  final tight =
-                      constraints.maxWidth < 270 ||
-                      MediaQuery.textScalerOf(context).scale(1) > 1.2;
-                  final amount = Row(
-                    children: [
-                      Expanded(
-                        child: InkWell(
-                          onTap: () =>
-                              _networkMenuKey.currentState?.showButtonMenu(),
-                          child: NativeAmountText(
-                            selected.available,
-                            symbol: selected.symbol,
-                            prefix: true,
-                            fontSize: 23,
-                            bold: true,
-                          ),
-                        ),
-                      ),
-                      PopupMenuButton<int>(
-                        key: _networkMenuKey,
-                        tooltip: 'Available budget by network',
-                        padding: EdgeInsets.zero,
-                        style: IconButton.styleFrom(
-                          minimumSize: const Size(30, 30),
-                          padding: EdgeInsets.zero,
-                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        ),
-                        position: PopupMenuPosition.under,
-                        color: const Color(0xFF15251B),
-                        surfaceTintColor: Colors.transparent,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
-                          side: const BorderSide(color: Color(0xFF3E5946)),
-                        ),
-                        constraints: const BoxConstraints(
-                          minWidth: 270,
-                          maxWidth: 320,
-                        ),
-                        icon: Container(
-                          width: 30,
-                          height: 30,
-                          alignment: Alignment.center,
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(9),
-                            border: Border.all(color: const Color(0xFF3E5946)),
-                          ),
-                          child: const RotatedBox(
-                            quarterTurns: 1,
-                            child: AppGlyph('arrow', size: 17),
-                          ),
-                        ),
-                        onSelected: (value) => setState(() => _chain = value),
-                        itemBuilder: (_) => [
-                          const PopupMenuItem<int>(
-                            enabled: false,
-                            height: 32,
-                            child: Text(
-                              'Available budget by network',
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w700,
-                                color: Color(0xFFECF3EA),
-                              ),
-                            ),
-                          ),
-                          ...entries.map(
-                            (e) => PopupMenuItem<int>(
-                              value: e.chainId,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                              ),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 8,
-                                  vertical: 8,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: e.chainId == selected.chainId
-                                      ? Theme.of(context).colorScheme.primary
-                                            .withValues(alpha: .1)
-                                      : Colors.transparent,
-                                  borderRadius: BorderRadius.circular(10),
-                                ),
-                                child: Row(
-                                  children: [
-                                    CircleAvatar(
-                                      radius: 12,
-                                      backgroundColor: e.chainId == 8453
-                                          ? const Color(0xFF355D80)
-                                          : const Color(0xFF345C40),
-                                      child: Text(
-                                        e.name.substring(0, 1),
-                                        style: const TextStyle(
-                                          fontSize: 11,
-                                          color: Colors.white,
-                                        ),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Expanded(
-                                      flex: 3,
-                                      child: Text(
-                                        e.name,
-                                        style: const TextStyle(fontSize: 12),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Expanded(
-                                      flex: 3,
-                                      child: NativeAmountText(
-                                        e.available,
-                                        symbol: e.symbol,
-                                        prefix: true,
-                                        fontSize: 12,
-                                      ),
-                                    ),
-                                    if (e.chainId == selected.chainId) ...[
-                                      const SizedBox(width: 6),
-                                      const AppGlyph('check', size: 14),
-                                    ],
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ),
-                          const PopupMenuItem<int>(
-                            enabled: false,
-                            height: 30,
-                            child: Text(
-                              'Each network has its own allowance.',
-                              style: TextStyle(fontSize: 10),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  );
-                  if (tight) {
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [amount, NetworkBadge(selected.name)],
-                    );
-                  }
-                  return Row(
-                    children: [
-                      Expanded(flex: 3, child: amount),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        flex: 2,
-                        child: Align(
-                          alignment: Alignment.centerRight,
-                          child: NetworkBadge(selected.name),
-                        ),
-                      ),
-                    ],
-                  );
-                },
-              ),
-              const SizedBox(height: 3),
-              const Text(
-                'Available for mint + gas',
-                style: TextStyle(fontSize: 11),
-              ),
-              const SizedBox(height: 8),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(4),
-                child: LinearProgressIndicator(
-                  value: fraction,
-                  minHeight: 5,
-                  backgroundColor: Theme.of(
-                    context,
-                  ).colorScheme.primary.withValues(alpha: .15),
-                ),
-              ),
-              const SizedBox(height: 10),
+  Widget build(BuildContext context) {
+    final snapshot = ref.watch(networkBudgetsProvider);
+    return AppPanel(
+      padding: const EdgeInsets.all(14),
+      child: Builder(
+        builder: (context) {
+          final entries = networkAllowances(
+            snapshot.isReloading ? [] : snapshot.valueOrNull ?? [],
+            DateTime.now().toUtc(),
+          );
+          final selected =
+              entries.where((e) => e.chainId == _chain).firstOrNull ??
+              entries.firstOrNull;
+          final total = selected == null
+              ? BigInt.zero
+              : selected.available + selected.spent + selected.reserved;
+          final fraction = total == BigInt.zero
+              ? 0.0
+              : (selected!.available * BigInt.from(10000) ~/ total).toDouble() /
+                    10000;
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
               Row(
                 children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text('Spent', style: TextStyle(fontSize: 10)),
-                        NativeAmountText(
-                          selected.spent,
-                          symbol: selected.symbol,
-                          fontSize: 12,
-                          bold: true,
-                        ),
-                      ],
+                  const Expanded(
+                    child: Text(
+                      'Spending budget',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
-                  const SizedBox(height: 10, child: VerticalDivider()),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text('Reserved', style: TextStyle(fontSize: 10)),
-                        NativeAmountText(
-                          selected.reserved,
-                          symbol: selected.symbol,
-                          fontSize: 12,
-                          bold: true,
-                        ),
-                      ],
+                  SizedBox(
+                    width: 28,
+                    height: 28,
+                    child: IconButton(
+                      tooltip: 'Refresh budget',
+                      constraints: const BoxConstraints.tightFor(
+                        width: 28,
+                        height: 28,
+                      ),
+                      padding: EdgeInsets.zero,
+                      onPressed: () => ref.invalidate(networkBudgetsProvider),
+                      icon: const RefreshGlyph(size: 17),
                     ),
                   ),
                 ],
               ),
+              if (snapshot.isLoading && selected == null)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 12),
+                  child: LinearProgressIndicator(),
+                )
+              else if (snapshot.hasError)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 12),
+                  child: Text('Budget unavailable. Tap refresh to retry.'),
+                )
+              else if (selected == null)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 12),
+                  child: Text('No active spending allowance'),
+                )
+              else ...[
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final tight =
+                        constraints.maxWidth < 270 ||
+                        MediaQuery.textScalerOf(context).scale(1) > 1.2;
+                    final amount = Row(
+                      children: [
+                        Expanded(
+                          child: InkWell(
+                            onTap: () =>
+                                _networkMenuKey.currentState?.showButtonMenu(),
+                            child: NativeAmountText(
+                              selected.available,
+                              symbol: selected.symbol,
+                              prefix: true,
+                              fontSize: 23,
+                              bold: true,
+                            ),
+                          ),
+                        ),
+                        PopupMenuButton<int>(
+                          key: _networkMenuKey,
+                          tooltip: 'Available budget by network',
+                          padding: EdgeInsets.zero,
+                          style: IconButton.styleFrom(
+                            minimumSize: const Size(30, 30),
+                            padding: EdgeInsets.zero,
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                          position: PopupMenuPosition.under,
+                          color: const Color(0xFF15251B),
+                          surfaceTintColor: Colors.transparent,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                            side: const BorderSide(color: Color(0xFF3E5946)),
+                          ),
+                          constraints: const BoxConstraints(
+                            minWidth: 270,
+                            maxWidth: 320,
+                          ),
+                          icon: Container(
+                            width: 30,
+                            height: 30,
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(9),
+                              border: Border.all(
+                                color: const Color(0xFF3E5946),
+                              ),
+                            ),
+                            child: const RotatedBox(
+                              quarterTurns: 1,
+                              child: AppGlyph('arrow', size: 17),
+                            ),
+                          ),
+                          onSelected: (value) => setState(() => _chain = value),
+                          itemBuilder: (_) => [
+                            const PopupMenuItem<int>(
+                              enabled: false,
+                              height: 32,
+                              child: Text(
+                                'Available budget by network',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                  color: Color(0xFFECF3EA),
+                                ),
+                              ),
+                            ),
+                            ...entries.map(
+                              (e) => PopupMenuItem<int>(
+                                value: e.chainId,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                ),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 8,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: e.chainId == selected.chainId
+                                        ? Theme.of(context).colorScheme.primary
+                                              .withValues(alpha: .1)
+                                        : Colors.transparent,
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      CircleAvatar(
+                                        radius: 12,
+                                        backgroundColor: e.chainId == 8453
+                                            ? const Color(0xFF355D80)
+                                            : const Color(0xFF345C40),
+                                        child: Text(
+                                          e.name.substring(0, 1),
+                                          style: const TextStyle(
+                                            fontSize: 11,
+                                            color: Colors.white,
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        flex: 3,
+                                        child: Text(
+                                          e.name,
+                                          style: const TextStyle(fontSize: 12),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        flex: 3,
+                                        child: NativeAmountText(
+                                          e.available,
+                                          symbol: e.symbol,
+                                          prefix: true,
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                      if (e.chainId == selected.chainId) ...[
+                                        const SizedBox(width: 6),
+                                        const AppGlyph('check', size: 14),
+                                      ],
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const PopupMenuItem<int>(
+                              enabled: false,
+                              height: 30,
+                              child: Text(
+                                'Each network has its own allowance.',
+                                style: TextStyle(fontSize: 10),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    );
+                    if (tight) {
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [amount, NetworkBadge(selected.name)],
+                      );
+                    }
+                    return Row(
+                      children: [
+                        Expanded(flex: 3, child: amount),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          flex: 2,
+                          child: Align(
+                            alignment: Alignment.centerRight,
+                            child: NetworkBadge(selected.name),
+                          ),
+                        ),
+                      ],
+                    );
+                  },
+                ),
+                const SizedBox(height: 3),
+                const Text(
+                  'Available for mint + gas',
+                  style: TextStyle(fontSize: 11),
+                ),
+                const SizedBox(height: 8),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(4),
+                  child: LinearProgressIndicator(
+                    value: fraction,
+                    minHeight: 5,
+                    backgroundColor: Theme.of(
+                      context,
+                    ).colorScheme.primary.withValues(alpha: .15),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('Spent', style: TextStyle(fontSize: 10)),
+                          NativeAmountText(
+                            selected.spent,
+                            symbol: selected.symbol,
+                            fontSize: 12,
+                            bold: true,
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 10, child: VerticalDivider()),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Reserved',
+                            style: TextStyle(fontSize: 10),
+                          ),
+                          NativeAmountText(
+                            selected.reserved,
+                            symbol: selected.symbol,
+                            fontSize: 12,
+                            bold: true,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+              const SizedBox(height: 7),
+              const Text(
+                'Signing allowance · individual mint and copy limits apply.',
+                style: TextStyle(fontSize: 10, height: 1.2),
+              ),
             ],
-            const SizedBox(height: 7),
-            const Text(
-              'Signing allowance · individual mint and copy limits apply.',
-              style: TextStyle(fontSize: 10, height: 1.2),
-            ),
-          ],
-        );
-      },
-    ),
-  );
+          );
+        },
+      ),
+    );
+  }
 }
 
 String compactNative(dynamic raw, {int decimals = 8}) {
