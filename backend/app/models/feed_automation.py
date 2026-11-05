@@ -15,6 +15,5 @@ class FeedMintApproval(Base):
     snapshot:Mapped[dict]=mapped_column(JSON)
     context_hash:Mapped[str]=mapped_column(String(64))
     expires_at:Mapped[datetime]=mapped_column(DateTime(timezone=True))
-    created_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),default=datetime.utcnow)
     last_checked_at:Mapped[datetime|None]=mapped_column(DateTime(timezone=True))
     note:Mapped[str|None]=mapped_column(Text)
