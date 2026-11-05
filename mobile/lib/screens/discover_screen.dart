@@ -15,6 +15,7 @@ import 'dart:async';
 import 'saved_plan_screen.dart';
 import 'queue_screen.dart';
 import 'history_screen.dart';
+import 'free_drops_screen.dart';
 import '../services/external_url.dart';
 import '../widgets/network_budget_card.dart' show formatNative;
 
@@ -90,6 +91,13 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
           ),
           const SizedBox(height: 6),
           Text('Today', style: Theme.of(context).textTheme.headlineMedium),
+          TextButton(
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const FreeDropsScreen()),
+            ),
+            child: const Text('Auto-mint eligible free drops'),
+          ),
           const SizedBox(height: 5),
           Text(
             'Welcome, ${api.username}. Review source details before using MetaMask.',

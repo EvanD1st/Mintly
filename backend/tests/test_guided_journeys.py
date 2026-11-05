@@ -119,8 +119,15 @@ async def test_legacy_idempotency_digest_is_preserved(lab):
     assert result.status_code==200,result.text
     async with lab.factory() as db:
         task=await db.get(MintTask,result.json()['id'])
-        assert task.request_hash==automatic.digest(body.model_dump(mode='json',exclude={'idempotency_key','guided'}))
+        # Freeze the actual pre-feature wire schema. Deriving this from every
+        # current model field would redefine "legacy" each time a field is added.
+        legacy_fields={'native_symbol','wallet_id','drop_id','stage_id','quantity','fee_cap_eth','grant_id',
+            'mint_kind','price_cap_eth','total_cap_eth','expires_at','scheduled_for_utc','conditional_eligibility',
+            'onchain_stage_index','plan_id','copy_event_id','review_hash','user_consent_confirmed'}
+        assert task.request_hash==automatic.digest(body.model_dump(mode='json',include=legacy_fields))
     assert (await lab.client.post('/api/tasks/arm',json=lab.request)).json()['id']==result.json()['id']
+    explicit=await lab.client.post('/api/tasks/arm',json={**lab.request,'schedule_mode':'fixed','feed_approval_id':None,'feed_source':None})
+    assert explicit.status_code==200 and explicit.json()['id']==result.json()['id']
 
 
 @pytest.mark.parametrize('kind',['allowlist','signed'])

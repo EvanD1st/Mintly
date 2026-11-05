@@ -111,6 +111,9 @@ def stage_schedule(drop: dict) -> list[dict]:
 
 
 _drop_cache={}
+
+def forget_drop(slug):
+    _drop_cache.pop(slug,None)
 _verified_mints={}
 _contract_cache={}
 _inflight={}

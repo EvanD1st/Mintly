@@ -89,7 +89,10 @@ async def import_open_sea_plan(req: ImportMintPlanRequest,
         chain_id, chain_label = CHAINS[detail["chain"]]
         # A verified MetaMask EVM address is usable across these networks.
         # Old pairings list only Ethereum/Base; that list is not network permission.
-        if wallet.signing_capability != "interactive" and chain_label not in (wallet.supported_chains or []):
+        from app.services.networks import NETWORKS
+        labels={chain_label}
+        if chain_id in NETWORKS:labels.add(NETWORKS[chain_id].name)
+        if wallet.signing_capability != "interactive" and not labels.intersection(wallet.supported_chains or []):
             raise OpenSeaUnavailable("This wallet is not linked for the drop's chain.", 400)
         plan = (await db.execute(select(MintPlan).where(
             MintPlan.wallet_id == wallet.id, MintPlan.collection_slug == slug,

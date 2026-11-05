@@ -52,6 +52,8 @@ class MintTask(Base):
     
     # Timing
     scheduled_for_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    schedule_checked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    schedule_note: Mapped[Optional[str]] = mapped_column(Text)
     expires_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     
     # Worker lease coordination

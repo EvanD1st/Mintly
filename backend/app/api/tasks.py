@@ -22,6 +22,7 @@ router = APIRouter(prefix="/tasks", tags=["tasks"])
 
 
 class GuidedRequest(BaseModel):
+    schedule_mode: str = Field(default='fixed',pattern='^(fixed|phase_open)$')
     native_symbol: str | None = None
     wallet_id:str
     grant_id:str
@@ -93,7 +94,10 @@ async def arm_mint_task(req: ArmTaskRequest, user: User = Depends(get_current_us
     automatic.enabled()
     if not req.user_consent_confirmed:
         raise HTTPException(422, 'Explicit task authorization is required.')
-    request_hash = automatic.digest(req.model_dump(mode='json', exclude={'idempotency_key'} if req.guided else {'idempotency_key','guided'}))
+    excluded={'idempotency_key'} if req.guided else {'idempotency_key','guided'}
+    if req.schedule_mode=='fixed':excluded.add('schedule_mode')
+    if req.feed_approval_id is None:excluded.update(('feed_approval_id','feed_source'))
+    request_hash = automatic.digest(req.model_dump(mode='json', exclude=excluded))
     key = automatic.digest([user.id, req.idempotency_key])
     await automatic.lock_execution(db)
     existing = (await db.execute(select(MintTask).where(MintTask.idempotency_key == key))).scalar_one_or_none()
@@ -109,6 +113,8 @@ async def arm_mint_task(req: ArmTaskRequest, user: User = Depends(get_current_us
     prepared={}
     grant, snapshot = await resolved_snapshot(db,req,user.id,prepared=prepared)
     copy_key = None
+    from app.services.copy_mints import no_mixed_stage_copy
+    await no_mixed_stage_copy(db,snapshot)
     if req.copy_event_id:
         from app.services.copy_mints import no_duplicate
         copy_key = await no_duplicate(db, snapshot)
@@ -129,11 +135,15 @@ async def arm_mint_task(req: ArmTaskRequest, user: User = Depends(get_current_us
     if req.review_hash and req.review_hash != automatic.digest(snapshot):
         raise HTTPException(409, 'The reviewed stage or limits changed. Review again before arming.')
     snapshot['execution'] = execution
+    approval=None
+    if req.feed_approval_id:
+        from app.models import FeedMintApproval
+        approval=await db.get(FeedMintApproval,req.feed_approval_id)
     auth = MintAuthorization(id=str(uuid.uuid4()), wallet_id=req.wallet_id, drop_id=req.drop_id,
         stage_id=req.stage_id, quantity=req.quantity, max_price_per_token_wei=snapshot['price_cap_wei'],
         max_fee_wei=snapshot['fee_cap_wei'], total_spend_cap_wei=snapshot['total_cap_wei'],
-        recipient_address=snapshot['recipient'], user_consent_text='Arm exact custodial automatic mint with the displayed finite limits.',
-        authorized_at=datetime.now(timezone.utc), grant_id=grant.id, snapshot=snapshot)
+        recipient_address=snapshot['recipient'], user_consent_text=(f'Execution under standing free-list approval {approval.id}.' if approval else 'Arm exact custodial automatic mint with the displayed finite limits.'),
+        authorized_at=approval.created_at if approval else datetime.now(timezone.utc), grant_id=grant.id, snapshot=snapshot)
     task = MintTask(id=str(uuid.uuid4()), authorization_id=auth.id, wallet_id=req.wallet_id,
         drop_id=req.drop_id, stage_id=req.stage_id, plan_id=req.plan_id, copy_stage_key=copy_key, status='armed', is_demo=False,
         idempotency_key=key, request_hash=request_hash, execution_mode=automatic.MODE,
@@ -151,8 +161,8 @@ async def arm_mint_task(req: ArmTaskRequest, user: User = Depends(get_current_us
         await db.flush()
         event = await db.get(CopyEvent, req.copy_event_id)
         event.task_id, event.status, event.note = task.id, 'armed', None
-    db.add(ActivityEvent(user_id=user.id, event_type='automatic_armed', label='Automatic mint armed',
-                         detail=task.id, icon_name='gem', is_demo=False))
+    db.add(ActivityEvent(user_id=user.id, event_type='automatic_armed', label='Free mint automatically armed' if approval else 'Automatic mint armed',
+                         detail=(f"{snapshot['drop_name']} — {snapshot['stage_name']}. Opens {task.scheduled_for_utc.astimezone(ZoneInfo('Africa/Lagos')):%d %b %H:%M} WAT." if approval else task.id), icon_name='gem', is_demo=False))
     await db.commit()
     return await task_response(db, task)
 
@@ -163,7 +173,7 @@ async def task_response(db, task):
     s = auth.snapshot
     recovery = await db.scalar(select(MintRecovery).where(MintRecovery.task_id == task.id))
     return TaskSchema(id=task.id, plan_id=task.plan_id, wallet_id=task.wallet_id, drop_id=task.drop_id,
-        stage_id=task.stage_id, status=task.status, is_demo=task.is_demo, created_at=aware(task.created_at),
+        stage_id=task.stage_id, status=task.status, schedule_note=task.schedule_note, is_demo=task.is_demo, created_at=aware(task.created_at),
         scheduled_for_utc=task.scheduled_for_utc,
         expires_at_utc=recovery.expires_at if recovery and recovery.activated_at else task.expires_at_utc,
         quantity=auth.quantity, unit_price_eth=format_wei_to_eth(s['price_wei']),
@@ -220,7 +230,7 @@ async def list_mint_queue(db: AsyncSession = Depends(get_db), user: User = Depen
         ))).scalar_one_or_none()
         formatted.append(TaskSchema(
             id=task.id, plan_id=task.plan_id, wallet_id=task.wallet_id, drop_id=task.drop_id, stage_id=task.stage_id,
-            status=task.status, is_demo=False, created_at=aware(task.created_at), scheduled_for_utc=task.scheduled_for_utc,
+            status=task.status, schedule_note=task.schedule_note, is_demo=False, created_at=aware(task.created_at), scheduled_for_utc=task.scheduled_for_utc,
             expires_at_utc=task.expires_at_utc, quantity=auth.quantity if auth else 1,
             unit_price_eth=stage.price_eth_str if stage else "",
             fee_cap_eth=format_wei_to_eth(auth.max_fee_wei) if auth else "0",

@@ -9,6 +9,9 @@ from app.schemas.drop import DropSchema, MintStageSchema
 class DraftTaskRequest(BaseModel):
     native_symbol: Literal['ETH','HYPE','APE'] | None = None
     guided: bool = False
+    schedule_mode: Literal['fixed','phase_open'] = 'fixed'
+    feed_approval_id: str | None = None
+    feed_source: dict | None = None
     plan_id: str | None = None
     copy_event_id: str | None = Field(default=None, min_length=64, max_length=64)
     wallet_id: str
@@ -56,6 +59,7 @@ class TaskSchema(BaseModel):
     drop_id: str
     stage_id: str
     status: str
+    schedule_note: str | None = None
     is_demo: bool
     created_at: datetime | None = None
     scheduled_for_utc: datetime

@@ -1020,6 +1020,21 @@ class ApiService extends ChangeNotifier {
       ((await _get('/automatic/policies?native_currencies=true')) as List)
           .cast<Map<String, dynamic>>();
 
+  Future<Map<String, dynamic>> fetchFreeDropApprovals() async =>
+      Map<String, dynamic>.from(await _get('/automatic/free-drops'));
+
+  Future<void> approveFreeDrops(Map<String, dynamic> request) async {
+    await _post(
+      '/automatic/free-drops',
+      request,
+      timeout: const Duration(seconds: 90),
+    );
+  }
+
+  Future<void> revokeFreeDrops(String id) async {
+    await _delete('/automatic/free-drops/$id');
+  }
+
   Future<void> disableAutomaticPolicy(String id) async {
     await _post('/automatic/policies/$id/disable', {});
   }

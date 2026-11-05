@@ -253,6 +253,19 @@ async def make_snapshot(db, req, user_id, *, presale_mint=None):
                 or any(o[k] != snapshot[k] for k in ('price_wei','start','end'))):
             raise HTTPException(409, 'Copy review differs from the observed public stage.')
         snapshot['copy_source'] = o
+    if getattr(req,'schedule_mode','fixed')=='phase_open':
+        from app.services.phase_tracking import authorize,PhaseChanged
+        try:await authorize(snapshot,db,req)
+        except PhaseChanged as error:raise HTTPException(409,str(error)) from None
+    if getattr(req,'feed_approval_id',None):
+        from app.models import FeedMintApproval
+        approval=await db.get(FeedMintApproval,req.feed_approval_id,populate_existing=True)
+        if (not approval or approval.status!='active' or approval.user_id!=user_id or approval.grant_id!=grant.id
+            or approval.wallet_id!=wallet.id or approval.snapshot['quantity']!=req.quantity
+            or price!=0 or stage_price!=0 or not 0<total<=approval.snapshot['fee_cap_wei']
+            or int(expiry.timestamp())>approval.snapshot['expiry'] or snapshot.get('schedule_mode')!='phase_open'):
+            raise HTTPException(409,'This task exceeds its free-drop standing approval.')
+        snapshot['feed_approval_id']=approval.id;snapshot['feed_source']=req.feed_source
     return grant, snapshot
 
 
@@ -284,6 +297,10 @@ async def validate_mint(web3, snapshot, transaction):
         raw = await web3.eth.call({'to': SEADROP_V1_ADDRESS, 'data': keccak(text='getPublicDrop(address)')[:4] + arg})
         price, start, end, limit, bps, restricted = decode(['uint80','uint48','uint48','uint16','uint16','bool'], raw)
         if (price, start, end) != (s['price_wei'], s['start'], s['end']) or limit < s['quantity']:
+            if s.get('schedule_mode')=='phase_open' and price==s['price_wei'] and limit>=s['quantity']:
+                from app.services.opensea import forget_drop
+                forget_drop(collection_slug(s['mint_page_url']))
+                raise OpenSeaUnavailable('The phase timing changed again. Waiting for a verified schedule update.',503,retry_after_seconds=5)
             raise ValueError('Public stage changed on chain')
         if restricted or bps:
             allowed = decode(['bool'], await web3.eth.call({'to': SEADROP_V1_ADDRESS,
