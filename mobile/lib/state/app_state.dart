@@ -10,8 +10,9 @@ import '../services/api_service.dart';
 // become the newly selected wallet's automation status.
 final todayAutomationProvider = FutureProvider.autoDispose
     .family<TodayAutomationStatus, (String, int, String?)>((ref, key) async {
-      if (key.$1.isEmpty || key.$3 == null)
+      if (key.$1.isEmpty || key.$3 == null) {
         return const TodayAutomationStatus([]);
+      }
       final data = await ref.read(apiServiceProvider).fetchFreeDropApprovals();
       final rows = (data['approvals'] as List)
           .map((row) => Map<String, dynamic>.from(row as Map))
