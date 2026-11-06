@@ -10,154 +10,177 @@ import 'package:mintly/services/push_service.dart';
 import 'package:mintly/state/app_state.dart';
 
 void main() {
-  for (final status in ['confirmed', 'already_minted']) {
-    testWidgets(
-      'merged sources keep $status and acknowledge exact displayed editions',
-      (tester) async {
-        tester.view.physicalSize = const Size(900, 2200);
-        tester.view.devicePixelRatio = 1;
-        addTearDown(tester.view.resetPhysicalSize);
-        addTearDown(tester.view.resetDevicePixelRatio);
-        var seen = false;
-        Map? ack;
-        final api = ApiService(
-          client: MockClient((request) async {
-            final path = request.url.path;
-            dynamic result = [];
-            if (path.endsWith('/auth/login')) {
-              result = {
-                'token': 'test',
-                'user': {
-                  'id': 'member',
-                  'username': 'member',
-                  'role': 'member',
-                },
-              };
-            } else if (path.endsWith('/drops/seen')) {
-              ack = jsonDecode(request.body) as Map;
-              seen = true;
-              result = {'seen': true};
-            } else if (path.endsWith('/drops')) {
-              result = {
-                'selected_wallet_id': 'wallet',
-                'source_status_text':
-                    '@lakzonevn connected · @Cassio_Sch refresh delayed',
-                'feed_status_text':
-                    '@lakzonevn list available · @Cassio_Sch refresh delayed',
-                'wallets': [
-                  {
-                    'id': 'wallet',
-                    'label': 'Mint wallet',
-                    'address': '0x1111111111111111111111111111111111111111',
-                  },
-                ],
-                'editions': [
-                  {'id': 'first', 'content_hash': 'hash-one'},
-                  {'id': 'second', 'content_hash': 'hash-two'},
-                ],
-                'drops': [
-                  {
-                    'id': 'shared-card',
-                    'name': 'Shared collection',
-                    'list_context': 'From yesterday’s list',
-                    'today_schedule': 'GTD 00:00 WAT · FCFS 01:00 WAT',
-                    'chain': 'Base',
-                    'chain_id': 8453,
-                    'mint_page_url': 'https://opensea.io/collection/shared',
-                    'additions': seen ? null : 'new',
-                    'sources': [
-                      {
-                        'author': 'lakzonevn',
-                        'price': 'Free',
-                        'time_wat': '01 Nov 14:00 WAT',
-                      },
-                      {
-                        'author': 'Cassio_Sch',
-                        'price': 'Free / 0.001 ETH',
-                        'time_wat': '01 Nov 15:00 WAT',
-                      },
-                    ],
-                    'automatic_mint': {
-                      'id': 'confirmed-task',
-                      'status': status,
-                      'quantity': 2,
-                      'stage_name': 'GTD',
-                      'confirmed_at': '2026-11-01T11:16:00Z',
+  for (final role in ['member', 'admin']) {
+    for (final status in ['confirmed', 'already_minted']) {
+      testWidgets(
+        '$role merged sources keep $status with admin-only list controls',
+        (tester) async {
+          tester.view.physicalSize = const Size(900, 2200);
+          tester.view.devicePixelRatio = 1;
+          addTearDown(tester.view.resetPhysicalSize);
+          addTearDown(tester.view.resetDevicePixelRatio);
+          var seen = false;
+          Map? ack;
+          final api = ApiService(
+            client: MockClient((request) async {
+              final path = request.url.path;
+              dynamic result = [];
+              if (path.endsWith('/auth/login')) {
+                result = {
+                  'token': 'test',
+                  'user': {'id': 'member', 'username': 'member', 'role': role},
+                };
+              } else if (path.endsWith('/drops/seen')) {
+                ack = jsonDecode(request.body) as Map;
+                seen = true;
+                result = {'seen': true};
+              } else if (path.endsWith('/drops')) {
+                result = {
+                  'selected_wallet_id': 'wallet',
+                  'source_status_text':
+                      '@lakzonevn connected · @Cassio_Sch refresh delayed',
+                  'feed_status_text':
+                      '@lakzonevn list available · @Cassio_Sch refresh delayed',
+                  'wallets': [
+                    {
+                      'id': 'wallet',
+                      'label': 'Mint wallet',
+                      'address': '0x1111111111111111111111111111111111111111',
                     },
-                  },
-                ],
-              };
-            } else if (path.endsWith('/tasks/queue')) {
-              result = {'tasks': []};
-            } else if (path.endsWith('/artwork')) {
-              result = {'image_url': null};
-            } else if (path.endsWith('/wallet-checks') ||
-                path.endsWith('/prepare-plan') ||
-                path.endsWith('/tasks/arm')) {
-              fail(
-                'A merged confirmed card must not check, prepare or arm again.',
+                  ],
+                  'editions': [
+                    {'id': 'first', 'content_hash': 'hash-one'},
+                    {'id': 'second', 'content_hash': 'hash-two'},
+                  ],
+                  'drops': [
+                    {
+                      'id': 'shared-card',
+                      'name': 'Shared collection',
+                      'list_context': 'From yesterday’s list',
+                      'today_schedule': 'GTD 00:00 WAT · FCFS 01:00 WAT',
+                      'chain': 'Base',
+                      'chain_id': 8453,
+                      'mint_page_url': 'https://opensea.io/collection/shared',
+                      'additions': seen ? null : 'new',
+                      'sources': [
+                        {
+                          'author': 'lakzonevn',
+                          'price': 'Free',
+                          'time_wat': '01 Nov 14:00 WAT',
+                        },
+                        {
+                          'author': 'Cassio_Sch',
+                          'price': 'Free / 0.001 ETH',
+                          'time_wat': '01 Nov 15:00 WAT',
+                        },
+                      ],
+                      'automatic_mint': {
+                        'id': 'confirmed-task',
+                        'status': status,
+                        'quantity': 2,
+                        'stage_name': 'GTD',
+                        'confirmed_at': '2026-11-01T11:16:00Z',
+                      },
+                    },
+                  ],
+                };
+              } else if (path.endsWith('/tasks/queue')) {
+                result = {'tasks': []};
+              } else if (path.endsWith('/artwork')) {
+                result = {'image_url': null};
+              } else if (path.endsWith('/wallet-checks') ||
+                  path.endsWith('/prepare-plan') ||
+                  path.endsWith('/tasks/arm')) {
+                fail(
+                  'A merged confirmed card must not check, prepare or arm again.',
+                );
+              }
+              return http.Response(
+                jsonEncode(result),
+                200,
+                headers: {'content-type': 'application/json; charset=utf-8'},
               );
-            }
-            return http.Response(
-              jsonEncode(result),
-              200,
-              headers: {'content-type': 'application/json; charset=utf-8'},
+            }),
+          );
+          await api.login('member', 'password');
+          final container = ProviderContainer(
+            overrides: [apiServiceProvider.overrideWith((ref) => api)],
+          );
+          await container.read(mintlyProvider.notifier).loadInitialData();
+          await tester.pumpWidget(
+            UncontrolledProviderScope(
+              container: container,
+              child: const MaterialApp(home: Scaffold(body: DiscoverScreen())),
+            ),
+          );
+          await tester.pumpAndSettle();
+          expect(find.text('Shared collection'), findsOneWidget);
+          expect(find.text('From yesterday’s list'), findsOneWidget);
+          expect(
+            find.text('Today: GTD 00:00 WAT · FCFS 01:00 WAT'),
+            findsOneWidget,
+          );
+          expect(
+            find.text(
+              status == 'confirmed' ? 'Minted' : 'Already minted — GTD',
+            ),
+            findsOneWidget,
+          );
+          expect(find.text('New addition'), findsOneWidget);
+          expect(find.text('@lakzonevn · @Cassio_Sch'), findsOneWidget);
+          expect(find.text('Set up automatic mint'), findsNothing);
+          await tester.tap(find.text('Source details'));
+          await tester.pumpAndSettle();
+          expect(find.textContaining('01 Nov 15:00 WAT'), findsOneWidget);
+          expect(
+            find.text('List updates'),
+            role == 'admin' ? findsOneWidget : findsNothing,
+          );
+          expect(
+            find.text('Mark additions as seen'),
+            role == 'admin' ? findsOneWidget : findsNothing,
+          );
+          if (role == 'admin') {
+            await tester.tap(find.text('List updates'));
+            await tester.pumpAndSettle();
+            expect(
+              find.text(
+                '@lakzonevn list available · @Cassio_Sch refresh delayed',
+              ),
+              findsOneWidget,
             );
-          }),
-        );
-        await api.login('member', 'password');
-        final container = ProviderContainer(
-          overrides: [apiServiceProvider.overrideWith((ref) => api)],
-        );
-        await container.read(mintlyProvider.notifier).loadInitialData();
-        await tester.pumpWidget(
-          UncontrolledProviderScope(
-            container: container,
-            child: const MaterialApp(home: Scaffold(body: DiscoverScreen())),
-          ),
-        );
-        await tester.pumpAndSettle();
-        expect(find.text('Shared collection'), findsOneWidget);
-        expect(find.text('From yesterday’s list'), findsOneWidget);
-        expect(
-          find.text('Today: GTD 00:00 WAT · FCFS 01:00 WAT'),
-          findsOneWidget,
-        );
-        expect(
-          find.text(status == 'confirmed' ? 'Minted' : 'Already minted — GTD'),
-          findsOneWidget,
-        );
-        expect(find.text('New addition'), findsOneWidget);
-        expect(find.text('@lakzonevn · @Cassio_Sch'), findsOneWidget);
-        expect(find.text('Set up automatic mint'), findsNothing);
-        await tester.tap(find.text('Source details'));
-        await tester.pumpAndSettle();
-        expect(find.textContaining('01 Nov 15:00 WAT'), findsOneWidget);
-        await tester.tap(find.text('Mark additions as seen'));
-        await tester.pumpAndSettle();
-        expect(ack, {
-          'editions': [
-            {'id': 'first', 'content_hash': 'hash-one'},
-            {'id': 'second', 'content_hash': 'hash-two'},
-          ],
-        });
-        expect(find.text('New addition'), findsNothing);
-        expect(
-          find.text(status == 'confirmed' ? 'Minted' : 'Already minted — GTD'),
-          findsOneWidget,
-        );
-        final push = PushService.instance;
-        await push.connect(api);
-        final before = push.todayRequests.value;
-        push.openToday({'category': 'daily_list', 'user_id': 'foreign'});
-        expect(push.todayRequests.value, before);
-        push.openToday({'category': 'daily_list', 'user_id': 'member'});
-        expect(push.todayRequests.value, before + 1);
-        await push.disconnect();
-        await tester.pumpWidget(const SizedBox.shrink());
-        container.dispose();
-        expect(tester.takeException(), isNull);
-      },
-    );
+            await tester.tap(find.text('Mark additions as seen'));
+            await tester.pumpAndSettle();
+            expect(ack, {
+              'editions': [
+                {'id': 'first', 'content_hash': 'hash-one'},
+                {'id': 'second', 'content_hash': 'hash-two'},
+              ],
+            });
+            expect(find.text('New addition'), findsNothing);
+          } else {
+            expect(ack, isNull);
+            expect(find.text('New addition'), findsOneWidget);
+          }
+          expect(
+            find.text(
+              status == 'confirmed' ? 'Minted' : 'Already minted — GTD',
+            ),
+            findsOneWidget,
+          );
+          final push = PushService.instance;
+          await push.connect(api);
+          final before = push.todayRequests.value;
+          push.openToday({'category': 'daily_list', 'user_id': 'foreign'});
+          expect(push.todayRequests.value, before);
+          push.openToday({'category': 'daily_list', 'user_id': 'member'});
+          expect(push.todayRequests.value, before + 1);
+          await push.disconnect();
+          await tester.pumpWidget(const SizedBox.shrink());
+          container.dispose();
+          expect(tester.takeException(), isNull);
+        },
+      );
+    }
   }
 }

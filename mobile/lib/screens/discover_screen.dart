@@ -181,7 +181,7 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
           const SizedBox(height: 12),
           TodayMintSummary(drops: state.drops),
           const SizedBox(height: 10),
-          if (!api.isAdmin && api.feedStatusText.isNotEmpty)
+          if (api.isAdmin && api.feedStatusText.isNotEmpty)
             DisclosureSection(
               title: const Text('List updates'),
               children: [
@@ -194,7 +194,7 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
                 ),
               ],
             ),
-          if (state.drops.any((d) => d.additions != null))
+          if (api.isAdmin && state.drops.any((d) => d.additions != null))
             TextButton(
               onPressed: () async {
                 final editions = api.feedEditions
