@@ -5,6 +5,7 @@ import '../state/app_state.dart';
 import '../services/wat_time.dart';
 import '../theme/compatible_icons.dart';
 import '../models/network_metadata.dart';
+import '../widgets/screen_components.dart';
 
 class FreeDropsScreen extends ConsumerStatefulWidget {
   const FreeDropsScreen({super.key});
@@ -18,7 +19,11 @@ class _FreeDropsState extends ConsumerState<FreeDropsScreen> {
   List<Map<String, dynamic>> _policies = [], _approvals = [], _wallets = [];
   Map<String, dynamic>? _policy, _current, _pending;
   DateTime? _approvalExpiry;
-  bool _loading = true, _busy = false, _consent = false, _maximum = false;
+  bool _loading = true,
+      _busy = false,
+      _consent = false,
+      _maximum = false,
+      _paused = false;
   String? _error;
   @override
   void initState() {
@@ -36,7 +41,9 @@ class _FreeDropsState extends ConsumerState<FreeDropsScreen> {
   String _units(dynamic value) {
     final n = BigInt.parse('$value');
     final scale = BigInt.from(10).pow(18);
-    return '${n ~/ scale}.${(n % scale).toString().padLeft(18, '0')}';
+    return '${n ~/ scale}.${(n % scale).toString().padLeft(18, '0')}'
+        .replaceFirst(RegExp(r'0+$'), '')
+        .replaceFirst(RegExp(r'\.$'), '');
   }
 
   void _select(Map<String, dynamic> policy) {
@@ -100,6 +107,7 @@ class _FreeDropsState extends ConsumerState<FreeDropsScreen> {
           results[1]['approvals'] as List,
         );
         _wallets = results[2] as List<Map<String, dynamic>>;
+        _paused = results[1]['automation_paused'] == true;
         final selected = _policy?['id'];
         if (_policies.isNotEmpty) {
           _select(
@@ -199,106 +207,190 @@ class _FreeDropsState extends ConsumerState<FreeDropsScreen> {
     }
   }
 
+  Widget _panel(List<Widget> children) => Card(
+    margin: const EdgeInsets.only(bottom: 14),
+    child: Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: children,
+      ),
+    ),
+  );
+
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
     final active = _current?['status'] == 'active';
     final pending = _current?['status'] == 'registering';
+    final stopping = _current?['status'] == 'revoking';
+    final note = '${_current?['note'] ?? ''}';
+    final allowanceLow = active && note.contains('below your chosen gas cap');
+    final reserved = active && note.contains('pending mint reservations');
+    final budgetBlocked = allowanceLow || reserved;
+    final title = _paused
+        ? 'Paused'
+        : pending
+        ? 'Finishing setup'
+        : stopping
+        ? 'Turning off'
+        : budgetBlocked
+        ? 'Needs attention'
+        : active
+        ? 'Enabled'
+        : 'Off';
+    final description = _paused
+        ? 'Resume automation from Wallet.'
+        : pending
+        ? 'Retry to finish setup with your saved limits.'
+        : stopping
+        ? 'New signing is blocked while we confirm.'
+        : allowanceLow
+        ? 'Your signing allowance is below this gas limit.'
+        : reserved
+        ? 'Another mint is using part of your signing allowance.'
+        : active
+        ? 'Your saved settings are loaded.'
+        : 'Choose your limits, then turn it on.';
+    final expiry = _current == null
+        ? _approvalExpiry
+        : DateTime.tryParse('${_current!['expires_at']}');
     return Scaffold(
-      appBar: AppBar(title: const Text('Free drops automation')),
+      appBar: AppBar(
+        title: const Text(
+          'Free drops automation',
+          style: TextStyle(fontFamily: 'Roboto'),
+        ),
+      ),
       body: ListView(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
         children: [
-          const Text(
-            'Automatically arm eligible free WL, GTD, FCFS or public phases from Today’s @lakzonevn and @Cassio_Sch lists.',
+          Text(
+            'Free mints, on autopilot',
+            style: Theme.of(
+              context,
+            ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
           ),
-          const SizedBox(height: 12),
-          const Text(
-            'Free means zero NFT price. Gas still costs money. Existing wallet budgets and daily limits apply. One collection is minted once; eligibility and supply are checked again before submission.',
-          ),
+          const SizedBox(height: 6),
+          const Text('Mintly arms free mints you qualify for from Today.'),
+          const SizedBox(height: 16),
           if (_loading) const LinearProgressIndicator(),
           if (!_loading && _policies.isEmpty)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 16),
-              child: Text('Set up a signing wallet in Wallet first.'),
-            ),
+            _panel([const Text('Set up a signing wallet in Wallet first.')]),
           if (_policy != null) ...[
-            DropdownButtonFormField<String>(
-              key: ValueKey(_policy!['id']),
-              initialValue: '${_policy!['id']}',
-              isExpanded: true,
-              icon: const RotatedBox(
-                quarterTurns: 1,
-                child: Icon(MintlyIcons.chevronRight),
-              ),
-              decoration: const InputDecoration(
-                labelText: 'Wallet and network',
-              ),
-              items: _policies
-                  .map(
-                    (p) => DropdownMenuItem(
-                      value: '${p['id']}',
-                      child: Text(_label(p), overflow: TextOverflow.ellipsis),
-                    ),
-                  )
-                  .toList(),
-              onChanged: _busy
-                  ? null
-                  : (id) => setState(
-                      () => _select(_policies.firstWhere((p) => p['id'] == id)),
-                    ),
-            ),
-            if (_maximum)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 12),
-                child: Text(
-                  'NFTs per collection: Maximum allowed for this wallet',
+            _panel([
+              Text(
+                'AUTO-ARMING',
+                style: TextStyle(
+                  fontSize: 11,
+                  letterSpacing: 1.3,
+                  color: colors.onSurface.withValues(alpha: .65),
                 ),
-              )
-            else
-              TextField(
-                controller: _quantity,
-                enabled: !_busy && _current == null && _pending == null,
-                keyboardType: TextInputType.number,
+              ),
+              const SizedBox(height: 6),
+              Text(
+                title,
+                style: TextStyle(
+                  fontSize: 26,
+                  fontWeight: FontWeight.w700,
+                  color: active && !_paused && !budgetBlocked
+                      ? colors.primary
+                      : colors.onSurface,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(description),
+              if (expiry != null) ...[
+                const SizedBox(height: 12),
+                Text(
+                  'Approval ends ${WatTime.label(expiry)}',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
+            ]),
+            _panel([
+              Text(
+                'Wallet & limits',
+                style: Theme.of(
+                  context,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 16),
+              DropdownButtonFormField<String>(
+                key: ValueKey(_policy!['id']),
+                initialValue: '${_policy!['id']}',
+                isExpanded: true,
+                icon: const RotatedBox(
+                  quarterTurns: 1,
+                  child: Icon(MintlyIcons.chevronRight),
+                ),
                 decoration: const InputDecoration(
-                  labelText: 'NFTs per collection',
+                  labelText: 'Wallet and network',
+                ),
+                items: _policies
+                    .map(
+                      (p) => DropdownMenuItem(
+                        value: '${p['id']}',
+                        child: Text(_label(p), overflow: TextOverflow.ellipsis),
+                      ),
+                    )
+                    .toList(),
+                onChanged: _busy
+                    ? null
+                    : (id) => setState(
+                        () =>
+                            _select(_policies.firstWhere((p) => p['id'] == id)),
+                      ),
+              ),
+              const SizedBox(height: 18),
+              if (_maximum) ...[
+                const Text(
+                  'NFTs per collection',
+                  style: TextStyle(fontSize: 12),
+                ),
+                const SizedBox(height: 4),
+                const Text(
+                  'Maximum allowed for this wallet',
+                  style: TextStyle(fontWeight: FontWeight.w600),
+                ),
+              ] else
+                TextField(
+                  controller: _quantity,
+                  style: TextStyle(color: colors.onSurface),
+                  enabled: !_busy && _current == null && _pending == null,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: 'NFTs per collection',
+                  ),
+                ),
+              const SizedBox(height: 18),
+              TextField(
+                controller: _gas,
+                style: TextStyle(color: colors.onSurface),
+                enabled: !_busy && _current == null && _pending == null,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                decoration: InputDecoration(
+                  labelText:
+                      'Maximum gas per mint (${_policy!['native_symbol'] ?? 'ETH'})',
                 ),
               ),
-            TextField(
-              controller: _gas,
-              enabled: !_busy && _current == null && _pending == null,
-              keyboardType: const TextInputType.numberWithOptions(
-                decimal: true,
-              ),
-              decoration: InputDecoration(
-                labelText:
-                    'Maximum gas per mint (${_policy!['native_symbol'] ?? 'ETH'})',
-              ),
-            ),
-            const SizedBox(height: 12),
-            if (_current == null && _approvalExpiry != null)
-              Text('Approval ends ${WatTime.label(_approvalExpiry!)}'),
-            if (_current != null) ...[
+              const SizedBox(height: 12),
               Text(
-                active
-                    ? 'Enabled'
-                    : pending
-                    ? 'Signer confirmation pending'
-                    : 'Stopping automation',
-              ),
-              Text('${_current!['note'] ?? ''}'),
-              Text(
-                'Expires ${WatTime.label(DateTime.parse('${_current!['expires_at']}'))}',
-              ),
-              const Text(
-                'Your saved settings are shown above. Turn this approval off before changing its limits.',
-              ),
-              OutlinedButton(
-                onPressed: _busy ? null : _disable,
-                child: Text(
-                  _busy ? 'Saving…' : 'Turn off free-drop automation',
+                'Free NFTs. Gas still costs money.',
+                style: TextStyle(
+                  color: colors.onSurface.withValues(alpha: .75),
                 ),
               ),
-            ],
+              if (_current != null && !pending) ...[
+                const SizedBox(height: 8),
+                const Text(
+                  'Turn off before changing these limits.',
+                  style: TextStyle(fontSize: 12),
+                ),
+              ],
+            ]),
             if (_current == null || pending) ...[
               CheckboxListTile(
                 contentPadding: EdgeInsets.zero,
@@ -307,9 +399,10 @@ class _FreeDropsState extends ConsumerState<FreeDropsScreen> {
                     ? null
                     : (v) => setState(() => _consent = v == true),
                 title: const Text(
-                  'I approve eligible free daily-list mints for this wallet, quantity and gas cap, until the displayed signing approval expires (up to 60 days). Follow the same phase’s verified opening within the approved deadline.',
+                  'Allow eligible free mints with these limits until the expiry shown.',
                 ),
               ),
+              const SizedBox(height: 8),
               FilledButton(
                 onPressed: _busy || !_consent ? null : _enable,
                 child: Text(
@@ -321,11 +414,43 @@ class _FreeDropsState extends ConsumerState<FreeDropsScreen> {
                 ),
               ),
             ],
+            if (_current != null)
+              OutlinedButton(
+                onPressed: _busy ? null : _disable,
+                child: Text(
+                  _busy ? 'Saving…' : 'Turn off free-drop automation',
+                  style: const TextStyle(fontFamily: 'Roboto'),
+                ),
+              ),
           ],
           if (_error != null)
-            Text(
-              _error!,
-              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: Text(_error!, style: TextStyle(color: colors.error)),
+            ),
+          const SizedBox(height: 12),
+          Card(
+            child: DisclosureSection(
+              title: const Text('How it works'),
+              children: const [
+                Padding(
+                  padding: EdgeInsets.fromLTRB(16, 0, 16, 16),
+                  child: Text(
+                    'Eligible free WL, GTD, FCFS and public phases from @lakzonevn and @Cassio_Sch.\n\nYour wallet budgets and daily limits still apply. Eligibility and supply are checked again before minting.\n\nMintly follows the phase’s verified opening, within your approval deadline. One mint per collection.',
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (note.isNotEmpty && !note.startsWith('Watching '))
+            DisclosureSection(
+              title: const Text('Latest activity'),
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                  child: Text(note),
+                ),
+              ],
             ),
           TextButton(
             onPressed: _busy ? null : _load,
