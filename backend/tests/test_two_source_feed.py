@@ -223,12 +223,32 @@ async def test_midnight_wat_visibility_does_not_reannounce_previous_list(test_db
     early['raw_text']=early['text'];early['posted_at']=datetime(2026,10,31,9,tzinfo=timezone.utc)
     old=await import_item(test_db,early)
     assert old.list_date==date(2026,10,31)
-    assert len(await feed_sources.daily_collections(test_db,date(2026,11,1)))==2
+    clock=datetime(2026,10,31,23,30,tzinfo=timezone.utc)
+    assert len(await feed_sources.daily_collections(test_db,date(2026,11,1),now=clock))==2
     assert [p.id for p in await daily_notices.available(test_db,date(2026,11,1))]==[post.id]
-    groups=await feed_sources.daily_collections(test_db,date(2026,11,1))
+    groups=await feed_sources.daily_collections(test_db,date(2026,11,1),now=clock)
     metadata,_=await feed_sources.source_metadata(test_db,groups,'viewer',date(2026,11,1))
     by_name={g['drop'].name:metadata[g['drop'].id] for g in groups}
     assert by_name['Earlier list collection']['list_context']=='From yesterday’s list'
     assert by_name['Late collection']['list_context'] is None
     assert all(m['today_schedule']=='Source listing 00:30 WAT' for m in by_name.values())
     assert not await feed_sources.daily_collections(test_db,date(2026,11,2))
+
+
+async def test_expiry_uses_postponed_private_task_without_cancelling_it(test_db,source_providers,monkeypatch):
+    users,wallets,drop,task,auth=await armed_fixture(test_db,monkeypatch)
+    post=await import_item(test_db,item(1062,slug='test'))
+    now=datetime.now(timezone.utc)
+    day=now.astimezone(x_feed.daily_date.__globals__['WAT']).date()
+    post.list_date=day-timedelta(days=1)
+    original_post=await test_db.get(SourcePost,drop.source_post_id)
+    original_post.list_date=post.list_date
+    mention=await test_db.scalar(select(FeedMention).where(FeedMention.post_id==post.id))
+    mention.details={'stages':[{'starts_at':(now-timedelta(hours=2)).isoformat()}]}
+    task.schedule_checked_at=now;task.scheduled_for_utc=now+timedelta(hours=1)
+    await test_db.commit()
+    groups=await feed_sources.daily_collections(test_db,day,now=now)
+    assert any(g['drop'].id==drop.id for g in groups)
+    assert not await feed_sources.daily_collections(test_db,day,now=now+timedelta(hours=2))
+    await test_db.refresh(task)
+    assert task.status=='armed' and task.authorization_id==auth.id

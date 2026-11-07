@@ -307,6 +307,38 @@ async def test_reservation_shortage_waits_then_arms_without_increasing_budget(fr
         assert grant.budget_wei==budget
 
 
+@pytest.mark.parametrize('limiter',['allowance','balance'])
+async def test_smaller_effective_cap_arms_and_signs_without_changing_approval(free_feed,limiter,monkeypatch):
+    from app.models import AutomaticGrant
+    from app.services.feed_sources import daily_collections
+    f=free_feed;lab=f['lab']
+    async with lab.factory() as db:
+        row=await db.get(FeedMintApproval,f['approval']['id'])
+        user=await db.get(User,lab.user.id);wallet=await db.get(Wallet,lab.wallet.id)
+        grant=await db.get(AutomaticGrant,lab.grant.id)
+        original=(copy.deepcopy(row.snapshot),row.context_hash,grant.budget_wei,copy.deepcopy(grant.scope))
+        cap=row.snapshot['fee_cap_wei']//2
+        if limiter=='allowance':grant.spent_wei=grant.budget_wei-cap
+        else:lab.w.provider.make_request('hardhat_setBalance',[wallet.address,hex(cap)])
+        await db.commit()
+        groups=await daily_collections(db,datetime.now(ZoneInfo('Africa/Lagos')).date(),user.id)
+        check=await db.get(FeedWalletCheck,(user.id,wallet.id,lab.drop.id))
+        assert await feed_automation.arm(db,row,groups[0],check,user,wallet)
+        task=(await db.scalars(select(MintTask))).one();task_id=task.id
+        auth=await db.get(MintAuthorization,task.authorization_id)
+        assert auth.max_fee_wei==auth.total_spend_cap_wei==cap
+        assert original==(row.snapshot,row.context_hash,grant.budget_wei,grant.scope)
+    lab.w.provider.make_request('evm_setNextBlockTimestamp',[lab.start]);lab.w.provider.make_request('evm_mine',[])
+    class Clock(datetime):
+        @classmethod
+        def now(cls,tz=None):return datetime.fromtimestamp(lab.w.eth.get_block('latest').timestamp,tz)
+    monkeypatch.setattr('app.services.automatic_signer.datetime',Clock)
+    prepared=await lab.sign(task_id)
+    assert prepared.get('hash'),prepared
+    async with lab.factory() as db:
+        assert (await db.get(MintTask,task_id)).signed_tx_raw
+
+
 async def test_other_user_cannot_read_or_disable_standing_approval(free_feed):
     f=free_feed;lab=f['lab']
     login=await lab.client.post('/api/auth/login',json={'username':'admin','password':'Admin test password 123'})
