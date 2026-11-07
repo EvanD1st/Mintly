@@ -2,7 +2,7 @@
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from sqlalchemy import select, or_, func
-from app.models import Drop, SourcePost, SourceConnection, FeedMention, FeedSeen, DismissedDrop
+from app.models import Drop, SourcePost, SourceConnection, FeedMention, FeedSeen, DismissedDrop, FeedWalletCheck, MintTask
 from app.services.opensea import collection_slug, OpenSeaUnavailable
 
 SOURCE_NAMES = ('lakzonevn','cassio_sch')
@@ -56,7 +56,23 @@ async def discovery_lock(db):
     await db.scalar(select(SourceConnection).where(SourceConnection.source_name=='lakzonevn').with_for_update())
 
 
-async def daily_collections(db,day,user_id=None):
+def carryover_visible(group,day,now,verified=None):
+    """Presentation expiry only; never cancels tasks or edits discovery history."""
+    if any(p.list_date>=day for p,_ in group['mentions']):return True
+    stages=verified or [s for _,details in group['mentions'] for s in details.get('stages',[])]
+    if not stages:return True
+    openings=[]
+    for stage in stages:
+        try:
+            opening=datetime.fromisoformat(stage['starts_at'])
+            if opening.tzinfo is None:return True
+            openings.append(opening)
+        except (KeyError,TypeError,ValueError):return True
+    return now<max(openings)+timedelta(hours=1)
+
+
+async def daily_collections(db,day,user_id=None,*,now=None):
+    now=now or datetime.now(timezone.utc)
     rows=(await db.execute(select(FeedMention,SourcePost,Drop).join(SourcePost,FeedMention.post_id==SourcePost.id)
         .join(Drop,FeedMention.drop_id==Drop.id).where(SourcePost.list_date>=day-timedelta(days=1),
             SourcePost.list_date<=day+timedelta(days=1),approved(),Drop.is_demo.is_(False))
@@ -65,7 +81,7 @@ async def daily_collections(db,day,user_id=None):
         .where(SourcePost.list_date==day,approved(),Drop.is_demo.is_(False),
             ~select(FeedMention.post_id).where(FeedMention.post_id==SourcePost.id).exists())
         .order_by(Drop.created_at,Drop.id))).all()
-    combined=[(d,p,m.details) for m,p,d in rows if p.list_date==day or day.isoformat() in m.details.get('days',[])]+[
+    combined=[(d,p,m.details) for m,p,d in rows if p.list_date<=day or day.isoformat() in m.details.get('days',[])]+[
         (d,p,{'price':d.source_price_text,'time_wat':d.source_time_text,'stages':[]}) for d,p in legacy]
     groups=[]
     for d,p,details in combined:
@@ -74,6 +90,32 @@ async def daily_collections(db,day,user_id=None):
             target={'drop':d,'ids':set(),'mentions':[]};groups.append(target)
         target['ids'].add(d.id)
         target['mentions'].append((p,details))
+    # Reuse the latest verified OpenSea phase schedule when available. This keeps
+    # a postponed opening ahead of an older source time, without provider IO here.
+    ids={i for g in groups if not any(p.list_date>=day for p,_ in g['mentions']) for i in g['ids']}
+    checks=(await db.scalars(select(FeedWalletCheck).where(FeedWalletCheck.drop_id.in_(ids),
+        FeedWalletCheck.checked_at.is_not(None)).order_by(FeedWalletCheck.checked_at.desc()))).all() if ids else []
+    schedules={}
+    for check in checks:
+        if check.result.get('stages') and check.drop_id not in schedules:
+            schedules[check.drop_id]=check.result['stages']
+    from app.services.mint_plans import aware
+    # Armed schedule tracking may have newer phase timing than display checks,
+    # which intentionally stop once a mint is armed or completed.
+    carryovers=[g for g in groups if g['ids']&ids]
+    contracts=[g['drop'].contract_address.lower() for g in carryovers if g['drop'].contract_address]
+    urls=[g['drop'].mint_page_url for g in carryovers]
+    tasks=(await db.execute(select(MintTask.scheduled_for_utc,Drop).join(Drop,MintTask.drop_id==Drop.id).where(
+        or_(Drop.id.in_(ids),func.lower(Drop.contract_address).in_(contracts),Drop.mint_page_url.in_(urls)),
+        MintTask.is_demo.is_(False),MintTask.schedule_checked_at.is_not(None)))).all() if ids else []
+    for opening,task_drop in tasks:
+        for g in carryovers:
+            if task_drop.id not in g['ids'] and not same_collection(g['drop'],task_drop):continue
+            key=g['drop'].id
+            schedules.setdefault(key,[s for _,details in g['mentions'] for s in details.get('stages',[])])
+            schedules[key]=[*schedules[key],{'starts_at':aware(opening).isoformat()}]
+    groups=[g for g in groups if carryover_visible(g,day,now,
+        next((schedules[i] for i in g['ids'] if i in schedules),None))]
     if user_id:
         dismissed=set((await db.scalars(select(DismissedDrop.drop_id).where(DismissedDrop.user_id==user_id))).all())
         aliases=(await db.execute(select(Drop.id,Drop.canonical_id).where(Drop.id.in_(dismissed),Drop.canonical_id.is_not(None)))).all() if dismissed else []

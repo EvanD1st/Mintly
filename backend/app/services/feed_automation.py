@@ -247,10 +247,13 @@ async def arm(db,row,group,check,user,wallet):
         func.lower(MintAuthorization.snapshot['contract'].as_string())==check.result['contract_address'].lower()))
     if previous:return
     grant=await automatic.grant_for(db,row.grant_id,user.id)
-    if grant.budget_wei-grant.spent_wei-grant.reserved_wei<r['fee_cap_wei']:
-        row.note=('Waiting for pending mint reservations to settle.' if grant.budget_wei-grant.spent_wei>=r['fee_cap_wei']
-            else 'The remaining signing allowance is below your chosen gas cap. Review the wallet spending approval or gas cap.')
+    if grant.budget_wei-grant.spent_wei-grant.reserved_wei<=0:
+        row.note=('Waiting for pending mint reservations to settle.' if grant.budget_wei-grant.spent_wei>0
+            else 'The signing allowance is used up. Renew the wallet spending approval.')
         return
+    if row.note in ('The remaining signing allowance is below your chosen gas cap. Review the wallet spending approval or gas cap.',
+        'Waiting for pending mint reservations to settle.'):
+        row.note='Watching Today for eligible free phases. Gas limits apply.'
     display=feed_checks.presentation(check)
     if not display['setup_enabled']:return
     phases=[p for p in display['stages'] if p['eligibility']=='eligible' and p['timing']!='ended'
@@ -281,11 +284,24 @@ async def arm(db,row,group,check,user,wallet):
     from app.api.mint_plans import automatic_context
     await automatic_context(plan.id,user,db)
     grant=await automatic.grant_for(db,row.grant_id,user.id)
+    # A gas cap is a maximum, not a minimum transaction price. Use only the
+    # remaining already-approved authority and unreserved native balance.
+    from web3 import AsyncWeb3
+    web3=AsyncWeb3(AsyncWeb3.AsyncHTTPProvider(automatic.rpc_for(grant.chain_id),request_kwargs={'timeout':15}))
+    try:
+        balance=await web3.eth.get_balance(AsyncWeb3.to_checksum_address(grant.account))
+    finally:
+        await web3.provider.disconnect()
+    fee_cap=min(r['fee_cap_wei'],grant.scope['max_task_wei'],
+        grant.budget_wei-grant.spent_wei-grant.reserved_wei,max(0,balance-grant.reserved_wei))
+    if fee_cap<=0:
+        row.note='Not enough available native tokens for gas.'
+        return
     now=datetime.now(timezone.utc)
     req=ArmTaskRequest(native_symbol=symbol(r['chain_id']),
         guided=True,plan_id=plan.id,wallet_id=wallet.id,grant_id=grant.id,drop_id=plan.automatic_drop_id,
         stage_id=plan.automatic_stage_id,quantity=quantity,mint_kind=stage_kind(phase['type']),
-        price_cap_eth='0',fee_cap_eth=format_wei_to_eth(r['fee_cap_wei']),total_cap_eth=format_wei_to_eth(r['fee_cap_wei']),
+        price_cap_eth='0',fee_cap_eth=format_wei_to_eth(fee_cap),total_cap_eth=format_wei_to_eth(fee_cap),
         expires_at=min(aware(plan.ends_at),aware(row.expires_at)),scheduled_for_utc=max(aware(plan.starts_at),now+timedelta(seconds=1)),
         conditional_eligibility=stage_kind(phase['type'])!='public' and aware(plan.starts_at)>now,
         schedule_mode='phase_open',user_consent_confirmed=True,
@@ -305,6 +321,11 @@ async def step(factory):
         user=await db.get(User,row.user_id);wallet=await db.get(Wallet,row.wallet_id)
         row.last_checked_at=now;await db.commit()
         if not user or not user.is_active or user.deleted_at or user.automation_paused or not wallet or wallet.archived_at:return True
+        grant=await db.get(AutomaticGrant,row.grant_id)
+        if (grant and grant.status=='enabled' and aware(grant.expires_at)>now
+            and grant.budget_wei-grant.spent_wei-grant.reserved_wei>0
+            and row.note=='The remaining signing allowance is below your chosen gas cap. Review the wallet spending approval or gas cap.'):
+            row.note='Watching Today for eligible free phases. Gas limits apply.'
         groups=await daily_collections(db,now.astimezone(ZoneInfo('Africa/Lagos')).date(),user.id)
         groups=[g for g in groups if g['drop'].chain_id==row.snapshot['chain_id'] and any((p.author_username or '').lower() in row.snapshot['sources'] for p,_ in g['mentions'])]
         await feed_checks.queue_checks(db,user,wallet,[g['drop'] for g in groups])
