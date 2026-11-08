@@ -70,6 +70,9 @@ async def usage(db, user_id, day=None, excluding=None, currency='ETH'):
 
 
 async def reserve(db, task, auth, user_id, *, now=None):
+    from app.services.auto_arm_funding import queued
+    existing=await db.get(DailyDebit,task.id)
+    amount=existing.maximum_wei if existing else queued(auth)
     user = await db.get(User,user_id,populate_existing=True)
     currency = symbol(auth.snapshot['chain_id'])
     user = await limit_owner(db,user,currency)
@@ -77,11 +80,11 @@ async def reserve(db, task, auth, user_id, *, now=None):
         raise HTTPException(503,'Daily limit confirmation is pending. Retry in Settings.')
     day = day_key(now or task.scheduled_for_utc)
     used = await usage(db,user_id,day,excluding=task.id,currency=currency)
-    if user.daily_limit_wei is not None and used['spent_wei'] + used['reserved_wei'] + auth.total_spend_cap_wei > user.daily_limit_wei:
+    if user.daily_limit_wei is not None and used['spent_wei'] + used['reserved_wei'] + amount > user.daily_limit_wei:
         raise HTTPException(429,LIMIT_NOTE)
     row = await db.get(DailyDebit,task.id)
     if not row:
-        db.add(DailyDebit(task_id=task.id,user_id=user_id,day=day,maximum_wei=auth.total_spend_cap_wei,currency=currency))
+        db.add(DailyDebit(task_id=task.id,user_id=user_id,day=day,maximum_wei=amount,currency=currency))
     elif row.currency != currency:
         raise ValueError('A debit cannot change native currency')
     elif not task.signed_tx_raw and task.status in ('armed','preparing'):

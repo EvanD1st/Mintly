@@ -28,7 +28,10 @@ async def recover_task(db, task_id, owner_id, expires_at, reference, vault=None)
     if not task or task.execution_mode != automatic.MODE:
         raise ValueError('Automatic task not found')
     auth = await db.get(MintAuthorization, task.authorization_id)
-    s = auth.snapshot
+    s = dict(auth.snapshot)
+    if s.get('feed_approval_id'):
+        from app.services.auto_arm_funding import quantity
+        s['quantity']=quantity(task,auth.quantity)
     user = await db.get(User, owner_id)
     wallet = await db.get(Wallet, task.wallet_id)
     if (not user or not user.is_active or user.deleted_at or user.must_change_password

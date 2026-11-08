@@ -66,9 +66,9 @@ def carryover_visible(group,day,now,verified=None):
         try:
             opening=datetime.fromisoformat(stage['starts_at'])
             if opening.tzinfo is None:return True
-            openings.append(opening)
+            if opening.astimezone(ZoneInfo('Africa/Lagos')).date()<=day:openings.append(opening)
         except (KeyError,TypeError,ValueError):return True
-    return now<max(openings)+timedelta(hours=1)
+    return bool(openings) and now<max(openings)+timedelta(hours=1)
 
 
 async def daily_collections(db,day,user_id=None,*,now=None):

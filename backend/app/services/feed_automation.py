@@ -239,6 +239,9 @@ async def arm(db,row,group,check,user,wallet):
     from app.services.parser import format_wei_to_eth
     from types import SimpleNamespace
     r=row.snapshot
+    if not isinstance(check.result,dict) or not check.result.get('contract_address'):
+        row.note='Wallet eligibility is not verified yet. Waiting for collection details; no mint was armed.'
+        return
     list_day=group.get('list_date') or datetime.now(timezone.utc).astimezone(ZoneInfo('Africa/Lagos')).date()
     # A cancelled or failed opportunity must not be silently recreated on every
     # feed refresh. Explicit per-collection review remains available to the user.
@@ -293,7 +296,7 @@ async def arm(db,row,group,check,user,wallet):
     finally:
         await web3.provider.disconnect()
     fee_cap=min(r['fee_cap_wei'],grant.scope['max_task_wei'],
-        grant.budget_wei-grant.spent_wei-grant.reserved_wei,max(0,balance-grant.reserved_wei))
+        grant.budget_wei-grant.spent_wei,max(0,balance))
     if fee_cap<=0:
         row.note='Not enough available native tokens for gas.'
         return
@@ -330,7 +333,7 @@ async def step(factory):
         groups=[g for g in groups if g['drop'].chain_id==row.snapshot['chain_id'] and any((p.author_username or '').lower() in row.snapshot['sources'] for p,_ in g['mentions'])]
         await feed_checks.queue_checks(db,user,wallet,[g['drop'] for g in groups])
         from types import SimpleNamespace
-        candidates=[{'drop':SimpleNamespace(id=g['drop'].id),'list_date':now.astimezone(ZoneInfo('Africa/Lagos')).date(),'mentions':[(SimpleNamespace(id=p.id,author_username=p.author_username),None) for p,_ in g['mentions']]} for g in groups]
+        candidates=[{'drop':SimpleNamespace(id=g['drop'].id,name=g['drop'].name),'list_date':now.astimezone(ZoneInfo('Africa/Lagos')).date(),'mentions':[(SimpleNamespace(id=p.id,author_username=p.author_username),None) for p,_ in g['mentions']]} for g in groups]
         approval_id=row.id
     for group in candidates:
         async with factory() as db:
@@ -343,16 +346,26 @@ async def step(factory):
                 if not check:continue
                 phase=await arm(db,row,group,check,user,wallet)
                 if phase:
-                    row.note=f"Automatically armed — {phase['name']}. Gas limits apply."
+                    row.note=f"Automatically armed — {group['drop'].name}: {phase['name']}. Gas limits apply."
                 await db.commit()
             except Exception as error:
-                logging.getLogger('mintly.free_drops').info('Preparation deferred approval_id=%s reason=%s',approval_id,type(error).__name__)
+                logging.getLogger('mintly.free_drops').warning('Preparation deferred approval_id=%s collection_id=%s reason=%s detail=%s',approval_id,group['drop'].id,type(error).__name__,preparation_error(error))
                 await db.rollback()
                 row=await db.get(FeedMintApproval,approval_id)
                 if not row:continue
-                row.note='Watching eligible free phases. Existing mints and approved budgets are respected; unavailable checks will retry.'
+                row.note=f"{group['drop'].name}: {preparation_error(error)}"
                 await db.commit()
     return True
+
+
+def preparation_error(error):
+    from app.services.opensea import OpenSeaUnavailable
+    from app.services.mint_diagnostics import PREPARATION_REASONS
+    if isinstance(error,OpenSeaUnavailable):
+        return PREPARATION_REASONS.get(error.mint_reason,str(error))
+    if isinstance(error,HTTPException):return str(error.detail)
+    if isinstance(error,KeyError):return 'Collection details are incomplete. Waiting for a verified eligibility check; no mint was armed.'
+    return 'Auto-Arming preparation failed. No transaction was sent. The error was recorded for support.'
 
 
 async def loop(factory):

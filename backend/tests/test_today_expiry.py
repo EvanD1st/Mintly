@@ -26,3 +26,7 @@ def test_unknown_schedule_is_retained(stages):
 
 def test_verified_postponement_overrides_old_source_opening():
     assert carryover_visible(group([stage(OPEN)]),DAY,OPEN+timedelta(hours=2),[stage(OPEN+timedelta(hours=3))])
+
+def test_postponed_to_another_day_does_not_keep_yesterdays_card_on_today():
+    assert not carryover_visible(group([stage(OPEN)]),DAY,OPEN+timedelta(hours=2),[stage(OPEN+timedelta(days=8))])
+    assert not carryover_visible(group([stage(OPEN)]),DAY,OPEN+timedelta(hours=2),[stage(OPEN),stage(OPEN+timedelta(days=8))])

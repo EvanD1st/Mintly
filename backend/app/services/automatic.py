@@ -216,7 +216,8 @@ async def make_snapshot(db, req, user_id, *, presale_mint=None):
             raise HTTPException(409, 'Choose a future mint time within the stage and before the approval expires.')
     if price < stage_price or fee <= 0 or total < stage_price * req.quantity + fee:
         raise HTTPException(409, 'Mint price, gas budget or total ceiling is insufficient.')
-    if total > int(grant.scope['max_task_wei']) or total > grant.budget_wei - grant.spent_wei - grant.reserved_wei:
+    required=min(10**13,total) if getattr(req,'feed_approval_id',None) else total
+    if total > int(grant.scope['max_task_wei']) or required > grant.budget_wei - grant.spent_wei - grant.reserved_wei:
         raise HTTPException(409, 'Automatic policy budget is insufficient, including pending reservations.')
     snapshot = {
         'plan_id': req.plan_id, 'user_id': user_id, 'wallet_id': wallet.id, 'account': to_checksum_address(wallet.address),
@@ -368,7 +369,8 @@ async def release_reservation(db, task, actual=0):
     await settle(db,task,actual)
     auth = await db.get(MintAuthorization, task.authorization_id)
     grant = await db.get(AutomaticGrant, auth.grant_id)
-    grant.reserved_wei -= auth.total_spend_cap_wei
+    from app.services.auto_arm_funding import held
+    grant.reserved_wei -= await held(db,task,auth)
     grant.spent_wei += actual
     if task.copy_rule_id:
         from app.models import CopyRule

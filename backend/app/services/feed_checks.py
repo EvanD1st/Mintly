@@ -16,7 +16,8 @@ async def existing_mints(db, user, wallet, drops):
     from app.services.automatic import TERMINAL
     rows = (await db.execute(select(
         MintTask.id, MintTask.plan_id, MintTask.status, MintTask.scheduled_for_utc, MintTask.confirmed_at,
-        MintAuthorization.quantity, MintAuthorization.snapshot, MintTask.external_mint,
+        MintAuthorization.quantity, MintAuthorization.snapshot, MintTask.external_mint,MintTask.prepared_calldata,
+        MintTask.signed_tx_raw.is_not(None).label('signed_tx_raw'),
         Drop.chain_id, Drop.contract_address, Drop.mint_page_url, MintStage.stage_name,
     ).join(MintAuthorization, MintTask.authorization_id == MintAuthorization.id)
         .join(Drop, MintTask.drop_id == Drop.id)
@@ -42,8 +43,11 @@ async def existing_mints(db, user, wallet, drops):
                 except OpenSeaUnavailable:
                     matches = False
             if matches:
+                from app.services.auto_arm_funding import quantity
+                from types import SimpleNamespace
+                count=quantity(SimpleNamespace(prepared_calldata=row['prepared_calldata'],signed_tx_raw=row['signed_tx_raw']),row['quantity'])
                 result[drop.id] = dict(id=row['id'], plan_id=row['plan_id'], wallet_id=wallet.id,
-                    status=row['status'], quantity=(row['external_mint'] or {}).get('quantity',row['quantity']),
+                    status=row['status'], quantity=(row['external_mint'] or {}).get('quantity',count),
                     external_mint=row['external_mint'],
                     stage_name=scope.get('stage_name') or row['stage_name'],
                     scheduled_for_utc=aware(row['scheduled_for_utc']),
@@ -160,7 +164,7 @@ async def step(factory):
             # Keep the last successful check time/result for an explicitly labelled
             # history summary, but invalidate freshness on failure. Retry backoff is
             # independent of cache expiry, so visible polling cannot defeat it.
-            row.result={**(row.result or {}),'note':'Eligibility could not be verified. Retry the check.'}
+            row.result={**(row.result or {}),'note':str(error)+' Retry the eligibility check.'}
             if not row.checked_at:row.checked_at=finished
             row.status='queued' if row.attempts<3 else 'unverified'
             row.next_attempt_at=finished+timedelta(seconds=max(60,error.retry_after_seconds or 0))

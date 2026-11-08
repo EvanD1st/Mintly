@@ -63,6 +63,7 @@ async def authorize(snapshot,db,req):
 
 
 async def refresh_task(db,task_id,vault):
+    from app.services.mint_plans import aware
     from app.models import MintTask,MintAuthorization,Wallet
     from app.services import automatic
     await automatic.lock_execution(db)
@@ -83,6 +84,9 @@ async def refresh_task(db,task_id,vault):
         if journal.execute('SELECT 1 FROM signed WHERE task=?',(task.id,)).fetchone():
             raise PhaseChanged('A signed transaction already exists; its timing cannot be rewritten.')
     finally:journal.close()
+    if original.get('feed_approval_id') and aware(task.scheduled_for_utc)>datetime.now(timezone.utc):
+        from app.services.auto_arm_funding import resize,queued,held
+        await resize(db,task,auth,grant,min(queued(auth),await held(db,task,auth)))
     await db.commit()
     changed=None
     try:effective=await resolve(original)
