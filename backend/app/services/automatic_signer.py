@@ -87,10 +87,11 @@ async def preflight_task(db, task_id, vault=None):
                 execution = await automatic.prepare_mint(web3, s)
             balance = await web3.eth.get_balance(to_checksum_address(s['account']), 'pending')
             if balance < s['total_cap_wei']:
-                note = f'Balance is below the approved maximum. Add {symbol(grant.chain_id)} before mint time.'
+                note = ('Gas cost and available balance will be checked at opening; the saved gas limit is a maximum.'
+                    if s.get('feed_approval_id') else f'Balance is below the approved maximum. Add {symbol(grant.chain_id)} before mint time.')
         except OpenSeaUnavailable as error:
             from app.services.mint_diagnostics import PREPARATION_REASONS
-            note = PREPARATION_REASONS.get(error.mint_reason,'Wallet-specific instructions are not ready. Another check will run at mint time.')
+            note = PREPARATION_REASONS.get(error.mint_reason,str(error))
         except Exception:
             note = 'Advance checks unavailable. Mint-time checks are still required.'
     finally:
@@ -319,7 +320,19 @@ async def prepare_task(db, task_id, vault=None):
             if previous['intent'] != intent:
                 raise ValueError('Attempt to change a previously signed task')
             raw, tx_hash, nonce = previous['raw'], previous['hash'], previous['nonce']
+            from app.services.auto_arm_funding import fund
+            await fund(db,task,auth,grant,restore=True,journal=journal)
+            if s.get('feed_approval_id'):
+                from eth_account._utils.legacy_transactions import Transaction
+                from eth_abi import decode
+                data=Transaction.from_bytes(bytes.fromhex(raw.removeprefix('0x'))).data
+                count=decode(['address','address','address','uint256'],data[4:132])[-1]
+                if not 1<=count<=auth.quantity:raise ValueError('Signed quantity exceeds approval')
+                s={**s,'quantity':count}
         else:
+            from app.services.auto_arm_funding import fund,adapt_quantity
+            await fund(db,task,auth,grant,journal=journal,now=datetime.now(timezone.utc))
+            s=await adapt_quantity(db,journal,task,s,grant,web3)
             from app.services import daily_budget
             await daily_budget.check_private(db,journal,vault,user,task,auth,web3,datetime.now(timezone.utc))
             # Independently reconcile the signer's lifetime budget; API DB edits cannot reset it.
@@ -435,7 +448,7 @@ async def prepare_task(db, task_id, vault=None):
         task.status = 'prepared'
         task.next_attempt_at = None
         task.failure_reason = None
-        task.prepared_calldata = json.dumps(s.get('execution')) if s.get('execution') else None
+        task.prepared_calldata = json.dumps({'quantity':s['quantity'],'execution':s.get('execution')})
         await db.commit()  # signed payload and hash durable before scheduler may broadcast
         return {'task_id': task.id, 'status': task.status, 'hash': tx_hash}
     finally:
@@ -515,6 +528,8 @@ async def refresh_schedule(task_id:str,db=Depends(get_db)):
     try:return await refresh_task(db,task_id,CustodyVault())
     except PhaseChanged as error:
         await db.rollback();raise HTTPException(409,str(error)) from None
+    except OpenSeaUnavailable as error:
+        await db.rollback();raise HTTPException(503,str(error)) from None
     except Exception:
         await db.rollback();raise HTTPException(503,'Schedule checks are temporarily unavailable; approval unchanged.') from None
 

@@ -1,0 +1,99 @@
+"""Small queued holds; full authorized liability is funded only at opening."""
+import json
+from datetime import datetime, timezone
+from fastapi import HTTPException
+from sqlalchemy import select
+from app.models import DailyDebit, MintTask, MintAuthorization
+from app.services.mint_plans import aware
+
+QUEUED_WEI=10**13  # 0.00001 of the network's native gas token, not a gas ceiling.
+
+def queued(auth):
+    return min(QUEUED_WEI,auth.total_spend_cap_wei) if auth.snapshot.get('feed_approval_id') else auth.total_spend_cap_wei
+
+async def held(db,task,auth):
+    debit=await db.get(DailyDebit,task.id)
+    return debit.maximum_wei if debit else auth.total_spend_cap_wei
+
+async def resize(db,task,auth,grant,amount,*,restore=False):
+    old=await held(db,task,auth)
+    delta=amount-old
+    if not restore and delta>0 and delta>grant.budget_wei-grant.spent_wei-grant.reserved_wei:
+        raise HTTPException(503,'Waiting for earlier mints to release signing allowance. No transaction sent.')
+    debit=await db.get(DailyDebit,task.id)
+    if not debit:
+        from app.services.daily_budget import day_key
+        from app.services.networks import symbol
+        debit=DailyDebit(task_id=task.id,user_id=grant.user_id,day=day_key(task.scheduled_for_utc),
+            maximum_wei=amount,currency=symbol(grant.chain_id))
+        db.add(debit)
+    else:
+        if debit.actual_wei is not None:raise ValueError('A settled reservation cannot be resized')
+        debit.maximum_wei=amount
+    grant.reserved_wei+=delta
+    if grant.reserved_wei<0:raise ValueError('Reservation accounting invariant violated')
+    await db.flush()
+
+async def fund(db,task,auth,grant,*,restore=False,journal=None,now=None):
+    if not auth.snapshot.get('feed_approval_id'):return
+    if not restore:
+        now=now or datetime.now(timezone.utc)
+        if aware(task.scheduled_for_utc)>now:raise HTTPException(503,'Waiting for this mint to open.')
+        earlier=(await db.scalars(select(MintTask).where(MintTask.wallet_id==task.wallet_id,
+            MintTask.id!=task.id,MintTask.status.in_(('armed','preparing')),
+            MintTask.scheduled_for_utc<=now).order_by(MintTask.scheduled_for_utc,MintTask.created_at,MintTask.id))).all()
+        for other in earlier:
+            a=await db.get(MintAuthorization,other.authorization_id)
+            if not a or not a.snapshot.get('feed_approval_id') or a.snapshot['chain_id']!=auth.snapshot['chain_id']:continue
+            if (aware(other.scheduled_for_utc),aware(other.created_at),other.id)<(aware(task.scheduled_for_utc),aware(task.created_at),task.id):
+                raise HTTPException(503,'An earlier-opening Auto-Arming mint has priority. Waiting to retry.')
+        # Only signer-verified unsigned future holds may yield to this opening.
+        if journal is not None:
+            later=(await db.execute(select(MintTask,MintAuthorization).join(MintAuthorization,
+                MintTask.authorization_id==MintAuthorization.id).where(MintAuthorization.grant_id==grant.id,
+                MintTask.id!=task.id,MintTask.status.in_(('armed','preparing')),
+                MintTask.signed_tx_raw.is_(None),MintTask.transaction_hash.is_(None)))).all()
+            for other,a in later:
+                if not a.snapshot.get('feed_approval_id') or journal.execute('SELECT 1 FROM signed WHERE task=?',(other.id,)).fetchone():continue
+                if (aware(other.scheduled_for_utc),aware(other.created_at),other.id)<(aware(task.scheduled_for_utc),aware(task.created_at),task.id):continue
+                old=await held(db,other,a)
+                if old>queued(a):await resize(db,other,a,grant,queued(a))
+                if auth.total_spend_cap_wei-await held(db,task,auth)>grant.budget_wei-grant.spent_wei-grant.reserved_wei:
+                    await resize(db,other,a,grant,0)
+    await resize(db,task,auth,grant,auth.total_spend_cap_wei,restore=restore)
+
+def quantity(task,authorized):
+    try:
+        value=json.loads(task.prepared_calldata or '{}').get('quantity')
+        if task.signed_tx_raw and isinstance(value,int) and 1<=value<=authorized:return value
+    except (ValueError,TypeError,AttributeError):pass
+    return authorized
+
+async def adapt_quantity(db,journal,task,s,grant,web3):
+    if not s.get('feed_approval_id'):return s
+    pin=journal.execute('SELECT snapshot FROM feed_approvals WHERE id=?',(s['feed_approval_id'],)).fetchone()
+    if not pin or json.loads(pin['snapshot']).get('quantity_mode')!='wallet_max':return s
+    from eth_abi import encode,decode
+    from eth_utils import keccak,to_checksum_address
+    from app.services.opensea import OpenSeaUnavailable
+    minted,supply,maximum=decode(['uint256']*3,await web3.eth.call({'to':to_checksum_address(s['contract']),
+        'data':keccak(text='getMintStats(address)')[:4]+encode(['address'],[to_checksum_address(s['account'])])}))
+    if supply>=maximum:raise OpenSeaUnavailable('This collection is sold out. No transaction was sent.',409,mint_reason='supply_exhausted')
+    if s['mint_kind']=='public':
+        remaining=max(0,s['phase_identity']['max_per_wallet']-minted)
+    else:
+        from app.models import Wallet
+        from app.services.mint_stage_choice import wallet_stages
+        from app.services.opensea import collection_slug
+        from app.services.phase_identity import stage_key
+        wallet=await db.get(Wallet,grant.wallet_id)
+        result,_=await wallet_stages(db,wallet,collection_slug(s['mint_page_url']),grant.chain_id,s['contract'])
+        phase=next((p for p in result['stages'] if stage_key(p['id'])==stage_key(s['phase_identity']['uuid'])),None)
+        if not phase or phase['eligibility']!='eligible' or phase.get('remaining') is None:
+            raise OpenSeaUnavailable('Wallet eligibility is not verified for this phase. Waiting to retry.',503)
+        remaining=phase['remaining']
+    count=min(s['quantity'],remaining,maximum-supply)
+    if count<=0:raise OpenSeaUnavailable('This wallet has no remaining mint allowance.',409,mint_reason='wallet_limit')
+    if count!=s['quantity']:
+        s={**s,'quantity':count};s.pop('execution',None)
+    return s

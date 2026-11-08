@@ -65,7 +65,7 @@ async def step(session_factory=AsyncSessionLocal, sign=request_signature, *, now
             MintTask.scheduled_for_utc <= now,
             or_(User.automation_paused.is_(False), MintTask.signed_tx_raw.is_not(None)),
         ).order_by(case((MintTask.status.in_(['armed','preparing','prepared']), 0), else_=1),
-            MintTask.expires_at_utc, MintTask.id).limit(1))).scalar_one_or_none()
+            MintTask.scheduled_for_utc, MintTask.created_at, MintTask.id).limit(1))).scalar_one_or_none()
         if not task:
             await db.commit()
             return False
@@ -446,13 +446,17 @@ async def schedule_step(session_factory=AsyncSessionLocal,check=None,*,now=None)
                 result.raise_for_status()
     for task_id in ids:
         try:await check(task_id)
-        except Exception:
+        except Exception as error:
             async with session_factory() as db:
                 await automatic.lock_execution(db)
                 task=await db.get(MintTask,task_id)
                 if task and task.status=='armed' and not task.signed_tx_raw:
                     task.schedule_checked_at=now
-                    task.schedule_note='Opening check delayed. Your approved limits remain unchanged.'
+                    response=getattr(error,'response',None)
+                    try:detail=response.json().get('detail') if response is not None else None
+                    except (ValueError,AttributeError):detail=None
+                    task.schedule_note=('Opening check delayed: '+detail if isinstance(detail,str) else
+                        'Opening check delayed. Your approved limits remain unchanged.')
                 await db.commit()
     return bool(ids)
 

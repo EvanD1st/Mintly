@@ -17,6 +17,7 @@ from app.services.opensea import OpenSeaUnavailable
 from app.services.mint_plans import aware
 from pydantic import BaseModel,Field
 from app.services.networks import symbol
+from app.services.auto_arm_funding import quantity as execution_quantity
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -149,7 +150,8 @@ async def arm_mint_task(req: ArmTaskRequest, user: User = Depends(get_current_us
         idempotency_key=key, request_hash=request_hash, execution_mode=automatic.MODE,
         scheduled_for_utc=datetime.fromtimestamp(snapshot.get('execute_at', snapshot['start']), timezone.utc),
         expires_at_utc=datetime.fromtimestamp(snapshot['expiry'], timezone.utc))
-    grant.reserved_wei += auth.total_spend_cap_wei
+    from app.services.auto_arm_funding import queued
+    grant.reserved_wei += queued(auth)
     db.add(auth)
     await db.flush()
     db.add(task)
@@ -176,7 +178,7 @@ async def task_response(db, task):
         stage_id=task.stage_id, status=task.status, schedule_note=task.schedule_note, is_demo=task.is_demo, created_at=aware(task.created_at),
         scheduled_for_utc=task.scheduled_for_utc,
         expires_at_utc=recovery.expires_at if recovery and recovery.activated_at else task.expires_at_utc,
-        quantity=auth.quantity, unit_price_eth=format_wei_to_eth(s['price_wei']),
+        quantity=execution_quantity(task,auth.quantity), unit_price_eth=format_wei_to_eth(s['price_wei']),
         fee_cap_eth=format_wei_to_eth(auth.max_fee_wei), total_cap_eth=format_wei_to_eth(auth.total_spend_cap_wei),
         drop_name=s['drop_name'], chain=s['chain'], chain_id=s['chain_id'], native_symbol=symbol(s['chain_id']), stage_name=s['stage_name'], icon_name='gem',
         time_wat_label=aware(task.scheduled_for_utc).astimezone(ZoneInfo('Africa/Lagos')).strftime('%d %b · %H:%M WAT'),
@@ -231,7 +233,7 @@ async def list_mint_queue(db: AsyncSession = Depends(get_db), user: User = Depen
         formatted.append(TaskSchema(
             id=task.id, plan_id=task.plan_id, wallet_id=task.wallet_id, drop_id=task.drop_id, stage_id=task.stage_id,
             status=task.status, schedule_note=task.schedule_note, is_demo=False, created_at=aware(task.created_at), scheduled_for_utc=task.scheduled_for_utc,
-            expires_at_utc=task.expires_at_utc, quantity=auth.quantity if auth else 1,
+            expires_at_utc=task.expires_at_utc, quantity=execution_quantity(task,auth.quantity) if auth else 1,
             unit_price_eth=stage.price_eth_str if stage else "",
             fee_cap_eth=format_wei_to_eth(auth.max_fee_wei) if auth else "0",
             total_cap_eth=format_wei_to_eth(auth.total_spend_cap_wei) if auth else "0",
