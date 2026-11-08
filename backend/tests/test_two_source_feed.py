@@ -235,10 +235,12 @@ async def test_midnight_wat_visibility_does_not_reannounce_previous_list(test_db
     assert not await feed_sources.daily_collections(test_db,date(2026,11,2))
 
 
-async def test_expiry_uses_postponed_private_task_without_cancelling_it(test_db,source_providers,monkeypatch):
+@pytest.mark.parametrize('hour,visible', [(12,True),(22,False)])
+async def test_expiry_uses_postponed_private_task_without_cancelling_it(test_db,source_providers,monkeypatch,hour,visible):
     users,wallets,drop,task,auth=await armed_fixture(test_db,monkeypatch)
     post=await import_item(test_db,item(1062,slug='test'))
-    now=datetime.now(timezone.utc)
+    # Exercise both a same-day opening and a postponement across WAT midnight.
+    now=datetime.now(timezone.utc).replace(hour=hour,minute=30,second=0,microsecond=0)
     day=now.astimezone(x_feed.daily_date.__globals__['WAT']).date()
     post.list_date=day-timedelta(days=1)
     original_post=await test_db.get(SourcePost,drop.source_post_id)
@@ -248,7 +250,7 @@ async def test_expiry_uses_postponed_private_task_without_cancelling_it(test_db,
     task.schedule_checked_at=now;task.scheduled_for_utc=now+timedelta(hours=1)
     await test_db.commit()
     groups=await feed_sources.daily_collections(test_db,day,now=now)
-    assert any(g['drop'].id==drop.id for g in groups)
+    assert any(g['drop'].id==drop.id for g in groups)==visible
     assert not await feed_sources.daily_collections(test_db,day,now=now+timedelta(hours=2))
     await test_db.refresh(task)
     assert task.status=='armed' and task.authorization_id==auth.id
