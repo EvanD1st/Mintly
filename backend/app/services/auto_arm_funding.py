@@ -3,7 +3,7 @@ import json
 from datetime import datetime, timezone
 from fastapi import HTTPException
 from sqlalchemy import select
-from app.models import DailyDebit, MintTask, MintAuthorization
+from app.models import DailyDebit, MintTask, MintAuthorization, AutomaticGrant, User
 from app.services.mint_plans import aware
 
 QUEUED_WEI=10**13  # 0.00001 of the network's native gas token, not a gas ceiling.
@@ -49,17 +49,29 @@ async def fund(db,task,auth,grant,*,restore=False,journal=None,now=None):
                 raise HTTPException(503,'An earlier-opening Auto-Arming mint has priority. Waiting to retry.')
         # Only signer-verified unsigned future holds may yield to this opening.
         if journal is not None:
+            from app.services import daily_budget
+            from app.services.networks import symbol
+            currency=symbol(grant.chain_id)
+            owner=await daily_budget.limit_owner(db,await db.get(User,grant.user_id),currency)
             later=(await db.execute(select(MintTask,MintAuthorization).join(MintAuthorization,
-                MintTask.authorization_id==MintAuthorization.id).where(MintAuthorization.grant_id==grant.id,
+                MintTask.authorization_id==MintAuthorization.id).join(AutomaticGrant,MintAuthorization.grant_id==AutomaticGrant.id)
+                .where(AutomaticGrant.user_id==grant.user_id,
                 MintTask.id!=task.id,MintTask.status.in_(('armed','preparing')),
                 MintTask.signed_tx_raw.is_(None),MintTask.transaction_hash.is_(None)))).all()
             for other,a in later:
                 if not a.snapshot.get('feed_approval_id') or journal.execute('SELECT 1 FROM signed WHERE task=?',(other.id,)).fetchone():continue
                 if (aware(other.scheduled_for_utc),aware(other.created_at),other.id)<(aware(task.scheduled_for_utc),aware(task.created_at),task.id):continue
+                other_grant=await db.get(AutomaticGrant,a.grant_id)
+                if a.grant_id!=grant.id and symbol(other_grant.chain_id)!=currency:continue
                 old=await held(db,other,a)
-                if old>queued(a):await resize(db,other,a,grant,queued(a))
-                if auth.total_spend_cap_wei-await held(db,task,auth)>grant.budget_wei-grant.spent_wei-grant.reserved_wei:
-                    await resize(db,other,a,grant,0)
+                if old>queued(a):await resize(db,other,a,other_grant,queued(a))
+                policy_shortage=(a.grant_id==grant.id and
+                    auth.total_spend_cap_wei-await held(db,task,auth)>grant.budget_wei-grant.spent_wei-grant.reserved_wei)
+                daily_shortage=False
+                if owner.daily_limit_wei is not None:
+                    used=await daily_budget.usage(db,grant.user_id,daily_budget.day_key(now),excluding=task.id,currency=currency)
+                    daily_shortage=used['spent_wei']+used['reserved_wei']+auth.total_spend_cap_wei>owner.daily_limit_wei
+                if policy_shortage or daily_shortage:await resize(db,other,a,other_grant,0)
     await resize(db,task,auth,grant,auth.total_spend_cap_wei,restore=restore)
 
 def quantity(task,authorized):
