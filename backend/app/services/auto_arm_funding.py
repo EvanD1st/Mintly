@@ -6,10 +6,22 @@ from sqlalchemy import select
 from app.models import DailyDebit, MintTask, MintAuthorization, AutomaticGrant, User
 from app.services.mint_plans import aware
 
-QUEUED_WEI=10**13  # 0.00001 of the network's native gas token, not a gas ceiling.
+QUEUED_WEI=10**13  # ETH queued hold, not a gas ceiling.
 
-def queued(auth):
-    return min(QUEUED_WEI,auth.total_spend_cap_wei) if auth.snapshot.get('feed_approval_id') else auth.total_spend_cap_wei
+async def queued_amount(chain_id, maximum, *, strict=True):
+    from app.services.networks import symbol
+    currency=symbol(chain_id)
+    if currency=='ETH':return min(QUEUED_WEI,maximum)
+    from app.services.reservation_quote import dollar_native_wei
+    amount=await dollar_native_wei(currency)
+    if amount is None:
+        if strict:raise HTTPException(503,f'{currency} price is unavailable. Auto-Arming will retry when its $1 reservation can be checked.')
+        return maximum  # Preserve existing holds if a fresh quote is unavailable.
+    return min(amount,maximum)
+
+async def queued(auth, *, strict=False):
+    if not auth.snapshot.get('feed_approval_id'):return auth.total_spend_cap_wei
+    return await queued_amount(auth.snapshot['chain_id'],auth.total_spend_cap_wei,strict=strict)
 
 async def held(db,task,auth):
     debit=await db.get(DailyDebit,task.id)
@@ -64,7 +76,8 @@ async def fund(db,task,auth,grant,*,restore=False,journal=None,now=None):
                 other_grant=await db.get(AutomaticGrant,a.grant_id)
                 if a.grant_id!=grant.id and symbol(other_grant.chain_id)!=currency:continue
                 old=await held(db,other,a)
-                if old>queued(a):await resize(db,other,a,other_grant,queued(a))
+                target=await queued(a)
+                if old>target:await resize(db,other,a,other_grant,target)
                 policy_shortage=(a.grant_id==grant.id and
                     auth.total_spend_cap_wei-await held(db,task,auth)>grant.budget_wei-grant.spent_wei-grant.reserved_wei)
                 daily_shortage=False

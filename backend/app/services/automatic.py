@@ -216,7 +216,8 @@ async def make_snapshot(db, req, user_id, *, presale_mint=None):
             raise HTTPException(409, 'Choose a future mint time within the stage and before the approval expires.')
     if price < stage_price or fee <= 0 or total < stage_price * req.quantity + fee:
         raise HTTPException(409, 'Mint price, gas budget or total ceiling is insufficient.')
-    required=min(10**13,total) if getattr(req,'feed_approval_id',None) else total
+    from app.services.auto_arm_funding import queued_amount
+    required=await queued_amount(drop.chain_id,total) if getattr(req,'feed_approval_id',None) else total
     if total > int(grant.scope['max_task_wei']) or required > grant.budget_wei - grant.spent_wei - grant.reserved_wei:
         raise HTTPException(409, 'Automatic policy budget is insufficient, including pending reservations.')
     snapshot = {

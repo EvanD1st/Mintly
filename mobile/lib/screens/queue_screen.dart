@@ -40,8 +40,7 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
       'submitted',
       'uncertain',
     ];
-    final activePlans = state.queue
-        .where((task) => activeStatuses.contains(task.status))
+    final representedPlans = state.queue
         .map((task) => task.planId)
         .whereType<String>()
         .toSet();
@@ -50,7 +49,7 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
           (p) =>
               (_filter == 'all' || _filter == 'review') &&
               widget.taskId == null &&
-              !activePlans.contains(p.id),
+              !representedPlans.contains(p.id),
         )
         .toList();
     final tasks = state.queue

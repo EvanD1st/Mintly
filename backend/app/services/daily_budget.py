@@ -69,10 +69,10 @@ async def usage(db, user_id, day=None, excluding=None, currency='ETH'):
         'reserved_wei':sum(r.maximum_wei for r in rows if r.actual_wei is None)}
 
 
-async def reserve(db, task, auth, user_id, *, now=None):
+async def reserve(db, task, auth, user_id, *, now=None, amount=None):
     from app.services.auto_arm_funding import queued
     existing=await db.get(DailyDebit,task.id)
-    amount=existing.maximum_wei if existing else queued(auth)
+    amount=existing.maximum_wei if existing else (await queued(auth,strict=True) if amount is None else amount)
     user = await db.get(User,user_id,populate_existing=True)
     currency = symbol(auth.snapshot['chain_id'])
     user = await limit_owner(db,user,currency)
