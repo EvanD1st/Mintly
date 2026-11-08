@@ -220,6 +220,11 @@ async def revoke(db,row,vault):
                 # disable new broadcasts, and continue receipt tracking.
                 if signed:
                     task.signed_tx_raw=signed['raw'];task.transaction_hash=signed['hash'];task.assigned_nonce=signed['nonce']
+                from app.services.auto_arm_funding import fund,signed_quantity
+                auth=await db.get(MintAuthorization,task.authorization_id)
+                grant=await db.get(AutomaticGrant,auth.grant_id)
+                await fund(db,task,auth,grant,restore=True,journal=journal)
+                task.prepared_calldata=json.dumps({'quantity':signed_quantity(task.signed_tx_raw,auth.quantity)})
                 task.status='uncertain';task.broadcast_disabled_at=datetime.now(timezone.utc)
                 task.failure_reason='Automation disabled. An existing signed transaction remains tracked.'
             else:

@@ -44,6 +44,31 @@ async def test_tiny_reservation_is_released_exactly_on_disarm(free_feed):
         assert (await db.get(DailyDebit,task_id)).actual_wei==0
 
 
+async def test_turn_off_restores_full_liability_after_lost_database_commit(free_feed,monkeypatch):
+    f=free_feed;lab=f['lab'];task_id,_=await arm_free(f)
+    lab.w.provider.make_request('evm_setNextBlockTimestamp',[lab.start]);lab.w.provider.make_request('evm_mine',[])
+    class Clock(datetime):
+        @classmethod
+        def now(cls,tz=None):return datetime.fromtimestamp(lab.w.eth.get_block('latest').timestamp,tz)
+    monkeypatch.setattr('app.services.automatic_signer.datetime',Clock)
+    await lab.sign(task_id)
+    async with lab.factory() as db:
+        task=await db.get(MintTask,task_id);raw=task.signed_tx_raw
+        auth=await db.get(MintAuthorization,task.authorization_id);cap=auth.total_spend_cap_wei
+        task.signed_tx_raw=None;task.transaction_hash=None;task.status='armed'
+        debit=await db.get(DailyDebit,task_id);grant=await db.get(AutomaticGrant,lab.grant.id)
+        grant.reserved_wei-=debit.maximum_wei-funding.QUEUED_WEI;debit.maximum_wei=funding.QUEUED_WEI
+        await db.commit()
+    response=await lab.client.delete('/api/automatic/free-drops/'+f['approval']['id'])
+    assert response.status_code==200,response.text
+    async with lab.factory() as db:
+        task=await db.get(MintTask,task_id)
+        assert task.status=='uncertain' and task.signed_tx_raw==raw and task.broadcast_disabled_at
+        assert (await db.get(AutomaticGrant,lab.grant.id)).reserved_wei==cap
+        assert (await db.get(DailyDebit,task_id)).maximum_wei==cap
+    assert lab.nft.functions.totalSupply().call()==0
+
+
 @pytest.mark.parametrize('limiter',['policy','daily'])
 async def test_earlier_opening_preempts_later_unsigned_reservation(free_feed,limiter):
     f=free_feed;lab=f['lab'];late_id,_=await arm_free(f)

@@ -323,11 +323,8 @@ async def prepare_task(db, task_id, vault=None):
             from app.services.auto_arm_funding import fund
             await fund(db,task,auth,grant,restore=True,journal=journal)
             if s.get('feed_approval_id'):
-                from eth_account._utils.legacy_transactions import Transaction
-                from eth_abi import decode
-                data=Transaction.from_bytes(bytes.fromhex(raw.removeprefix('0x'))).data
-                count=decode(['address','address','address','uint256'],data[4:132])[-1]
-                if not 1<=count<=auth.quantity:raise ValueError('Signed quantity exceeds approval')
+                from app.services.auto_arm_funding import signed_quantity
+                count=signed_quantity(raw,auth.quantity)
                 s={**s,'quantity':count}
         else:
             from app.services.auto_arm_funding import fund,adapt_quantity
