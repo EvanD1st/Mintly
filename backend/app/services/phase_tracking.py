@@ -86,7 +86,7 @@ async def refresh_task(db,task_id,vault):
     finally:journal.close()
     if original.get('feed_approval_id') and aware(task.scheduled_for_utc)>datetime.now(timezone.utc):
         from app.services.auto_arm_funding import resize,queued,held
-        await resize(db,task,auth,grant,min(queued(auth),await held(db,task,auth)))
+        await resize(db,task,auth,grant,min(await queued(auth),await held(db,task,auth)))
     await db.commit()
     changed=None
     try:effective=await resolve(original)

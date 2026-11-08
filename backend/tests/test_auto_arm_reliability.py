@@ -143,6 +143,7 @@ async def test_max_quantity_shrinks_to_live_supply_and_replays_same_signature(fr
     if competing_quantity==100:
         response=await lab.signer_client.post('/tasks/'+task_id+'/prepare')
         assert response.status_code==409 and 'sold out' in response.text,response.text
+        assert response.headers['X-Mintly-Reason']=='supply_exhausted'
         async with lab.factory() as db:
             task=await db.get(MintTask,task_id)
             assert task.signed_tx_raw is None

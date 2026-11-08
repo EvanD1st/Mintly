@@ -26,9 +26,9 @@ async def require_unminted(web3, contract, account):
     minted, supply, maximum = decode(['uint256'] * 3, await web3.eth.call({
         'to': contract, 'data': keccak(text='getMintStats(address)')[:4] + encode(['address'], [account])}))
     if minted:
-        raise HTTPException(409, f'Already minted {minted} from this collection. Copy skipped to prevent another mint.')
+        raise HTTPException(409, f'Already minted {minted} from this collection. No additional mint was sent.', headers={'X-Mintly-Reason':'wallet_limit'})
     if supply >= maximum:
-        raise HTTPException(409, 'This collection is sold out. No transaction sent.')
+        raise HTTPException(409, 'This collection is sold out. No transaction sent.', headers={'X-Mintly-Reason':'supply_exhausted'})
 
 
 def deadline(event, rule):

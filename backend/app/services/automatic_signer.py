@@ -266,7 +266,7 @@ async def prepare_task(db, task_id, vault=None):
                     try:
                         await free_copy.require_unminted(web3, s['contract'], s['account'])
                     except HTTPException as error:
-                        raise OpenSeaUnavailable(error.detail, 409, mint_reason='wallet_limit') from None
+                        raise OpenSeaUnavailable(error.detail, 409, mint_reason=(error.headers or {}).get('X-Mintly-Reason','wallet_limit')) from None
                 mode = copy_mints.quantity_mode(r)
                 group = copy_mints.budget_group(r)
                 if group is not None:
@@ -306,7 +306,7 @@ async def prepare_task(db, task_id, vault=None):
             await feed_automation.verify_task(db,journal,task,s,grant)
             from app.services.free_copy import require_unminted
             try:await require_unminted(web3,s['contract'],s['account'])
-            except HTTPException as error:raise OpenSeaUnavailable(error.detail,409,mint_reason='wallet_limit') from None
+            except HTTPException as error:raise OpenSeaUnavailable(error.detail,409,mint_reason=(error.headers or {}).get('X-Mintly-Reason','wallet_limit')) from None
         block = await web3.eth.get_block('latest')
         now = max(int(datetime.now(timezone.utc).timestamp()), block.timestamp)
         if now >= min(s['expiry'], policy['expires_at']):

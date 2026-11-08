@@ -151,13 +151,16 @@ async def arm_mint_task(req: ArmTaskRequest, user: User = Depends(get_current_us
         scheduled_for_utc=datetime.fromtimestamp(snapshot.get('execute_at', snapshot['start']), timezone.utc),
         expires_at_utc=datetime.fromtimestamp(snapshot['expiry'], timezone.utc))
     from app.services.auto_arm_funding import queued
-    grant.reserved_wei += queued(auth)
+    queued_reserve=await queued(auth,strict=True)
+    if queued_reserve>grant.budget_wei-grant.spent_wei-grant.reserved_wei:
+        raise HTTPException(409,'Automatic policy budget is insufficient, including pending reservations.')
+    grant.reserved_wei += queued_reserve
     db.add(auth)
     await db.flush()
     db.add(task)
     await db.flush()
     from app.services.daily_budget import reserve
-    await reserve(db,task,auth,user.id)
+    await reserve(db,task,auth,user.id,amount=queued_reserve)
     if req.copy_event_id:
         from app.models import CopyEvent
         await db.flush()
