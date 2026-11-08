@@ -44,7 +44,8 @@ async def test_tiny_reservation_is_released_exactly_on_disarm(free_feed):
         assert (await db.get(DailyDebit,task_id)).actual_wei==0
 
 
-async def test_earlier_opening_preempts_later_unsigned_reservation(free_feed):
+@pytest.mark.parametrize('limiter',['policy','daily'])
+async def test_earlier_opening_preempts_later_unsigned_reservation(free_feed,limiter):
     f=free_feed;lab=f['lab'];late_id,_=await arm_free(f)
     async with lab.factory() as db:
         late=await db.get(MintTask,late_id);a=await db.get(MintAuthorization,late.authorization_id)
@@ -62,7 +63,9 @@ async def test_earlier_opening_preempts_later_unsigned_reservation(free_feed):
         grant.reserved_wei+=funding.QUEUED_WEI
         # Simulate a legacy 4pm hold that filled almost all the policy.
         await funding.resize(db,late,a,grant,a.total_spend_cap_wei)
-        grant.spent_wei=grant.budget_wei-a.total_spend_cap_wei-funding.QUEUED_WEI
+        if limiter=='policy':grant.spent_wei=grant.budget_wei-a.total_spend_cap_wei-funding.QUEUED_WEI
+        else:
+            user=await db.get(User,lab.user.id);user.daily_limit_wei=a.total_spend_cap_wei
         now=datetime.now(timezone.utc)+timedelta(hours=3)
         journal=sqlite3.connect(':memory:');journal.execute('CREATE TABLE signed(task TEXT)')
         try:
@@ -70,14 +73,16 @@ async def test_earlier_opening_preempts_later_unsigned_reservation(free_feed):
                 await funding.fund(db,late,a,grant,journal=journal,now=now)
             assert 'priority' in caught.value.detail
             journal.execute('INSERT INTO signed VALUES (?)',(late.id,))
-            with pytest.raises(HTTPException):
-                await funding.fund(db,early,early_auth,grant,journal=journal,now=now)
+            if limiter=='policy':
+                with pytest.raises(HTTPException):
+                    await funding.fund(db,early,early_auth,grant,journal=journal,now=now)
             assert (await db.get(DailyDebit,late.id)).maximum_wei==a.total_spend_cap_wei
             journal.execute('DELETE FROM signed')
             await funding.fund(db,early,early_auth,grant,journal=journal,now=now)
             assert (await db.get(DailyDebit,early.id)).maximum_wei==a.total_spend_cap_wei
             assert (await db.get(DailyDebit,late.id)).maximum_wei<=funding.QUEUED_WEI
             assert grant.reserved_wei+grant.spent_wei<=grant.budget_wei
+            if limiter=='daily':assert (await db.get(DailyDebit,late.id)).maximum_wei==0
         finally:journal.close()
 
 
