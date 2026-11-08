@@ -81,6 +81,13 @@ def quantity(task,authorized):
     except (ValueError,TypeError,AttributeError):pass
     return authorized
 
+def signed_quantity(raw,maximum):
+    from eth_account._utils.legacy_transactions import Transaction
+    data=Transaction.from_bytes(bytes.fromhex(raw.removeprefix('0x'))).data
+    count=int.from_bytes(data[100:132],'big') if len(data)>=132 else 0
+    if not 1<=count<=maximum:raise ValueError('Signed quantity exceeds approval')
+    return count
+
 async def adapt_quantity(db,journal,task,s,grant,web3):
     if not s.get('feed_approval_id'):return s
     pin=journal.execute('SELECT snapshot FROM feed_approvals WHERE id=?',(s['feed_approval_id'],)).fetchone()
