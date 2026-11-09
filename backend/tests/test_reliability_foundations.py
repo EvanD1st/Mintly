@@ -204,14 +204,19 @@ async def test_copy_activity_uses_task_lifecycle_and_detection_time_for_latency(
 
 
 @pytest.mark.parametrize('reason,warning,review',[('upstream_access_denied',True,True),('insufficient_funds',False,False),('invalid_proof',False,True)])
-async def test_copy_preparation_failure_before_task_is_visible_without_exposing_wallet_data(copying,reason,warning,review):
+async def test_copy_preparation_failure_before_task_is_visible_without_exposing_wallet_data(copying,monkeypatch,reason,warning,review):
     from app.models import CopyEvent
+    from app.services import copy_mints
+    from app.services.opensea import OpenSeaUnavailable
     c=copying;lab=c['lab']
+    async def reject_preparation(*args,**kwargs):
+        raise OpenSeaUnavailable('Simulated preparation rejection.',503,mint_reason=reason)
+    monkeypatch.setattr(copy_mints,'arm_event',reject_preparation)
     await c['approve']();await c['mint']();await c['scan']()
     now=datetime.now(timezone.utc)
     async with lab.factory() as db:
-        event=await db.scalar(select(CopyEvent));event.last_error_category=reason
-        event.last_checked_at=now;event.status='skipped';await db.commit()
+        event=await db.scalar(select(CopyEvent))
+        assert event.task_id is None and event.last_error_category==reason
         result=await reliability.report(db,now=now+timedelta(seconds=1))
         assert result['copy_unarmed_reasons']=={reason:1}
         assert bool(result['incidents'])==warning
