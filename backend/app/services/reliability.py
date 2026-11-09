@@ -206,7 +206,9 @@ async def report(db,*,hours=24,now=None):
         .where(CopyEvent.created_at>=since,CopyEvent.created_at<now,CopyEvent.task_id.is_(None),
             CopyEvent.last_error_category.is_not(None),CopyWatch.archived_at.is_(None),
             User.is_active.is_(True),User.deleted_at.is_(None),User.automation_paused.is_(False)))).mappings().all()
-    copy_failures=SERVICE_REASONS|MARKET_REASONS|OPERATOR_REASONS|{'temporary_checks_unavailable','temporary_preparation_error','validation_rejected'}
+    from app.services.mint_diagnostics import PREPARATION_REASONS
+    copy_failures=set(PREPARATION_REASONS)|SERVICE_REASONS|MARKET_REASONS|OPERATOR_REASONS|{'temporary_checks_unavailable','temporary_preparation_error','validation_rejected',
+        'mint_instructions_unavailable','signer_validation_rejected','preparation_unavailable'}
     for r in copy_errors:
         reason=r['last_error_category']
         if reason not in copy_failures:continue  # Paused, watch-only and budget waits are intentional controls.

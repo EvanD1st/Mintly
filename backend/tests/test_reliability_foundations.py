@@ -191,8 +191,8 @@ async def test_copy_activity_uses_task_lifecycle_and_detection_time_for_latency(
         assert result['modes']['copy']['activity_to_submission']['p95_seconds']==3
 
 
-@pytest.mark.parametrize('reason,warning',[('upstream_access_denied',True),('insufficient_funds',False)])
-async def test_copy_preparation_failure_before_task_is_visible_without_exposing_wallet_data(copying,reason,warning):
+@pytest.mark.parametrize('reason,warning,review',[('upstream_access_denied',True,True),('insufficient_funds',False,False),('invalid_proof',False,True)])
+async def test_copy_preparation_failure_before_task_is_visible_without_exposing_wallet_data(copying,reason,warning,review):
     from app.models import CopyEvent
     c=copying;lab=c['lab']
     await c['approve']();await c['mint']();await c['scan']()
@@ -203,6 +203,6 @@ async def test_copy_preparation_failure_before_task_is_visible_without_exposing_
         result=await reliability.report(db,now=now+timedelta(seconds=1))
         assert result['copy_unarmed_reasons']=={reason:1}
         assert bool(result['incidents'])==warning
-        assert bool(result['copy_failures_needing_review'])==warning
+        assert bool(result['copy_failures_needing_review'])==review
         if warning:assert result['incidents'][0]['affected_copy_events']==1
         assert 'source_address' not in json.dumps(result,default=str)
