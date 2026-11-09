@@ -173,8 +173,8 @@ async def test_copy_activity_uses_task_lifecycle_and_detection_time_for_latency(
     from app.models import CopyEvent
     c=copying;lab=c['lab']
     await c['approve']();await c['mint']();await c['scan']()
-    assert await copy_mints.step(lab.factory)
     async with lab.factory() as db:
+        await copy_mints.process_copy_events(db,c['watch_id'],lab.w.eth.chain_id)
         event=await db.scalar(select(CopyEvent));task=await db.get(MintTask,event.task_id)
         task.status='failed';task.failure_reason='This collection is sold out. No transaction sent.'
         await db.commit()
