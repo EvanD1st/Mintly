@@ -10,6 +10,7 @@ import 'admin_screen.dart';
 import 'copy_mints_screen.dart';
 import 'history_screen.dart';
 import 'source_screen.dart';
+import 'reliability_screen.dart';
 import '../widgets/account_picker_card.dart';
 
 class AccountSettingsScreen extends ConsumerStatefulWidget {
@@ -185,6 +186,12 @@ class _AccountSettingsState extends ConsumerState<AccountSettingsScreen> {
             ]),
             if (api.isAdmin)
               _section('Administration', [
+                _link(
+                  'Mint reliability',
+                  'Attempts, timing and recurring failures.',
+                  const Icon(MintlyIcons.public),
+                  const ReliabilityScreen(),
+                ),
                 _link(
                   'Live source',
                   'Feed health and session diagnostics.',

@@ -5,8 +5,10 @@ LABELS = ('Checking wallet','Preparing','Sent','Included','Confirmed')
 
 
 def progress(task):
+    from app.services.mint_lifecycle import read_model
+    lifecycle=read_model(task)
     if task.status == 'already_minted':
-        return {'key':'confirmed', 'label':'Already minted', 'detail':task.failure_reason,
+        return {'key':'confirmed', 'label':'Already minted', 'detail':lifecycle['detail'],
             'steps':[], 'included_at':None, 'confirmed_at':None}
     terminal = task.status in ('failed','expired','disarmed','reverted')
     index = (4 if task.status == 'confirmed' else 3 if task.included_at or task.status == 'reverted' else
@@ -23,7 +25,8 @@ def progress(task):
         label = 'Included — waiting for confirmations' if task.inclusion_result == 'success' else 'Reverted — waiting for confirmations'
     if terminal:
         label = {'failed':'Preparation stopped' if not task.transaction_hash else 'Mint stopped','expired':'Mint window ended','disarmed':'Mint paused or cancelled','reverted':'Mint reverted'}[task.status]
-    return {'key':KEYS[index], 'label':label, 'detail':task.failure_reason if terminal or task.status in ('armed','uncertain') else None,
+        if lifecycle['reason_code']=='supply_exhausted':label=lifecycle['label']
+    return {'key':KEYS[index], 'label':label, 'detail':lifecycle['detail'] if terminal or task.status in ('armed','uncertain') else None,
         'steps':[{'key':key,'label':text,'state':('complete' if n < index or (n == index and task.status == 'confirmed') else
             'stopped' if terminal and n == index else 'current' if n == index else 'pending')}
             for n,(key,text) in enumerate(zip(KEYS,LABELS))],

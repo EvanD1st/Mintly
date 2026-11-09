@@ -15,6 +15,7 @@ from app.services import automatic, copy_mints as copying
 from app.services.mint_plans import aware
 from app.schemas.drop import DropSchema
 from app.services.mint_progress import progress as task_progress
+from app.services.mint_lifecycle import read_model
 from app.services.networks import symbol, require_currency
 
 router = APIRouter(prefix='/copy-mints', tags=['copy-mints'])
@@ -530,6 +531,7 @@ async def activity(watch_id: str | None = None, offset: int = Query(0, ge=0), li
         entries.append({'id': event.id, 'watch_id': event.watch_id, 'wallet_label': watch.label,
             'native_symbol': symbol(o['chain_id']),
             'progress':task_progress(task) if task else None,
+            'lifecycle':read_model(task) if task else None,
             'observed_at': event.created_at, 'observation': o,
             'status': 'skipped' if funding and unsigned else (task.status if task else event.status),
             'note': note, 'task_id': event.task_id,

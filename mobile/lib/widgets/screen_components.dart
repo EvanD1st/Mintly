@@ -149,8 +149,9 @@ class ScreenHeading extends StatelessWidget {
 
 class StatusBadge extends StatelessWidget {
   final String status;
+  final String? label;
   final bool compact;
-  const StatusBadge(this.status, {super.key, this.compact = false});
+  const StatusBadge(this.status, {super.key, this.compact = false, this.label});
   @override
   Widget build(BuildContext context) {
     final color = ['failed', 'reverted'].contains(status)
@@ -175,7 +176,7 @@ class StatusBadge extends StatelessWidget {
         border: Border.all(color: color.withValues(alpha: .3)),
       ),
       child: Text(
-        statusLabel(status),
+        label ?? statusLabel(status),
         style: TextStyle(
           color: filled ? const Color(0xFF102013) : color,
           fontSize: compact ? 10 : 12,
@@ -275,6 +276,7 @@ class NetworkBadge extends StatelessWidget {
 
 class CollectionHeader extends StatelessWidget {
   final String name, network, status;
+  final String? statusText;
   final Widget artwork;
   const CollectionHeader({
     super.key,
@@ -282,6 +284,7 @@ class CollectionHeader extends StatelessWidget {
     required this.artwork,
     this.network = '',
     this.status = '',
+    this.statusText,
   });
   @override
   Widget build(BuildContext context) => Row(
@@ -309,7 +312,8 @@ class CollectionHeader extends StatelessWidget {
               runSpacing: 4,
               children: [
                 if (network.isNotEmpty) NetworkBadge(network),
-                if (status.isNotEmpty) StatusBadge(status, compact: true),
+                if (status.isNotEmpty)
+                  StatusBadge(status, compact: true, label: statusText),
               ],
             ),
           ],

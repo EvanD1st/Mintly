@@ -674,7 +674,13 @@ class _HistoryState extends ConsumerState<HistoryScreen> {
                             ),
                           ),
                           if (status.isNotEmpty)
-                            StatusBadge(status, compact: true),
+                            StatusBadge(
+                              status,
+                              compact: true,
+                              label:
+                                  (data['lifecycle'] as Map?)?['label']
+                                      as String?,
+                            ),
                         ],
                       ),
                       const SizedBox(height: 5),

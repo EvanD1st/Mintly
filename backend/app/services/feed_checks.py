@@ -8,14 +8,14 @@ from app.services.opensea import OpenSeaClient,collection_slug,CHAINS,OpenSeaUna
 from app.services.mint_plans import aware
 from app.services.networks import advertised
 
-async def existing_mints(db, user, wallet, drops):
+async def existing_mints(db, user, wallet, drops, *, include_terminal=False):
     """Match confirmed or live tasks using the selected owner's collection identity."""
     if not wallet or not drops:
         return {}
     from app.models import MintTask, MintAuthorization, MintStage
-    from app.services.automatic import TERMINAL
+    from app.services.mint_lifecycle import ACTIVE,TERMINAL
     rows = (await db.execute(select(
-        MintTask.id, MintTask.plan_id, MintTask.status, MintTask.scheduled_for_utc, MintTask.confirmed_at,
+        MintTask.id, MintTask.plan_id, MintTask.status, MintTask.failure_reason, MintTask.scheduled_for_utc, MintTask.confirmed_at,
         MintAuthorization.quantity, MintAuthorization.snapshot, MintTask.external_mint,MintTask.prepared_calldata,
         MintTask.signed_tx_raw.is_not(None).label('signed_tx_raw'),
         Drop.chain_id, Drop.contract_address, Drop.mint_page_url, MintStage.stage_name,
@@ -24,10 +24,11 @@ async def existing_mints(db, user, wallet, drops):
         .join(MintStage, MintTask.stage_id == MintStage.id)
         .join(Wallet, MintTask.wallet_id == Wallet.id)
         .where(Wallet.user_id == user.id, Wallet.id == wallet.id,
-            MintTask.is_demo.is_(False), or_(MintTask.status.in_(('confirmed','already_minted')), MintTask.status.not_in(TERMINAL)))
+            MintTask.is_demo.is_(False), MintTask.status.in_(ACTIVE|TERMINAL if include_terminal else ACTIVE|{'confirmed','already_minted'}),
+            or_(MintTask.status.in_(('confirmed','already_minted')), MintTask.archived_at.is_(None)))
         # A successful mint remains visible even after archiving or a later failed attempt.
-        .order_by(case((MintTask.status.in_(('confirmed','already_minted')), 0), else_=1),
-            MintTask.confirmed_at.desc(), MintTask.scheduled_for_utc, MintTask.id))).mappings().all()
+        .order_by(case((MintTask.status.in_(('confirmed','already_minted')), 0), (MintTask.status.in_(ACTIVE),1), else_=2),
+            MintTask.confirmed_at.desc(), MintTask.created_at.desc(), MintTask.id))).mappings().all()
     result = {}
     for drop in drops:
         for row in rows:
@@ -44,11 +45,13 @@ async def existing_mints(db, user, wallet, drops):
                     matches = False
             if matches:
                 from app.services.auto_arm_funding import quantity
+                from app.services.mint_lifecycle import read_model
                 from types import SimpleNamespace
                 count=quantity(SimpleNamespace(prepared_calldata=row['prepared_calldata'],signed_tx_raw=row['signed_tx_raw']),row['quantity'])
                 result[drop.id] = dict(id=row['id'], plan_id=row['plan_id'], wallet_id=wallet.id,
                     status=row['status'], quantity=(row['external_mint'] or {}).get('quantity',count),
                     external_mint=row['external_mint'],
+                    lifecycle=read_model(SimpleNamespace(**row)),
                     stage_name=scope.get('stage_name') or row['stage_name'],
                     scheduled_for_utc=aware(row['scheduled_for_utc']),
                     confirmed_at=aware(row['confirmed_at']) if row['confirmed_at'] else None)

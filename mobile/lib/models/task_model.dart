@@ -26,6 +26,7 @@ class MintTaskModel {
   final String? scheduleNote;
   final Map<String, dynamic>? externalMint;
   final Map<String, dynamic>? progress;
+  final Map<String, dynamic>? lifecycle;
 
   MintTaskModel({
     required this.id,
@@ -52,6 +53,7 @@ class MintTaskModel {
     this.scheduleNote,
     this.externalMint,
     this.progress,
+    this.lifecycle,
   });
 
   factory MintTaskModel.fromJson(Map<String, dynamic> json) {
@@ -84,6 +86,9 @@ class MintTaskModel {
           : null,
       progress: json['progress'] is Map<String, dynamic>
           ? json['progress'] as Map<String, dynamic>
+          : null,
+      lifecycle: json['lifecycle'] is Map<String, dynamic>
+          ? json['lifecycle'] as Map<String, dynamic>
           : null,
     );
   }
