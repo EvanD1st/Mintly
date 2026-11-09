@@ -9,8 +9,15 @@ final reliabilityProvider = FutureProvider.autoDispose
       if (!api.isAdmin || key != (api.userId, api.sessionRevision)) {
         throw StateError('Administrator access required.');
       }
-      final timer = Timer(const Duration(minutes: 1), ref.invalidateSelf);
-      ref.onDispose(timer.cancel);
+  Timer? timer;
+  void scheduleRefresh() {
+    timer?.cancel();
+    timer = Timer(const Duration(minutes: 1), ref.invalidateSelf);
+  }
+  scheduleRefresh();
+  ref.onCancel(() => timer?.cancel());
+  ref.onResume(scheduleRefresh);
+  ref.onDispose(() => timer?.cancel());
       final result = await api.fetchReliability();
       if (!api.isAdmin || key != (api.userId, api.sessionRevision)) {
         throw StateError('Account changed. Open the report again.');
