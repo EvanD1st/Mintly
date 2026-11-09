@@ -263,11 +263,8 @@ async def arm(db,row,group,check,user,wallet):
         'Waiting for pending mint reservations to settle.'):
         row.note='Watching Today for eligible free phases. Gas limits apply.'
     display=feed_checks.presentation(check)
-    if not display['setup_enabled']:return
-    phases=[p for p in display['stages'] if p['eligibility']=='eligible' and p['timing']!='ended'
-        and p.get('price_wei')=='0' and p.get('remaining') is not None and (p['remaining']>0 if r.get('quantity_mode')=='wallet_max' else p['remaining']>=r['quantity'])
-        and stage_kind(p['type']) in grant.scope['mint_kinds']]
-    phases.sort(key=lambda p:(p['timing']!='open',stage_kind(p['type'])=='public',p['starts_at'],p['id']))
+    from app.services.free_phase_selection import eligible_phases
+    phases=eligible_phases(display,r,grant.scope['mint_kinds'])
     if not phases:return
     phase=phases[0]
     s={'chain_id':r['chain_id'],'account':r['account'],'contract':check.result['contract_address'],'feed_approval_id':row.id}
@@ -341,6 +338,9 @@ async def step(factory):
         candidates=[{'drop':SimpleNamespace(id=g['drop'].id,name=g['drop'].name),'list_date':now.astimezone(ZoneInfo('Africa/Lagos')).date(),'mentions':[(SimpleNamespace(id=p.id,author_username=p.author_username),None) for p,_ in g['mentions']]} for g in groups]
         approval_id=row.id
     for group in candidates:
+        # Independent observation transaction: telemetry must never veto arming.
+        from app.services.reliability import observe
+        await observe(factory,approval_id,group['drop'].id)
         async with factory() as db:
             try:
                 row=await db.get(FeedMintApproval,approval_id)
@@ -353,6 +353,9 @@ async def step(factory):
                 if phase:
                     row.note=f"Automatically armed — {group['drop'].name}: {phase['name']}. Gas limits apply."
                 await db.commit()
+                if phase:
+                    from app.services.reliability import arm_result
+                    await arm_result(factory,approval_id,group['drop'].id)
             except Exception as error:
                 logging.getLogger('mintly.free_drops').warning('Preparation deferred approval_id=%s collection_id=%s reason=%s detail=%s',approval_id,group['drop'].id,type(error).__name__,preparation_error(error))
                 await db.rollback()
@@ -360,6 +363,8 @@ async def step(factory):
                 if not row:continue
                 row.note=f"{group['drop'].name}: {preparation_error(error)}"
                 await db.commit()
+                from app.services.reliability import arm_result
+                await arm_result(factory,approval_id,group['drop'].id,error)
     return True
 
 

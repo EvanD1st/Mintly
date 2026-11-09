@@ -26,7 +26,7 @@ from app.services.seadrop_mint import decode_mint, verify_presale
 from app.services.signer.base import SEADROP_V1_ADDRESS, MINT_PUBLIC_SELECTOR
 
 MODE = 'custodial_v1'
-TERMINAL = {'confirmed', 'reverted', 'failed', 'expired', 'disarmed', 'already_minted'}
+from app.services.mint_lifecycle import TERMINAL
 
 
 def digest(value):

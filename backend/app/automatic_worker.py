@@ -293,12 +293,11 @@ async def step(session_factory=AsyncSessionLocal, sign=request_signature, *, now
                 return True
             # A recent mint may still be waiting for canonical confirmations.
             # Keep the finite window available to reconcile it on the next check.
-            permanent = (isinstance(error, httpx.HTTPStatusError) and error.response.status_code == 409
-                and reason not in ('wallet_limit', 'allowance_or_supply_exhausted'))
-            temporary=isinstance(error,(httpx.RequestError,httpx.HTTPStatusError)) and (
-                not isinstance(error,httpx.HTTPStatusError) or error.response.status_code in (429,500,502,503,504))
-            exhausted=((not temporary and task.preparation_attempts>=6) if task.copy_rule_id else
-                task.preparation_attempts>=max(1,settings.OPENSEA_PREPARATION_MAX_ATTEMPTS))
+            from app.services.mint_lifecycle import preparation_disposition
+            permanent,exhausted=preparation_disposition(
+                error.response.status_code if isinstance(error,httpx.HTTPStatusError) else None,
+                reason,task.preparation_attempts,settings.OPENSEA_PREPARATION_MAX_ATTEMPTS,
+                copy=bool(task.copy_rule_id),transport_error=isinstance(error,httpx.RequestError))
             if permanent or exhausted:
                 note = 'Bounded preparation retries exhausted. No transaction broadcast.'
                 category = mint_diagnostics.category(events, None, error)

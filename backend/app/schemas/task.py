@@ -94,6 +94,7 @@ class TaskSchema(BaseModel):
     execution_mode: Optional[str] = None
     wallet_address: Optional[str] = None
     progress: dict | None = None
+    lifecycle: dict | None = None
 
 
 class QueueResponse(BaseModel):

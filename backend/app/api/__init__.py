@@ -18,6 +18,7 @@ from app.api.copy_mints import router as copy_router
 from app.api.opensea_access import router as opensea_access_router
 from app.api.artwork import router as artwork_router
 from app.api.feed_automation import router as feed_automation_router
+from app.api.reliability import router as reliability_router
 
 api_router = APIRouter(prefix="/api")
 api_router.include_router(auth_router)
@@ -39,6 +40,7 @@ protected.include_router(notifications_router)
 protected.include_router(mint_plans_router)
 protected.include_router(permission_router)
 protected.include_router(admin_router)
+protected.include_router(reliability_router)
 api_router.include_router(protected)
 
 __all__ = ["api_router"]

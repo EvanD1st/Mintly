@@ -737,7 +737,7 @@ class ApiService extends ChangeNotifier {
     try {
       data =
           await _get(
-                '/drops?daily_only=true&filter_kind=$filter${wallet == null ? '' : '&wallet_id=${Uri.encodeQueryComponent(wallet)}'}',
+                '/drops?daily_only=true&execution_states=true&filter_kind=$filter${wallet == null ? '' : '&wallet_id=${Uri.encodeQueryComponent(wallet)}'}',
               )
               as Map<String, dynamic>;
     } on ApiException catch (error) {
@@ -749,7 +749,7 @@ class ApiService extends ChangeNotifier {
       // The selected wallet was removed. Let the server choose an owned default.
       selectedFeedWallet = null;
       data =
-          await _get('/drops?daily_only=true&filter_kind=$filter')
+          await _get('/drops?daily_only=true&execution_states=true&filter_kind=$filter')
               as Map<String, dynamic>;
     }
     if (revision != _feedRevision) {
@@ -818,6 +818,9 @@ class ApiService extends ChangeNotifier {
 
   Future<Map<String, dynamic>> fetchSourceStatus() async =>
       (await _get('/source/status')) as Map<String, dynamic>;
+
+  Future<Map<String, dynamic>> fetchReliability() async =>
+      (await _get('/admin/reliability')) as Map<String, dynamic>;
 
   Future<void> markFeedSeen(List<Map<String, dynamic>> editions) async {
     await _post('/drops/seen', {

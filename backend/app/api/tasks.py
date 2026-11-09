@@ -174,6 +174,7 @@ async def arm_mint_task(req: ArmTaskRequest, user: User = Depends(get_current_us
 
 async def task_response(db, task):
     from app.services.mint_progress import progress
+    from app.services.mint_lifecycle import read_model
     auth = await db.get(MintAuthorization, task.authorization_id)
     s = auth.snapshot
     recovery = await db.scalar(select(MintRecovery).where(MintRecovery.task_id == task.id))
@@ -185,10 +186,10 @@ async def task_response(db, task):
         fee_cap_eth=format_wei_to_eth(auth.max_fee_wei), total_cap_eth=format_wei_to_eth(auth.total_spend_cap_wei),
         drop_name=s['drop_name'], chain=s['chain'], chain_id=s['chain_id'], native_symbol=symbol(s['chain_id']), stage_name=s['stage_name'], icon_name='gem',
         time_wat_label=aware(task.scheduled_for_utc).astimezone(ZoneInfo('Africa/Lagos')).strftime('%d %b · %H:%M WAT'),
-        transaction_hash=task.transaction_hash, explorer_url=task.explorer_url, failure_reason=task.failure_reason,
+        transaction_hash=task.transaction_hash, explorer_url=task.explorer_url, failure_reason=read_model(task)['detail'],
         external_mint=task.external_mint,
         submitted_at=task.submitted_at, confirmed_at=task.confirmed_at, actual_total_cost_wei=task.actual_total_cost_wei,
-        execution_mode=task.execution_mode, wallet_address=s['account'],progress=progress(task))
+        execution_mode=task.execution_mode, wallet_address=s['account'],progress=progress(task),lifecycle=read_model(task))
 
 
 @router.post("/{task_id}/disarm")
@@ -219,6 +220,8 @@ async def disarm_task(task_id: str, db: AsyncSession = Depends(get_db),
 
 @router.get("/queue", response_model=QueueResponse)
 async def list_mint_queue(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user), native_currencies:bool=False):
+    from app.services.mint_lifecycle import read_model
+    from app.services.mint_progress import progress
     tasks = (await db.execute(select(MintTask).join(Wallet, Wallet.id == MintTask.wallet_id).where(
         Wallet.user_id == user.id, MintTask.is_demo.is_(False), MintTask.archived_at.is_(None),
     ).order_by(MintTask.created_at.desc(), MintTask.id.desc()))).scalars().all()
@@ -244,7 +247,7 @@ async def list_mint_queue(db: AsyncSession = Depends(get_db), user: User = Depen
             stage_name=stage.stage_name if stage else "Unknown",
             time_wat_label=task.scheduled_for_utc.astimezone(ZoneInfo("Africa/Lagos")).strftime("%H:%M WAT"),
             icon_name=drop.icon_name if drop else "gem", transaction_hash=task.transaction_hash,
-            explorer_url=task.explorer_url, failure_reason=task.failure_reason,
+            explorer_url=task.explorer_url, failure_reason=read_model(task)['detail'],lifecycle=read_model(task),progress=progress(task),
             submitted_at=task.submitted_at, confirmed_at=task.confirmed_at,
             actual_total_cost_wei=task.actual_total_cost_wei,
         ))

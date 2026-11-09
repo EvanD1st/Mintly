@@ -17,6 +17,7 @@ import 'saved_plan_screen.dart';
 import 'queue_screen.dart';
 import 'history_screen.dart';
 import 'free_drops_screen.dart';
+import 'reliability_screen.dart';
 import '../services/external_url.dart';
 import '../widgets/network_budget_card.dart' show formatNative;
 
@@ -181,6 +182,7 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
           const SizedBox(height: 12),
           TodayMintSummary(drops: state.drops),
           const SizedBox(height: 10),
+          if (api.isAdmin) const ReliabilityNotice(),
           if (api.isAdmin && api.feedStatusText.isNotEmpty)
             DisclosureSection(
               title: const Text('List updates'),
@@ -484,17 +486,24 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
     final mint = drop.automaticMint!;
     final external = mint['status'] == 'already_minted';
     final minted = mint['status'] == 'confirmed' || external;
-    final status = switch (mint['status']) {
-      'confirmed' => 'Minted',
-      'already_minted' => 'Already minted — ${mint['stage_name']}',
-      'armed' => 'Armed',
-      'preparing' => 'Preparing mint',
-      'prepared' => 'Mint prepared',
-      'submitting' => 'Submitting mint',
-      'submitted' => 'Mint submitted',
-      'uncertain' => 'Checking transaction',
-      _ => 'Automatic mint active',
-    };
+    final lifecycle = mint['lifecycle'] as Map?;
+    final status =
+        lifecycle?['label'] as String? ??
+        switch (mint['status']) {
+          'confirmed' => 'Minted',
+          'already_minted' => 'Already minted — ${mint['stage_name']}',
+          'armed' => 'Armed',
+          'preparing' => 'Preparing mint',
+          'prepared' => 'Mint prepared',
+          'submitting' => 'Submitting mint',
+          'submitted' => 'Mint submitted',
+          'uncertain' => 'Checking transaction',
+          'failed' => 'Mint stopped',
+          'expired' => 'Mint window ended',
+          'disarmed' => 'Mint paused or cancelled',
+          'reverted' => 'Transaction reverted',
+          _ => 'Checking mint status',
+        };
     final scheduled = DateTime.tryParse(
       mint['scheduled_for_utc'] as String? ?? '',
     );
@@ -546,6 +555,10 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
               const Text(
                 'Your automatic mint is already set up. It runs while the app is closed.',
               ),
+            if (!minted &&
+                lifecycle?['terminal'] == true &&
+                lifecycle?['detail'] != null)
+              Text('${lifecycle!['detail']}'),
             const SizedBox(height: 10),
             FilledButton(
               onPressed: () async {

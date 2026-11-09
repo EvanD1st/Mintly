@@ -412,6 +412,7 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
             name: task.dropName,
             network: task.chain,
             status: task.status,
+            statusText: task.lifecycle?['label'] as String?,
             artwork: CollectionThumbnail(
               name: task.dropName,
               reference: reference,

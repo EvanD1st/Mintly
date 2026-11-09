@@ -23,7 +23,7 @@ router = APIRouter(prefix="/drops", tags=["drops"])
 async def list_drops(
     filter_kind: Optional[str] = "all", user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    wallet_id: Optional[str] = None, daily_only: bool = False,
+    wallet_id: Optional[str] = None, daily_only: bool = False, execution_states:bool=False,
 ):
     now = datetime.now(timezone.utc)
     wallets = (await db.scalars(select(Wallet).where(Wallet.user_id == user.id,
@@ -68,7 +68,7 @@ async def list_drops(
     checks = {c.drop_id:c for c in (await db.scalars(select(FeedWalletCheck).where(
         FeedWalletCheck.user_id==user.id,FeedWalletCheck.wallet_id==wallet.id,
         FeedWalletCheck.drop_id.in_([d.id for d in drops])))).all()} if daily_only and wallet else {}
-    existing = await existing_mints(db, user, wallet, drops) if daily_only else {}
+    existing = await existing_mints(db, user, wallet, drops,include_terminal=execution_states) if daily_only else {}
     for drop in drops:
         card = DropSchema.model_validate(drop)
         if daily_only:
@@ -86,8 +86,10 @@ async def list_drops(
             if drop.id in existing:
                 card.automatic_mint = existing[drop.id]
                 minted = existing[drop.id]['status'] in ('confirmed','already_minted')
+                lifecycle=existing[drop.id]['lifecycle']
                 card.wallet_check = dict(status=existing[drop.id]['status'], setup_enabled=False,
                     stages=[], note='This wallet already minted this collection. View its mint history.' if minted
+                    else (lifecycle['detail'] or lifecycle['label']) if lifecycle['terminal']
                     else 'An automatic mint is already active for this wallet. View it in Mint plans.')
             elif not supported(drop):
                 card.wallet_check=dict(status='unsupported',setup_enabled=False,stages=[],

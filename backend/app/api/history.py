@@ -81,6 +81,11 @@ async def history(section: Literal['plans', 'mints', 'activity', 'permissions', 
                     'total_cap_eth': format_wei_to_eth(auth.total_spend_cap_wei) if auth else '0',
                     'transaction_hash': row.transaction_hash, 'explorer_url': row.explorer_url,
                     'failure_reason': row.failure_reason, 'actual_total_cost_wei': row.actual_total_cost_wei}
+            from app.services.mint_lifecycle import read_model
+            from app.services.mint_progress import progress
+            details['lifecycle']=read_model(row)
+            details['progress']=progress(row)
+            details['failure_reason']=read_model(row)['detail']
             details['archived_at'] = row.archived_at
             details['created_at'] = row.created_at
             details['plan_id'] = row.plan_id

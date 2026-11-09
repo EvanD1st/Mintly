@@ -38,3 +38,4 @@ from app.models.daily_notice import DailyListNotice
 from app.models.account_recovery import AccountRecoveryCode
 from app.models.feed_source import SourceRevision, FeedMention, FeedSeen, SourceAlert
 from app.models.feed_automation import FeedMintApproval
+from app.models.mint_opportunity import MintOpportunity
