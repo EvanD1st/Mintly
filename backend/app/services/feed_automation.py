@@ -338,9 +338,6 @@ async def step(factory):
         candidates=[{'drop':SimpleNamespace(id=g['drop'].id,name=g['drop'].name),'list_date':now.astimezone(ZoneInfo('Africa/Lagos')).date(),'mentions':[(SimpleNamespace(id=p.id,author_username=p.author_username),None) for p,_ in g['mentions']]} for g in groups]
         approval_id=row.id
     for group in candidates:
-        # Independent observation transaction: telemetry must never veto arming.
-        from app.services.reliability import observe
-        await observe(factory,approval_id,group['drop'].id)
         async with factory() as db:
             try:
                 row=await db.get(FeedMintApproval,approval_id)
@@ -353,9 +350,12 @@ async def step(factory):
                 if phase:
                     row.note=f"Automatically armed — {group['drop'].name}: {phase['name']}. Gas limits apply."
                 await db.commit()
+                # Publish the task first; observations have their own bounded transaction.
+                from app.services.reliability import observe,best_effort
+                await best_effort(observe,factory,approval_id,group['drop'].id)
                 if phase:
                     from app.services.reliability import arm_result
-                    await arm_result(factory,approval_id,group['drop'].id)
+                    await best_effort(arm_result,factory,approval_id,group['drop'].id)
             except Exception as error:
                 logging.getLogger('mintly.free_drops').warning('Preparation deferred approval_id=%s collection_id=%s reason=%s detail=%s',approval_id,group['drop'].id,type(error).__name__,preparation_error(error))
                 await db.rollback()
@@ -363,8 +363,9 @@ async def step(factory):
                 if not row:continue
                 row.note=f"{group['drop'].name}: {preparation_error(error)}"
                 await db.commit()
-                from app.services.reliability import arm_result
-                await arm_result(factory,approval_id,group['drop'].id,error)
+                from app.services.reliability import observe,arm_result,best_effort
+                await best_effort(observe,factory,approval_id,group['drop'].id)
+                await best_effort(arm_result,factory,approval_id,group['drop'].id,error)
     return True
 
 

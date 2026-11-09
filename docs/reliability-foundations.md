@@ -6,7 +6,7 @@ Updated mobile clients request `execution_states=true` on Today. Older installed
 
 ## Measurements
 
-Verified fresh eligible Auto-Arming observations are recorded once per owner, wallet, network and collection. Repeat polls, source duplicates and additional phases do not inflate this denominator. Stale/incomplete checks are excluded. A failed observation transaction is logged and execution continues. Observation and arming-result records never call the signer, decrypt keys, fetch providers, reserve funds or create mint tasks.
+Verified fresh eligible Auto-Arming observations are recorded once per owner, wallet, network and collection. Repeat polls, source duplicates and additional phases do not inflate this denominator. Stale/incomplete checks are excluded. Tasks are committed before observation IO, so submission does not wait for metrics. Each separate observation operation has a 100ms best-effort deadline; failed or slow observations are logged and execution continues. Observation and arming-result records never call the signer, decrypt keys, fetch providers, reserve funds or create mint tasks. This means missed observations can reduce measurement coverage rather than delay mint execution.
 
 Eligibility coverage starts with observed evidence after this release. Historical opportunities are not backfilled. Only openings in the requested interval count as due opportunities; linked tracked task timing overrides old display timing after postponement. Unarmed closed opportunities are marked for review, not asserted to be preventable misses. Later user cancellation, changing eligibility and external wallet activity can affect the outcome.
 

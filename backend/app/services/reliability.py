@@ -1,5 +1,5 @@
 """Observation-only reliability measurements. Never calls a signer or provider."""
-import hashlib,json,logging,math
+import asyncio,hashlib,json,logging,math
 from collections import Counter,defaultdict
 from datetime import datetime,timedelta,timezone
 from sqlalchemy import select,func,or_,tuple_,case
@@ -7,6 +7,16 @@ from app.models import (MintOpportunity,FeedMintApproval,FeedWalletCheck,Automat
     User,Wallet,Drop,MintTask,MintAuthorization,MintAttemptDiagnostic,CopyEvent,CopyWatch)
 from app.services.mint_plans import aware
 from app.services.mint_lifecycle import ACTIVE,MARKET_REASONS,OPERATOR_REASONS,SERVICE_REASONS,reason_from_note,reason_text
+
+
+async def best_effort(operation,*args):
+    """Called after execution commits. Reporting must not hold the next mint up."""
+    try:
+        async with asyncio.timeout(.1):await operation(*args)
+    except TimeoutError:
+        logging.getLogger('mintly.reliability').warning('Observation deadline reached; execution continues.')
+    except Exception:
+        logging.getLogger('mintly.reliability').warning('Observation unavailable; execution continues.')
 
 
 def arming_reason(error):

@@ -67,6 +67,18 @@ async def test_telemetry_failure_does_not_block_real_auto_arming(free_feed):
     async with lab.factory() as db:assert await db.scalar(select(func.count()).select_from(MintTask))==1
 
 
+async def test_stalled_telemetry_only_runs_after_task_is_published_and_cannot_block_worker(free_feed,monkeypatch):
+    import asyncio
+    from app.services import feed_automation
+    lab=free_feed['lab'];committed=[]
+    async def stalled(*args):
+        async with lab.factory() as db:committed.append(await db.scalar(select(func.count()).select_from(MintTask)))
+        await asyncio.Event().wait()
+    monkeypatch.setattr(reliability,'observe',stalled)
+    async with asyncio.timeout(10):assert await feed_automation.step(lab.factory)
+    assert committed==[1]
+
+
 async def test_report_separates_market_failures_and_counts_distinct_incident_tasks(free_feed):
     lab=free_feed['lab'];task_id,_=await arm_free(free_feed)
     now=datetime.now(timezone.utc)
