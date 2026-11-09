@@ -947,7 +947,7 @@ class _CopyMintsState extends ConsumerState<CopyMintsScreen> {
   Widget _event(Map<String, dynamic> event) {
     final o = event['observation'] as Map<String, dynamic>;
     final status = '${event['status']}';
-    final label =
+    final label = (event['lifecycle'] as Map?)?['label'] as String? ??
         {
           'confirmed': 'Mint confirmed',
           'submitted': 'Submitted',

@@ -8,6 +8,7 @@ from app.services import reliability
 from app.services.mint_lifecycle import read_model,preparation_disposition
 from test_feed_automation_evm import free_feed,arm_free
 from test_automatic_evm import lab
+from test_copy_mints import copying
 
 
 def test_lifecycle_does_not_expose_execution_secrets_or_guess_unknown_failures():
@@ -165,3 +166,26 @@ def test_arming_categories_never_retain_provider_or_exception_bodies():
     from fastapi import HTTPException
     assert reliability.arming_reason(HTTPException(503,{'private_key':'never-retain'}))=='arming_unavailable'
     assert reliability.arming_reason(RuntimeError('secret'))=='arming_error'
+
+
+async def test_copy_activity_uses_task_lifecycle_and_detection_time_for_latency(copying):
+    from app.services import copy_mints
+    from app.models import CopyEvent
+    c=copying;lab=c['lab']
+    await c['approve']();await c['mint']();await c['scan']()
+    assert await copy_mints.step(lab.factory)
+    async with lab.factory() as db:
+        event=await db.scalar(select(CopyEvent));task=await db.get(MintTask,event.task_id)
+        task.status='failed';task.failure_reason='This collection is sold out. No transaction sent.'
+        await db.commit()
+        observed=event.created_at.replace(tzinfo=timezone.utc) if event.created_at.tzinfo is None else event.created_at
+        task_id=task.id
+    activity=(await lab.client.get('/api/copy-mints/activity')).json()['events'][0]
+    queue=(await lab.client.get('/api/tasks/queue')).json()['tasks'][0]
+    assert activity['lifecycle']==queue['lifecycle'] and activity['lifecycle']['label']=='Sold out'
+    async with lab.factory() as db:
+        task=await db.get(MintTask,task_id);task.status='confirmed'
+        task.scheduled_for_utc=observed-timedelta(days=2);task.submitted_at=observed+timedelta(seconds=3)
+        await db.commit()
+        result=await reliability.report(db,now=observed+timedelta(seconds=10))
+        assert result['modes']['copy']['activity_to_submission']['p95_seconds']==3
