@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../state/app_state.dart';
+import '../widgets/screen_components.dart';
 
 final reliabilityProvider = FutureProvider.autoDispose
     .family<Map<String, dynamic>, (String, int)>((ref, key) async {
@@ -172,7 +173,7 @@ class ReliabilityScreen extends ConsumerWidget {
       if (outcomes.isEmpty) const Text('No mint tasks opened in this window.'),
       for (final entry in outcomes.entries)
         _fact(_label('${entry.key}'), entry.value),
-      ExpansionTile(
+      DisclosureSection(
         title: const Text('Recent outcomes needing review'),
         children: [
           for (final failure in data['recent_failures'] as List? ?? [])
