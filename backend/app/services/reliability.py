@@ -4,7 +4,7 @@ from collections import Counter,defaultdict
 from datetime import datetime,timedelta,timezone
 from sqlalchemy import select,func,or_,tuple_,case
 from app.models import (MintOpportunity,FeedMintApproval,FeedWalletCheck,AutomaticGrant,
-    User,Wallet,Drop,MintTask,MintAuthorization,MintAttemptDiagnostic,CopyEvent)
+    User,Wallet,Drop,MintTask,MintAuthorization,MintAttemptDiagnostic,CopyEvent,CopyWatch)
 from app.services.mint_plans import aware
 from app.services.mint_lifecycle import ACTIVE,MARKET_REASONS,OPERATOR_REASONS,SERVICE_REASONS,reason_from_note,reason_text
 
@@ -107,7 +107,7 @@ async def report(db,*,hours=24,now=None):
         .order_by(MintAttemptDiagnostic.started_at.desc(),MintAttemptDiagnostic.finished_at.desc(),MintAttemptDiagnostic.id.desc()))).mappings().all() if ids else []
     latest={}
     for d in diagnostics:latest.setdefault(d['task_id'],d)
-    outcomes=Counter();groups=defaultdict(lambda:{'tasks':set(),'opportunities':set(),'examples':[],'last_seen':since})
+    outcomes=Counter();groups=defaultdict(lambda:{'tasks':set(),'opportunities':set(),'copy_events':set(),'examples':[],'last_seen':since})
     by_mode=defaultdict(lambda:{'tasks':0,'submitted':0,'confirmed':0,'latency':[],'invalid_time_samples':0})
     task_keys=set();needs_review=0;recent_failures=[]
     for r in rows:
@@ -128,6 +128,7 @@ async def report(db,*,hours=24,now=None):
         elif reason=='supply_exhausted':outcome='sold_out'
         elif reason in MARKET_REASONS:outcome='wallet_or_stage_constraint'
         elif reason in SERVICE_REASONS:outcome='service_failure_needs_review';needs_review+=1
+        elif reason in OPERATOR_REASONS:outcome='approval_needs_review';needs_review+=1
         else:outcome='unknown_needs_review';needs_review+=1
         outcomes[outcome]+=1
         if outcome not in ('confirmed','already_minted','disarmed','pending') and len(recent_failures)<20:
@@ -195,12 +196,34 @@ async def report(db,*,hours=24,now=None):
                 group=groups[(o.chain_id,o.last_error_code)];group['opportunities'].add(o.id)
                 if len(group['examples'])<5:group['examples'].append({'opportunity_id':o.id,'username':c['username'],'collection':c['name']})
                 group['last_seen']=max(group['last_seen'],aware(o.last_error_at))
+    # Copy already persists pre-task failures. Reuse that evidence instead of
+    # inventing eligible opportunities from unverified followed-wallet signals.
+    copy_unarmed=Counter()
+    copy_errors=(await db.execute(select(CopyEvent.id,CopyEvent.last_error_category,CopyEvent.last_checked_at,
+        CopyEvent.observation['chain_id'].as_integer().label('chain_id'),
+        CopyEvent.observation['name'].as_string().label('collection'),User.username)
+        .join(CopyWatch,CopyEvent.watch_id==CopyWatch.id).join(User,CopyEvent.user_id==User.id)
+        .where(CopyEvent.created_at>=since,CopyEvent.created_at<now,CopyEvent.task_id.is_(None),
+            CopyEvent.last_error_category.is_not(None),CopyWatch.archived_at.is_(None),
+            User.is_active.is_(True),User.deleted_at.is_(None),User.automation_paused.is_(False)))).mappings().all()
+    copy_failures=SERVICE_REASONS|MARKET_REASONS|OPERATOR_REASONS|{'temporary_checks_unavailable','temporary_preparation_error','validation_rejected'}
+    for r in copy_errors:
+        reason=r['last_error_category']
+        if reason not in copy_failures:continue  # Paused, watch-only and budget waits are intentional controls.
+        copy_unarmed[reason]+=1
+        if len(recent_failures)<20:recent_failures.append({'event_id':r['id'],'username':r['username'],
+            'collection':r['collection'],'outcome':'copy_not_armed','reason_code':reason,'reason_text':reason_text(reason),'chain_id':r['chain_id']})
+        if reason in MARKET_REASONS or not r['last_checked_at'] or aware(r['last_checked_at'])<cutoff:continue
+        group=groups[(r['chain_id'],reason)];group['copy_events'].add(r['id'])
+        group['last_seen']=max(group['last_seen'],aware(r['last_checked_at']))
+        if len(group['examples'])<5:group['examples'].append({'event_id':r['id'],'username':r['username'],'collection':r['collection']})
     incidents=[]
     for (chain,reason),g in groups.items():
-        if len(g['tasks'])+len(g['opportunities'])>=3 or reason in OPERATOR_REASONS:
+        if len(g['tasks'])+len(g['opportunities'])+len(g['copy_events'])>=3 or reason in OPERATOR_REASONS:
             incidents.append({'chain_id':chain,'reason_code':reason,'affected_tasks':len(g['tasks']),
                 'reason_text':reason_text(reason),
                 'affected_opportunities':len(g['opportunities']),
+                'affected_copy_events':len(g['copy_events']),
                 'examples':g['examples'],
                 'severity':'action_required' if reason in OPERATOR_REASONS else 'warning','last_seen':g['last_seen']})
     coverage=await db.scalar(select(func.min(MintOpportunity.eligible_at)))
@@ -229,9 +252,12 @@ async def report(db,*,hours=24,now=None):
         'eligible_closed_without_task':sum(aware(o.closes_at)<=now for o in unmatched),
         'eligibility_checks':dict(checks),'auto_arm_waiting':dict(waiting),
         'unarmed_reasons':dict(blocked),
+        'arming_failures_needing_review':sum(v for reason,v in blocked.items() if reason not in MARKET_REASONS and reason not in ('budget_wait','daily_budget_wait')),
+        'copy_unarmed_reasons':dict(copy_unarmed),
+        'copy_failures_needing_review':sum(v for reason,v in copy_unarmed.items() if reason not in MARKET_REASONS),
         'copy_events_observed':copy_seen,'failures_needing_review':needs_review,
         'recent_failures':recent_failures,
-        'incidents':sorted(incidents,key=lambda g:(g['severity']!='action_required',-(g['affected_tasks']+g['affected_opportunities']),str(g['chain_id']),g['reason_code'])),
+        'incidents':sorted(incidents,key=lambda g:(g['severity']!='action_required',-(g['affected_tasks']+g['affected_opportunities']+g['affected_copy_events']),str(g['chain_id']),g['reason_code'])),
         'notes':['Eligibility counts start with verified observations after this rollout; older opportunities are not reconstructed.',
             'One Auto-Arming collection per wallet is counted. Repeated polls and phases do not inflate the count.',
             'A failure needing review is not proof that a miss was preventable. Sold-out and wallet constraints are separate.',

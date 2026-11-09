@@ -1,7 +1,8 @@
 """Shared read model and retry decisions; execution records remain authoritative."""
 ACTIVE = frozenset(('armed','preparing','prepared','submitting','submitted','uncertain'))
 TERMINAL = frozenset(('confirmed','reverted','failed','expired','disarmed','already_minted'))
-MARKET_REASONS = frozenset(('supply_exhausted','wallet_not_allowlisted','wallet_limit','allowance_or_supply_exhausted','stage_not_active'))
+MARKET_REASONS = frozenset(('supply_exhausted','wallet_not_allowlisted','wallet_limit','allowance_or_supply_exhausted',
+    'stage_not_active','insufficient_funds','creator_payout_missing','terms_changed','wrong_phase'))
 OPERATOR_REASONS = frozenset(('api_key_unavailable','api_access_denied','upstream_access_denied','wallet_approval_changed'))
 SERVICE_REASONS = frozenset(('timeout','network_error','invalid_response','upstream_server_error','upstream_rate_limited',
     'signer_timeout','signer_connection_error','rpc_unavailable','api_key_unavailable','api_access_denied','upstream_access_denied'))
@@ -17,6 +18,9 @@ def reason_text(code):
         'upstream_access_denied':'OpenSea denied API access. Operator review is needed.',
         'signer_timeout':'The signer response timed out. Check task status before retrying.',
         'signer_connection_error':'The signer could not be reached.',
+        'temporary_checks_unavailable':'Copy checks are temporarily unavailable. Mintly will retry within the approved phase.',
+        'temporary_preparation_error':'Copy preparation is temporarily unavailable. Mintly will retry within the approved phase.',
+        'validation_rejected':'The stage, source transaction or receiving wallet checks rejected this copy. Review its eligibility and approval.',
     }.get(code,(code or 'Unknown reason').replace('_',' '))
 
 

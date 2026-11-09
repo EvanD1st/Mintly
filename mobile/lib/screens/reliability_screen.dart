@@ -36,9 +36,9 @@ class ReliabilityNotice extends ConsumerWidget {
     );
     final value = data.asData?.value;
     final reviewNeeded = (value?['failures_needing_review'] as num? ?? 0) > 0 ||
+        (value?['copy_failures_needing_review'] as num? ?? 0) > 0 ||
         (value?['eligible_closed_without_task'] as num? ?? 0) > 0 ||
-        (value?['unarmed_reasons'] as Map? ?? {}).entries.any((e) =>
-            e.key != 'budget_wait' && e.key != 'daily_budget_wait' && (e.value as num) > 0);
+        (value?['arming_failures_needing_review'] as num? ?? 0) > 0;
     final count =
         ((value?['incidents'] as List?)?.length ?? 0) +
         (((value?['auto_arm_waiting'] as Map?)?['signing_approval_unavailable']
@@ -159,7 +159,7 @@ class ReliabilityScreen extends ConsumerWidget {
             padding: const EdgeInsets.all(14),
             child: Text(
               '${incident['reason_text'] ?? _label('${incident['reason_code']}')} · chain ${incident['chain_id']}\n'
-              '${incident['affected_tasks']} task(s), ${incident['affected_opportunities'] ?? 0} unarmed opportunity(s) · last seen ${_wat('${incident['last_seen']}')}\n'
+              '${incident['affected_tasks']} task(s), ${incident['affected_opportunities'] ?? 0} unarmed opportunity(s), ${incident['affected_copy_events'] ?? 0} copy signal(s) · last seen ${_wat('${incident['last_seen']}')}\n'
               '${(incident['examples'] as List? ?? []).map((e) => '${e['username']} · ${e['collection']}').join('\n')}',
             ),
           ),
@@ -197,6 +197,8 @@ class ReliabilityScreen extends ConsumerWidget {
         _fact(_label('${entry.key}'), entry.value),
       for (final entry in (data['unarmed_reasons'] as Map? ?? {}).entries)
         _fact('Unarmed: ${_label('${entry.key}')}', entry.value),
+      for (final entry in (data['copy_unarmed_reasons'] as Map? ?? {}).entries)
+        _fact('Copy not armed: ${_label('${entry.key}')}', entry.value),
       const SizedBox(height: 20),
       const Text(
         'Submission timing',
