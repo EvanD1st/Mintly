@@ -113,7 +113,7 @@ async def report(db,*,hours=24,now=None):
     ids=[r['id'] for r in rows]
     diagnostics=(await db.execute(select(MintAttemptDiagnostic.task_id,MintAttemptDiagnostic.error_category,
         MintAttemptDiagnostic.started_at,MintAttemptDiagnostic.outcome).where(
-        MintAttemptDiagnostic.task_id.in_(ids),MintAttemptDiagnostic.phase=='preparation')
+        MintAttemptDiagnostic.task_id.in_(ids),MintAttemptDiagnostic.phase.in_(('preparation','schedule')))
         .order_by(MintAttemptDiagnostic.started_at.desc(),MintAttemptDiagnostic.finished_at.desc(),MintAttemptDiagnostic.id.desc()))).mappings().all() if ids else []
     latest={}
     for d in diagnostics:latest.setdefault(d['task_id'],d)

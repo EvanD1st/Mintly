@@ -43,6 +43,8 @@ PROVIDER_CODES={'STAGE_NOT_ACTIVE':'stage_not_active','MINT_NOT_ACTIVE':'stage_n
 def public_note(note):
     """Explain older stored failures without inventing the missing specific cause."""
     return {
+        'The approved phase price, method or allowance changed. Review this mint again.':
+            'Mint terms changed after arming. Mintly stopped this mint. Review the updated stage.',
         'Independent signer rejected task policy, identity, budget or chain readiness.':
             'Mintly could not verify the wallet approval, spending limits or network checks. '
             'No transaction was sent. Review the approval in Wallet and your Copy settings.',
@@ -198,7 +200,7 @@ def category(events,status,error=None):
     import httpx
     if isinstance(error,httpx.HTTPStatusError):
         reason=error.response.headers.get('X-Mintly-Reason')
-        if reason in ('wallet_approval_changed','pending_source_changed','wallet_limit','supply_exhausted','auto_arm_gas_limit'):
+        if reason in ('wallet_approval_changed','pending_source_changed','wallet_limit','supply_exhausted','auto_arm_gas_limit','terms_changed'):
             return reason
     for row in reversed(events):
         code=row['http_status']
@@ -215,7 +217,7 @@ def category(events,status,error=None):
     return 'preparation_unavailable' if error else 'none'
 
 
-async def save(db,task,phase,attempt,started,outcome,events=None,status=None,error=None):
+async def save(db,task,phase,attempt,started,outcome,events=None,status=None,error=None,reason_code=None):
     """A diagnostics failure must not change execution, reservations or nonce rules."""
     from app.models import MintAttemptDiagnostic
     events=clean_events(events or [])
@@ -223,7 +225,7 @@ async def save(db,task,phase,attempt,started,outcome,events=None,status=None,err
         async with db.begin_nested():
             db.add(MintAttemptDiagnostic(task_id=task.id,phase=phase,attempt_number=attempt,
                 started_at=started,finished_at=datetime.now(timezone.utc),outcome=outcome,
-                signer_http_status=status,error_category=category(events,status,error),upstream_events=events,
+                signer_http_status=status,error_category=reason_code if reason_code in PREPARATION_REASONS else category(events,status,error),upstream_events=events,
                 next_retry_at=task.next_attempt_at if task.status in ('armed','preparing') else None))
             await db.flush()
             from app.models import MintAuthorization
