@@ -1,7 +1,7 @@
 """Shared read model and retry decisions; execution records remain authoritative."""
 ACTIVE = frozenset(('armed','preparing','prepared','submitting','submitted','uncertain'))
 TERMINAL = frozenset(('confirmed','reverted','failed','expired','disarmed','already_minted'))
-MARKET_REASONS = frozenset(('supply_exhausted','wallet_not_allowlisted','wallet_limit','allowance_or_supply_exhausted',
+MARKET_REASONS = frozenset(('auto_arm_gas_limit','supply_exhausted','wallet_not_allowlisted','wallet_limit','allowance_or_supply_exhausted',
     'stage_not_active','insufficient_funds','creator_payout_missing','terms_changed','wrong_phase'))
 OPERATOR_REASONS = frozenset(('api_key_unavailable','api_access_denied','upstream_access_denied','wallet_approval_changed'))
 SERVICE_REASONS = frozenset(('timeout','network_error','invalid_response','upstream_server_error','upstream_rate_limited',

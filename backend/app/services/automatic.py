@@ -200,6 +200,10 @@ async def make_snapshot(db, req, user_id, *, presale_mint=None):
     price = wei(req.price_cap_eth) if req.price_cap_eth is not None else stage_price
     fee = wei(req.fee_cap_eth)
     total = wei(req.total_cap_eth) if req.total_cap_eth is not None else price * req.quantity + fee
+    if getattr(req,'feed_approval_id',None):
+        from app.services.auto_arm_funding import fee_ceiling
+        fee=fee_ceiling(drop.chain_id,fee)
+        total=min(total,fee)  # Standing Auto-Arming approvals are free-only.
     if not max(datetime.now(timezone.utc), start) < expiry <= min(end, aware(grant.expires_at)):
         raise HTTPException(409, 'Submission expiry must fall within the stage and policy validity.')
     scheduled = getattr(req, 'scheduled_for_utc', None)

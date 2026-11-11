@@ -178,12 +178,19 @@ async def task_response(db, task):
     auth = await db.get(MintAuthorization, task.authorization_id)
     s = auth.snapshot
     recovery = await db.scalar(select(MintRecovery).where(MintRecovery.task_id == task.id))
+    from app.models import DailyDebit
+    from app.services.auto_arm_funding import execution_ceiling
+    debit=await db.get(DailyDebit,task.id)
+    ceiling=execution_ceiling(s) if not task.signed_tx_raw and task.status in ('armed','preparing') else auth.max_fee_wei
+    reserved=debit.maximum_wei if debit and debit.actual_wei is None else 0
     return TaskSchema(id=task.id, plan_id=task.plan_id, wallet_id=task.wallet_id, drop_id=task.drop_id,
         stage_id=task.stage_id, status=task.status, schedule_note=task.schedule_note, is_demo=task.is_demo, created_at=aware(task.created_at),
         scheduled_for_utc=task.scheduled_for_utc,
         expires_at_utc=recovery.expires_at if recovery and recovery.activated_at else task.expires_at_utc,
         quantity=execution_quantity(task,auth.quantity), unit_price_eth=format_wei_to_eth(s['price_wei']),
         fee_cap_eth=format_wei_to_eth(auth.max_fee_wei), total_cap_eth=format_wei_to_eth(auth.total_spend_cap_wei),
+        effective_fee_cap_eth=format_wei_to_eth(ceiling),reserved_now_eth=format_wei_to_eth(reserved),
+        actual_total_cost_eth=format_wei_to_eth(task.actual_total_cost_wei) if task.actual_total_cost_wei is not None else None,
         drop_name=s['drop_name'], chain=s['chain'], chain_id=s['chain_id'], native_symbol=symbol(s['chain_id']), stage_name=s['stage_name'], icon_name='gem',
         time_wat_label=aware(task.scheduled_for_utc).astimezone(ZoneInfo('Africa/Lagos')).strftime('%d %b · %H:%M WAT'),
         transaction_hash=task.transaction_hash, explorer_url=task.explorer_url, failure_reason=read_model(task)['detail'],

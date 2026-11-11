@@ -10,6 +10,7 @@ log=logging.getLogger('uvicorn.error')
 FAILURES={'timeout','network_error','invalid_response','redirect','response_too_large','cooldown','paced','queued','execution_priority'}
 ENDPOINTS={'drop_mint','drop_schedule','key_creation','contract_lookup','other_opensea'}
 PREPARATION_REASONS={
+    'auto_arm_gas_limit':'Gas is above the Auto-Arming limit. Waiting for lower fees. No transaction sent.',
     'upstream_server_error':'OpenSea mint preparation is temporarily unavailable. Waiting to retry.',
     'stage_not_active':'The selected stage is not active yet; waiting for mint instructions.',
     'instructions_unavailable':'Waiting for wallet-specific mint instructions; another check is required.',
@@ -197,7 +198,7 @@ def category(events,status,error=None):
     import httpx
     if isinstance(error,httpx.HTTPStatusError):
         reason=error.response.headers.get('X-Mintly-Reason')
-        if reason in ('wallet_approval_changed','pending_source_changed','wallet_limit','supply_exhausted'):
+        if reason in ('wallet_approval_changed','pending_source_changed','wallet_limit','supply_exhausted','auto_arm_gas_limit'):
             return reason
     for row in reversed(events):
         code=row['http_status']

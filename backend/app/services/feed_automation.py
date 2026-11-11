@@ -48,7 +48,8 @@ def tables(journal):
 
 
 def public(row):
-    return {'id':row.id,'status':'expired' if row.status=='active' and aware(row.expires_at)<=datetime.now(timezone.utc) else row.status,'snapshot':row.snapshot,'expires_at':row.expires_at,'note':row.note}
+    from app.services.auto_arm_funding import fee_ceiling
+    return {'effective_fee_cap_wei':str(fee_ceiling(row.snapshot['chain_id'],row.snapshot['fee_cap_wei'])),'id':row.id,'status':'expired' if row.status=='active' and aware(row.expires_at)<=datetime.now(timezone.utc) else row.status,'snapshot':row.snapshot,'expires_at':row.expires_at,'note':row.note}
 
 
 async def pin(db,journal,approval_id,vault):
@@ -191,7 +192,8 @@ async def enable_for_today_wallet(db,user,req):
                 key=existing.id;fee=s['fee_cap_wei'];expiry=aware(existing.expires_at)
             else:
                 key=str(uuid.uuid5(uuid.UUID(req.request_id),grant.id))
-                fee=int(grant.scope['max_task_wei'])
+                from app.services.auto_arm_funding import fee_ceiling
+                fee=fee_ceiling(chain,int(grant.scope['max_task_wei']))
                 expiry=min(aware(grant.expires_at),now+timedelta(days=60))
             enabled.append(await create(db,user,SimpleNamespace(request_id=key,grant_id=grant.id,
                 quantity=MAX_WALLET_QUANTITY,quantity_mode='wallet_max',fee_cap=format_wei_to_eth(fee),
@@ -297,7 +299,8 @@ async def arm(db,row,group,check,user,wallet):
         balance=await web3.eth.get_balance(AsyncWeb3.to_checksum_address(grant.account))
     finally:
         await web3.provider.disconnect()
-    fee_cap=min(r['fee_cap_wei'],grant.scope['max_task_wei'],
+    from app.services.auto_arm_funding import fee_ceiling
+    fee_cap=min(fee_ceiling(grant.chain_id,r['fee_cap_wei']),grant.scope['max_task_wei'],
         grant.budget_wei-grant.spent_wei,max(0,balance))
     if fee_cap<=0:
         row.note='Not enough available native tokens for gas.'

@@ -158,21 +158,24 @@ async def backfill_private(journal, vault, user_id, web3=None, chain_id=None, cu
                 await own.provider.disconnect()
 
 
-def private_usage(journal, user_id, day, currency='ETH'):
-    rows = [r for r in journal.execute('SELECT s.actual,s.liability,s.chain,d.day FROM signed s JOIN daily_signed d ON d.task=s.task WHERE d.user_id=?',(user_id,)).fetchall() if symbol(r['chain']) == currency]
+def private_usage(journal, user_id, day, currency='ETH', *, excluding=None):
+    rows = [r for r in journal.execute('SELECT s.task,s.actual,s.liability,s.chain,d.day FROM signed s JOIN daily_signed d ON d.task=s.task WHERE d.user_id=?',(user_id,)).fetchall() if symbol(r['chain']) == currency and r['task']!=excluding]
     return {'spent_wei':sum(r['actual'] for r in rows if r['actual'] is not None and r['day'] == day),
         'reserved_wei':sum(r['liability'] for r in rows if r['actual'] is None)}
 
 
-async def check_private(db, journal, vault, user, task, auth, web3, now):
+async def check_private(db, journal, vault, user, task, auth, web3, now, *, amount=None, replacing=False):
+    amount=auth.total_spend_cap_wei if amount is None else amount
+    if not 0<amount<=auth.total_spend_cap_wei or (not auth.snapshot.get('feed_approval_id') and amount!=auth.total_spend_cap_wei):
+        raise ValueError('Execution liability differs from authorization')
     currency = symbol(auth.snapshot['chain_id'])
     owner = await limit_owner(db,user,currency)
     private_configuration(journal,owner)
     if owner.daily_limit_wei is not None:
         await backfill_private(journal,vault,user.id,web3,auth.snapshot['chain_id'],currency=currency)
         await reconcile_private(journal,user.id,web3,auth.snapshot['chain_id'],currency=currency)
-        used = private_usage(journal,user.id,day_key(now),currency)
-        if used['spent_wei'] + used['reserved_wei'] + auth.total_spend_cap_wei > owner.daily_limit_wei:
+        used = private_usage(journal,user.id,day_key(now),currency,excluding=task.id if replacing else None)
+        if used['spent_wei'] + used['reserved_wei'] + amount > owner.daily_limit_wei:
             raise HTTPException(429,LIMIT_NOTE)
     await reserve(db,task,auth,user.id,now=now)
 
