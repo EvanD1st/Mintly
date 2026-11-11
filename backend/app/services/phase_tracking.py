@@ -28,8 +28,9 @@ async def resolve(snapshot,*,now=None):
     if len(candidates)!=1:
         raise PhaseChanged('The approved phase was removed or cannot be identified. Review this mint again.')
     actual=pinned(candidates[0])
-    if any(actual[k]!=approved[k] for k in ('type','price_wei','max_per_wallet')):
-        raise PhaseChanged('The approved phase price, method or allowance changed. Review this mint again.')
+    from app.services.phase_explanations import explain
+    explanation=explain(approved,actual,s['chain_id'],free_only=s.get('price_cap_wei')==0)
+    if explanation:raise PhaseChanged(explanation)
     if stage_kind(actual['type'])!=s['mint_kind']:
         raise PhaseChanged('The approved mint method changed. Review this mint again.')
     if actual['starts_at']>=s['expiry']:
@@ -89,6 +90,7 @@ async def refresh_task(db,task_id,vault):
         await resize(db,task,auth,grant,min(await queued(auth),await held(db,task,auth)))
     await db.commit()
     changed=None
+    check_started=datetime.now(timezone.utc)
     try:effective=await resolve(original)
     except PhaseChanged as error:changed=error
     await automatic.lock_execution(db)
@@ -107,6 +109,13 @@ async def refresh_task(db,task_id,vault):
         from app.automatic_worker import finish
         task.schedule_note=str(changed)
         await finish(db,task,'failed',str(changed))
+        try:
+            from app.services import mint_diagnostics
+            await mint_diagnostics.save(db,task,'schedule',None,check_started,'failed',
+                status=409,reason_code='terms_changed')
+        except Exception:
+            import logging
+            logging.getLogger('mintly.automatic').warning('Phase-change diagnostic unavailable task_id=%s',task.id)
     else:
         from app.services.mint_plans import aware
         from app.models import ActivityEvent

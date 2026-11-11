@@ -26,6 +26,8 @@ def reason_text(code):
 
 def reason_from_note(note):
     from app.services.mint_diagnostics import PREPARATION_REASONS
+    from app.services.phase_explanations import is_terms_change
+    if is_terms_change(note):return 'terms_changed'
     for code,text in PREPARATION_REASONS.items():
         if note in (text,text+' Checks stopped. No transaction was sent.'):return code
     return {'This collection is sold out. No transaction sent.':'supply_exhausted',
@@ -41,6 +43,7 @@ def read_model(task):
         'confirmed':'Minted','already_minted':'Already minted','reverted':'Transaction reverted',
         'failed':'Mint stopped','expired':'Mint window ended','disarmed':'Mint paused or cancelled'}.get(status,'Checking mint status')
     if status in ('failed','expired') and reason=='supply_exhausted':label='Sold out'
+    if status in ('failed','expired') and reason=='terms_changed':label='Mint terms changed'
     return {'status':status,'label':label,'terminal':status in TERMINAL,'active':status in ACTIVE,
         'reason_code':reason,'detail':public_note(getattr(task,'failure_reason',None)),
         'task_id':getattr(task,'id',None),'source':'execution_record'}
