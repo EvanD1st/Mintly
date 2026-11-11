@@ -176,10 +176,13 @@ async def step(session_factory=AsyncSessionLocal, sign=request_signature, *, now
                     from eth_account._utils.legacy_transactions import Transaction
                     decoded = Transaction.from_bytes(raw)
                     fee = decoded.gas * decoded.gasPrice + await additional_fee(web3, chain_id, decoded.gas, len(raw))
-                    if fee > auth.max_fee_wei or decoded.value + fee > auth.total_spend_cap_wei:
+                    from app.services.auto_arm_funding import broadcast_fee_limit
+                    fee_limit=await broadcast_fee_limit(db,task,auth)
+                    if fee > fee_limit or decoded.value + fee > auth.total_spend_cap_wei:
                         task.status = 'uncertain'
                         from app.services.networks import name
-                        task.failure_reason = f'{name(chain_id)} parent or operator fees exceed the approved cap; saved transaction held without broadcasting.'
+                        task.failure_reason = (f'{name(chain_id)} fees rose above the reserved gas amount; saved transaction held without broadcasting.' if auth.snapshot.get('feed_approval_id') else
+                            f'{name(chain_id)} parent or operator fees exceed the approved cap; saved transaction held without broadcasting.')
                         task.next_attempt_at = now + timedelta(seconds=15)
                         await db.commit()
                         return True

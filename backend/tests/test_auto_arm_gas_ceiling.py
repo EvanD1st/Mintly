@@ -97,6 +97,10 @@ async def test_only_buffered_quote_is_reserved_and_replay_restores_it(free_feed,
         task=await db.get(MintTask,task_id);grant=await db.get(AutomaticGrant,lab.grant.id)
         debit=await db.get(DailyDebit,task_id)
         assert debit.maximum_wei==grant.reserved_wei==entry['liability']
+        assert await funding.broadcast_fee_limit(db,task,auth)==entry['liability']
+        # A larger refreshed parent-fee quote must not use unused approval headroom.
+        assert entry['liability']+1>await funding.broadcast_fee_limit(db,task,auth)
+        assert entry['liability']+1<auth.max_fee_wei
         task.signed_tx_raw=None;task.transaction_hash=None;task.status='armed'
         grant.reserved_wei=funding.QUEUED_WEI;debit.maximum_wei=funding.QUEUED_WEI
         await db.commit()

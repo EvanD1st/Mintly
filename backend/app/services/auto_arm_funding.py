@@ -48,6 +48,12 @@ async def held(db,task,auth):
     debit=await db.get(DailyDebit,task.id)
     return debit.maximum_wei if debit else auth.total_spend_cap_wei
 
+async def broadcast_fee_limit(db,task,auth):
+    if not auth.snapshot.get('feed_approval_id'):return auth.max_fee_wei
+    # A refreshed OP-stack parent fee must fit the recorded signed exposure.
+    return min(auth.max_fee_wei,await held(db,task,auth))
+
+
 async def resize(db,task,auth,grant,amount,*,restore=False):
     old=await held(db,task,auth)
     delta=amount-old
