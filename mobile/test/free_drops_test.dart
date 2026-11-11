@@ -258,7 +258,7 @@ void main() {
         '0.0007',
       );
       expect(api.submitted, isEmpty);
-      expect(find.text('Free NFTs. Gas still costs money.'), findsOneWidget);
+      expect(find.text('Auto-Arming uses up to 0.00002 ETH per mint. Higher fees wait.'), findsOneWidget);
     },
   );
   testWidgets(

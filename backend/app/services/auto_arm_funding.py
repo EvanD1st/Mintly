@@ -1,4 +1,4 @@
-"""Small queued holds; full authorized liability is funded only at opening."""
+"""Small queued holds; buffered transaction liability is funded at execution."""
 import json
 from datetime import datetime, timezone
 from fastapi import HTTPException
@@ -7,6 +7,26 @@ from app.models import DailyDebit, MintTask, MintAuthorization, AutomaticGrant, 
 from app.services.mint_plans import aware
 
 QUEUED_WEI=10**13  # ETH queued hold, not a gas ceiling.
+ETH_GAS_CEILING_WEI=2*10**13  # 0.00002 ETH per Auto-Arming transaction.
+
+
+def fee_ceiling(chain_id, approved):
+    from app.services.networks import symbol
+    return min(approved,ETH_GAS_CEILING_WEI) if symbol(chain_id)=='ETH' else approved
+
+
+def execution_ceiling(snapshot):
+    approved=min(snapshot['fee_cap_wei'],snapshot['total_cap_wei'])
+    return fee_ceiling(snapshot['chain_id'],approved) if snapshot.get('feed_approval_id') else approved
+
+
+def execution_liability(snapshot,value,fee):
+    if snapshot.get('feed_approval_id') and fee>execution_ceiling(snapshot):
+        raise HTTPException(503,'Gas is above the Auto-Arming limit. Waiting for lower fees. No transaction sent.')
+    if fee>snapshot['fee_cap_wei'] or value+fee>snapshot['total_cap_wei']:
+        raise ValueError('Estimated gas or total debit exceeds task authorization')
+    return value+fee if snapshot.get('feed_approval_id') else snapshot['total_cap_wei']
+
 
 async def queued_amount(chain_id, maximum, *, strict=True):
     from app.services.networks import symbol
@@ -46,8 +66,17 @@ async def resize(db,task,auth,grant,amount,*,restore=False):
     if grant.reserved_wei<0:raise ValueError('Reservation accounting invariant violated')
     await db.flush()
 
-async def fund(db,task,auth,grant,*,restore=False,journal=None,now=None):
+async def fund(db,task,auth,grant,*,restore=False,journal=None,now=None,amount=None):
     if not auth.snapshot.get('feed_approval_id'):return
+    if restore:
+        # The private journal survives a lost DB commit. Never re-quote or shrink
+        # an already signed transaction's unresolved liability.
+        entry=journal.execute('SELECT liability FROM signed WHERE task=?',(task.id,)).fetchone() if journal is not None else None
+        amount=entry['liability'] if entry else auth.total_spend_cap_wei
+    elif amount is None:
+        amount=auth.total_spend_cap_wei
+    if not isinstance(amount,int) or not 0<amount<=auth.total_spend_cap_wei:
+        raise ValueError('Execution liability exceeds task authorization')
     if not restore:
         now=now or datetime.now(timezone.utc)
         if aware(task.scheduled_for_utc)>now:raise HTTPException(503,'Waiting for this mint to open.')
@@ -79,13 +108,13 @@ async def fund(db,task,auth,grant,*,restore=False,journal=None,now=None):
                 target=await queued(a)
                 if old>target:await resize(db,other,a,other_grant,target)
                 policy_shortage=(a.grant_id==grant.id and
-                    auth.total_spend_cap_wei-await held(db,task,auth)>grant.budget_wei-grant.spent_wei-grant.reserved_wei)
+                    amount-await held(db,task,auth)>grant.budget_wei-grant.spent_wei-grant.reserved_wei)
                 daily_shortage=False
                 if owner.daily_limit_wei is not None:
                     used=await daily_budget.usage(db,grant.user_id,daily_budget.day_key(now),excluding=task.id,currency=currency)
-                    daily_shortage=used['spent_wei']+used['reserved_wei']+auth.total_spend_cap_wei>owner.daily_limit_wei
+                    daily_shortage=used['spent_wei']+used['reserved_wei']+amount>owner.daily_limit_wei
                 if policy_shortage or daily_shortage:await resize(db,other,a,other_grant,0)
-    await resize(db,task,auth,grant,auth.total_spend_cap_wei,restore=restore)
+    await resize(db,task,auth,grant,amount,restore=restore)
 
 def quantity(task,authorized):
     try:

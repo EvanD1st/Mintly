@@ -13,6 +13,10 @@ from test_phase_tracking_evm import detail,update
 
 @pytest.fixture
 async def free_feed(lab,monkeypatch):
+    # This legacy EVM fixture uses a high-fee local chain. Keep its reviewed
+    # 0.0005 ceiling so quantity/recovery tests retain their original scope.
+    # Dedicated gas-ceiling tests exercise the production 0.00002 ETH rule.
+    monkeypatch.setattr('app.services.auto_arm_funding.ETH_GAS_CEILING_WEI',5*10**14)
     update(lab,lab.start,lab.end,price=0)
     metadata=detail(lab,price=0)
     metadata.update(collection_name='Free daily collection',collection_slug='local-test',opensea_url=lab.drop.mint_page_url,drop_type='seadrop_v1_erc721')

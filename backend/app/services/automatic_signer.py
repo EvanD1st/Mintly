@@ -328,18 +328,14 @@ async def prepare_task(db, task_id, vault=None):
                 s={**s,'quantity':count}
         else:
             from app.services.auto_arm_funding import fund,adapt_quantity
-            await fund(db,task,auth,grant,journal=journal,now=datetime.now(timezone.utc))
             s=await adapt_quantity(db,journal,task,s,grant,web3)
             from app.services import daily_budget
-            await daily_budget.check_private(db,journal,vault,user,task,auth,web3,datetime.now(timezone.utc))
             # Independently reconcile the signer's lifetime budget; API DB edits cannot reset it.
             advance = _preflights.get(task.id)
             if (not advance or advance[1] != intent or time.monotonic() - advance[0] > 90
                     or time.monotonic() - _reconciled.get(grant.context_hash, -1000) > 30):
                 await reconcile_policy(journal, web3, grant)
             charged = sum(row[0] for row in journal.execute('SELECT COALESCE(actual,liability) FROM signed WHERE policy=?', (grant.id,)))
-            if charged + s['total_cap_wei'] > policy['budget_wei']:
-                raise ValueError('Independent signer budget exhausted or reserved by uncertain submissions')
             if task.copy_rule_id:
                 if group is not None:
                     await reconcile_copy_group(journal, group, web3, grant.chain_id)
@@ -404,8 +400,15 @@ async def prepare_task(db, task_id, vault=None):
                 raise
             tx['gasPrice'] = gas_price
             fee = await maximum_fee(web3, tx, s['chain_id'], gas, gas_price)
-            if fee > s['fee_cap_wei'] or tx['value'] + fee > s['total_cap_wei']:
-                raise ValueError('Estimated gas or total debit exceeds task authorization')
+            from app.services.auto_arm_funding import execution_liability
+            liability=execution_liability(s,tx['value'],fee)
+            # quote_gas already buffers gas units (and Nitro price); maximum_fee
+            # includes bounded OP-stack parent/operator fees. Charge this signed
+            # transaction's maximum liability, not unused approval headroom.
+            await fund(db,task,auth,grant,journal=journal,now=datetime.now(timezone.utc),amount=liability)
+            await daily_budget.check_private(db,journal,vault,user,task,auth,web3,datetime.now(timezone.utc),amount=liability)
+            if charged + liability > policy['budget_wei']:
+                raise ValueError('Independent signer budget exhausted or reserved by uncertain submissions')
             if await web3.eth.get_balance(address, 'pending') < tx['value'] + fee:
                 raise ValueError('Insufficient funds for mint value and gas')
             # Nitro checks affordability against eth_call's gas limit. Omitting it
@@ -423,7 +426,7 @@ async def prepare_task(db, task_id, vault=None):
             del account
             raw, tx_hash = '0x' + bytes(signed.raw_transaction).hex(), '0x' + bytes(signed.hash).hex()
             journal.execute('INSERT INTO signed(task,policy,intent,address,chain,nonce,liability,raw,hash) VALUES(?,?,?,?,?,?,?,?,?)',
-                (task.id, grant.id, intent, address.lower(), s['chain_id'], nonce, s['total_cap_wei'], raw, tx_hash))
+                (task.id, grant.id, intent, address.lower(), s['chain_id'], nonce, liability, raw, tx_hash))
             journal.execute('INSERT INTO daily_signed(task,user_id,day) VALUES(?,?,?)',
                 (task.id,user.id,daily_budget.day_key(datetime.now(timezone.utc))))
             if copy_key:

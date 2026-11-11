@@ -15,6 +15,10 @@ class MintTaskModel {
   final String unitPriceEth;
   final String feeCapEth;
   final String totalCapEth;
+  final String? effectiveFeeCapEth;
+  final String? reservedNowEth;
+  final String? actualTotalCostEth;
+  String get gasCeilingEth => effectiveFeeCapEth ?? feeCapEth;
   final String dropName;
   final String chain;
   final String stageName;
@@ -42,6 +46,9 @@ class MintTaskModel {
     required this.unitPriceEth,
     required this.feeCapEth,
     required this.totalCapEth,
+    this.effectiveFeeCapEth,
+    this.reservedNowEth,
+    this.actualTotalCostEth,
     required this.dropName,
     required this.chain,
     required this.stageName,
@@ -72,6 +79,9 @@ class MintTaskModel {
       unitPriceEth: json['unit_price_eth'] ?? '0',
       feeCapEth: json['fee_cap_eth'] ?? '0',
       totalCapEth: json['total_cap_eth'] ?? '0',
+      effectiveFeeCapEth: json['effective_fee_cap_eth']?.toString(),
+      reservedNowEth: json['reserved_now_eth']?.toString(),
+      actualTotalCostEth: json['actual_total_cost_eth']?.toString(),
       dropName: json['drop_name'] ?? '',
       chain: json['chain'] ?? 'Base',
       stageName: json['stage_name'] ?? 'Allowlist',

@@ -451,11 +451,21 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
               'wallet',
             ),
             CompactFact(
-              'Gas cap',
-              '${task.feeCapEth} ${task.nativeCurrency}',
+              'Gas ceiling',
+              '${task.gasCeilingEth} ${task.nativeCurrency}',
               'gas',
             ),
           ]),
+          if (task.reservedNowEth != null)
+            Text(
+              'Reserved now: ${task.reservedNowEth} ${task.nativeCurrency}',
+              style: const TextStyle(fontSize: 11),
+            ),
+          if (task.actualTotalCostEth != null)
+            Text(
+              'Actual spend: ${task.actualTotalCostEth} ${task.nativeCurrency}',
+              style: const TextStyle(fontSize: 11),
+            ),
           const SizedBox(height: 7),
           if (task.status == 'armed')
             const Text(
@@ -501,6 +511,14 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
                         ),
                       ),
                       const SizedBox(height: 12),
+                      DetailRow(
+                        'Gas ceiling',
+                        '${task.gasCeilingEth} ${task.nativeCurrency}',
+                      ),
+                      if (task.reservedNowEth != null)
+                        DetailRow('Reserved now', '${task.reservedNowEth} ${task.nativeCurrency}'),
+                      if (task.actualTotalCostEth != null)
+                        DetailRow('Actual spend', '${task.actualTotalCostEth} ${task.nativeCurrency}'),
                       DetailRow(
                         'Approved total cap',
                         '${task.totalCapEth} ${task.nativeCurrency}',

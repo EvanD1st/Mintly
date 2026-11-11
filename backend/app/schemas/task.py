@@ -91,6 +91,9 @@ class TaskSchema(BaseModel):
     submitted_at: Optional[datetime] = None
     confirmed_at: Optional[datetime] = None
     actual_total_cost_wei: Optional[int] = None
+    effective_fee_cap_eth: str | None = None
+    reserved_now_eth: str | None = None
+    actual_total_cost_eth: str | None = None
     execution_mode: Optional[str] = None
     wallet_address: Optional[str] = None
     progress: dict | None = None

@@ -77,10 +77,12 @@ async def recover_task(db, task_id, owner_id, expires_at, reference, vault=None)
         raise ValueError('Recovery authorization expired before signing')
     if recovery.snapshot != {**s, 'expiry': int(aware(recovery.expires_at).timestamp()), 'recovery_nonce': task.assigned_nonce}:
         raise ValueError('Recovery scope differs from immutable original authorization')
+    from app.services.auto_arm_funding import held,execution_ceiling,fund,resize
+    held_amount=await held(db,task,auth)
     original = Transaction.from_bytes(bytes.fromhex(recovery.previous_signed_tx_raw.removeprefix('0x')))
     if (original.nonce != task.assigned_nonce or original.value != s['price_wei'] * s['quantity']
             or (original.v - 35) // 2 != s['chain_id'] or auth.total_spend_cap_wei != s['total_cap_wei']
-            or auth.max_fee_wei != s['fee_cap_wei'] or grant.reserved_wei < s['total_cap_wei']):
+            or auth.max_fee_wei != s['fee_cap_wei'] or grant.reserved_wei < held_amount):
         raise ValueError('Original nonce or immutable debit bounds differ')
     if (not automatic.allows_collection(policy, s['contract']) or s['mint_kind'] not in policy['mint_kinds']
             or not 0 < s['total_cap_wei'] <= policy['max_task_wei']
@@ -121,13 +123,15 @@ async def recover_task(db, task_id, owner_id, expires_at, reference, vault=None)
         old_entry = journal.execute('SELECT * FROM signed WHERE task=?', (task.id,)).fetchone()
         if (not old_entry or old_entry['hash'] != recovery.previous_hash or old_entry['raw'] != recovery.previous_signed_tx_raw
                 or old_entry['nonce'] != original.nonce
-                or old_entry['policy'] != grant.id or old_entry['liability'] != s['total_cap_wei']
+                or old_entry['policy'] != grant.id or not 0<old_entry['liability']<=s['total_cap_wei']
+                or (not s.get('feed_approval_id') and old_entry['liability']!=s['total_cap_wei'])
                 or old_entry['intent'] != automatic.digest({'snapshot': s, 'policy': grant.context_hash})):
             raise ValueError('Original independent signing journal entry differs')
         saved = journal.execute('SELECT * FROM recoveries WHERE id=?', (recovery.id,)).fetchone()
         if saved:
             if saved['intent'] != intent or saved['nonce'] != original.nonce:
                 raise ValueError('Previously signed recovery cannot change')
+            await fund(db,task,auth,grant,restore=True,journal=journal)
             raw, tx_hash = saved['raw'], saved['hash']
         else:
             execution = await automatic.prepare_mint(web3, dict(recovery.snapshot))
@@ -140,10 +144,23 @@ async def recover_task(db, task_id, owner_id, expires_at, reference, vault=None)
             price = max(price, (original.gasPrice * 1125 + 999) // 1000)
             from app.services.automatic_fees import maximum_fee
             fee = await maximum_fee(web3, tx, s['chain_id'], gas, price)
-            if fee > s['fee_cap_wei'] or original.value + fee > s['total_cap_wei']:
+            if fee > execution_ceiling(s) or original.value + fee > s['total_cap_wei']:
                 raise ValueError('Recovery fee exceeds the original owner-approved debit ceiling')
             if await web3.eth.get_balance(s['account'], 'pending') < original.value + fee:
                 raise ValueError('Insufficient funds for bounded recovery')
+            liability=max(old_entry['liability'],original.value+fee) if s.get('feed_approval_id') else s['total_cap_wei']
+            if s.get('feed_approval_id'):
+                # Same nonce can include either original or replacement, never
+                # both. Reserve the larger liability and retain prior journal
+                # exposure until a receipt settles it.
+                from app.services import daily_budget
+                from app.services.automatic_signer import reconcile_policy
+                await reconcile_policy(journal,web3,grant)
+                charged=sum(r[0] for r in journal.execute('SELECT COALESCE(actual,liability) FROM signed WHERE policy=? AND task<>?',(grant.id,task.id)))
+                if charged+liability>policy['budget_wei']:
+                    raise ValueError('Independent signer budget exhausted or reserved by uncertain submissions')
+                await resize(db,task,auth,grant,liability)
+                await daily_budget.check_private(db,journal,vault,user,task,auth,web3,datetime.now(timezone.utc),amount=liability,replacing=True)
             tx.update(gas=gas, gasPrice=price)
             await web3.eth.call(tx, 'pending')
             if datetime.now(timezone.utc) >= aware(recovery.expires_at):
@@ -155,7 +172,8 @@ async def recover_task(db, task_id, owner_id, expires_at, reference, vault=None)
             raw, tx_hash = '0x' + bytes(signed.raw_transaction).hex(), '0x' + bytes(signed.hash).hex()
             journal.execute('INSERT INTO recoveries(id,task,intent,nonce,raw,hash) VALUES(?,?,?,?,?,?)',
                             (recovery.id, task.id, intent, original.nonce, raw, tx_hash))
-            journal.commit()  # fsync before worker-visible activation; lifetime liability remains charged once
+            journal.execute('UPDATE signed SET liability=? WHERE task=?',(liability,task.id))
+            journal.commit()  # fsync before worker-visible activation; same-nonce exposure charged once
         recovery.replacement_signed_tx_raw, recovery.replacement_hash = raw, tx_hash
         recovery.activated_at, recovery.status = datetime.now(timezone.utc), 'prepared'
         task.signed_tx_raw, task.transaction_hash = raw, tx_hash

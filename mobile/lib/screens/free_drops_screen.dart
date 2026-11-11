@@ -75,14 +75,16 @@ class _FreeDropsState extends ConsumerState<FreeDropsScreen> {
     _approvalExpiry = expiry.isBefore(ceiling) ? expiry : ceiling;
     _maximum = _current == null || s?['quantity_mode'] == 'wallet_max';
     _quantity.text = _maximum ? '65535' : '${s?['quantity'] ?? 1}';
-    _gas.text = s == null ? '' : _units(s['fee_cap_wei']);
+    _gas.text = s == null
+        ? ((policy['native_symbol'] ?? 'ETH') == 'ETH' ? '0.00002' : '')
+        : _units(saved?['effective_fee_cap_wei'] ?? s['fee_cap_wei']);
     if (_current?['status'] == 'registering') {
       _pending = {
         'request_id': _current!['id'],
         'grant_id': s!['grant_id'],
         'quantity': s['quantity'],
         if (_maximum) 'quantity_mode': 'wallet_max',
-        'fee_cap': _gas.text,
+        'fee_cap': _units(s['fee_cap_wei']),
         'native_symbol': policy['native_symbol'] ?? 'ETH',
         'expires_at': _current!['expires_at'],
         'consent': true,
@@ -378,7 +380,9 @@ class _FreeDropsState extends ConsumerState<FreeDropsScreen> {
               ),
               const SizedBox(height: 12),
               Text(
-                'Free NFTs. Gas still costs money.',
+                (_policy!['native_symbol'] ?? 'ETH') == 'ETH'
+                    ? 'Auto-Arming uses up to 0.00002 ETH per mint. Higher fees wait.'
+                    : 'Free NFTs. Gas still costs money.',
                 style: TextStyle(
                   color: colors.onSurface.withValues(alpha: .75),
                 ),
