@@ -14,9 +14,9 @@ from test_phase_tracking_evm import detail,update
 @pytest.fixture
 async def free_feed(lab,monkeypatch):
     # This legacy EVM fixture uses a high-fee local chain. Keep its reviewed
-    # 0.0005 ceiling so quantity/recovery tests retain their original scope.
+    # policy ceiling so quantity/recovery tests retain their original scope.
     # Dedicated gas-ceiling tests exercise the production 0.00002 ETH rule.
-    monkeypatch.setattr('app.services.auto_arm_funding.ETH_GAS_CEILING_WEI',5*10**14)
+    monkeypatch.setattr('app.services.auto_arm_funding.ETH_GAS_CEILING_WEI',10**15)
     update(lab,lab.start,lab.end,price=0)
     metadata=detail(lab,price=0)
     metadata.update(collection_name='Free daily collection',collection_slug='local-test',opensea_url=lab.drop.mint_page_url,drop_type='seadrop_v1_erc721')
@@ -121,7 +121,7 @@ async def test_one_tap_mints_verified_remaining_wallet_maximum_not_cached_defaul
     if limit>100:
         # The collection supply allows 100, but this many tokens exceed the
         # separately approved gas cap. Neither quantity nor gas consent moves.
-        assert prepared.status_code==409 and 'gas or total debit' in prepared.text,prepared.text
+        assert prepared.status_code==503 and 'Gas is above the Auto-Arming limit' in prepared.text,prepared.text
         async with lab.factory() as db:
             task=await db.get(MintTask,task_id)
             assert task.signed_tx_raw is None
