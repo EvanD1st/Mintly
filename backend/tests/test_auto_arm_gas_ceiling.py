@@ -21,6 +21,7 @@ def test_eth_ceiling_is_exact_and_does_not_expand_smaller_approvals():
         assert funding.execution_liability(s,0,cap)==cap
         with pytest.raises(HTTPException) as caught:funding.execution_liability(s,0,cap+1)
         assert caught.value.status_code==503 and 'Waiting for lower fees' in caught.value.detail
+        assert caught.value.headers['X-Mintly-Reason']=='auto_arm_gas_limit'
     for chain,approved in ((33139,9*10**18),(999,10**17)):
         assert funding.fee_ceiling(chain,approved)==approved
     manual={'chain_id':1,'fee_cap_wei':10**16,'total_cap_wei':10**16}
@@ -43,6 +44,11 @@ async def test_existing_unsigned_approval_cannot_bypass_new_cap(free_feed,monkey
     open_phase(lab,monkeypatch)
     response=await lab.signer_client.post('/tasks/'+task_id+'/prepare')
     assert response.status_code==503 and 'Waiting for lower fees' in response.text,response.text
+    assert response.headers['X-Mintly-Reason']=='auto_arm_gas_limit'
+    from app.services.mint_diagnostics import category
+    import httpx
+    error=httpx.HTTPStatusError('Gas ceiling',request=response.request,response=response)
+    assert category([],503,error)=='auto_arm_gas_limit'
     async with lab.factory() as db:
         task=await db.get(MintTask,task_id);auth=await db.get(MintAuthorization,task.authorization_id)
         assert task.signed_tx_raw is None and task.transaction_hash is None

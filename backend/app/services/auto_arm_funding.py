@@ -22,7 +22,8 @@ def execution_ceiling(snapshot):
 
 def execution_liability(snapshot,value,fee):
     if snapshot.get('feed_approval_id') and fee>execution_ceiling(snapshot):
-        raise HTTPException(503,'Gas is above the Auto-Arming limit. Waiting for lower fees. No transaction sent.')
+        from app.services.mint_diagnostics import PREPARATION_REASONS
+        raise HTTPException(503,PREPARATION_REASONS['auto_arm_gas_limit'],headers={'X-Mintly-Reason':'auto_arm_gas_limit'})
     if fee>snapshot['fee_cap_wei'] or value+fee>snapshot['total_cap_wei']:
         raise ValueError('Estimated gas or total debit exceeds task authorization')
     return value+fee if snapshot.get('feed_approval_id') else snapshot['total_cap_wei']
